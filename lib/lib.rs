@@ -1,0 +1,40 @@
+//! `tool-cli` library.
+
+pub mod commands;
+pub mod constants;
+pub mod error;
+pub mod handlers;
+pub mod mcp;
+pub mod mcpb;
+pub mod oauth;
+pub mod pack;
+pub mod prompt;
+pub mod references;
+pub mod registry;
+pub mod resolver;
+pub mod scaffold;
+pub mod security;
+pub mod styles;
+pub mod system_config;
+pub mod tree;
+pub mod validate;
+pub mod vars;
+
+//--------------------------------------------------------------------------------------------------
+// Re-Exports
+//--------------------------------------------------------------------------------------------------
+
+pub use commands::*;
+pub use constants::*;
+pub use error::*;
+pub use handlers::*;
+pub use mcp::*;
+pub use mcpb::*;
+pub use pack::*;
+pub use references::*;
+pub use registry::*;
+pub use resolver::*;
+pub use scaffold::*;
+pub use system_config::*;
+pub use validate::*;
+pub use vars::*;
