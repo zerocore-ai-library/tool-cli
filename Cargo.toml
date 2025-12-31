@@ -1,0 +1,79 @@
+[package]
+name = "tool-cli"
+description = "`tool-cli` implements a CLI tool for managing MCP tools."
+version = "0.1.0"
+edition = "2024"
+authors = ["Steve Akinyemi"]
+license = "MIT"
+
+[[bin]]
+name = "tool"
+path = "bin/main.rs"
+
+[lib]
+name = "tool_cli"
+path = "lib/lib.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+cliclack = "0.3"
+ctrlc = "3.4"
+
+# Async
+tokio = { version = "1.0", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# File handling
+walkdir = "2.5"
+ignore = "0.4"
+zip = { version = "4.0", default-features = false, features = ["deflate"] }
+flate2 = "1.1"
+tar = "0.4"
+
+# Utilities
+libc = "0.2"
+regex = "1.11"
+semver = { version = "1.0", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4"] }
+dirs = "6.0"
+base64 = "0.22"
+colored = "3.0"
+console = "0.15"
+urlencoding = "2.1"
+sha2 = "0.10"
+
+# Logging (to suppress rmcp tracing output by default)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# MCP Protocol
+rmcp = { git = "https://github.com/zerocore-ai/rust-sdk", branch = "develop", features = [
+    "client",
+    "reqwest",
+    "transport-child-process",
+    "transport-streamable-http-client",
+    "transport-streamable-http-client-reqwest",
+    "transport-io",
+    "auth",
+] }
+reqwest = { version = "0.12", features = ["json"] }
+
+# OAuth
+axum = "0.8"
+open = "5.3"
+atty = "0.2"
+chrono = { version = "0.4", features = ["serde"] }
+oauth2 = "5.0"
+aes-gcm = "0.10"
+rand = "0.8"
+zeroize = "1.8"
+async-trait = "0.1"
