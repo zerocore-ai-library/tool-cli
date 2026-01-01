@@ -9,7 +9,10 @@ use cliclack::{Theme, ThemeState, input, intro, outro, select, set_theme};
 use console::{Style, Term};
 
 use crate::error::{ToolError, ToolResult};
-use crate::mcpb::{InitMode, McpbServerType, McpbTransport, NodePackageManager, PackageManager, PythonPackageManager};
+use crate::mcpb::{
+    InitMode, McpbServerType, McpbTransport, NodePackageManager, PackageManager,
+    PythonPackageManager,
+};
 
 //--------------------------------------------------------------------------------------------------
 // Constants

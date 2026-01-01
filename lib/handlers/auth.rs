@@ -1,6 +1,6 @@
 //! Registry authentication command handlers.
 
-use crate::constants::{get_registry_url, REGISTRY_AUTH_DIR, REGISTRY_TOKEN_ENV};
+use crate::constants::{REGISTRY_AUTH_DIR, REGISTRY_TOKEN_ENV, get_registry_url};
 use crate::error::ToolResult;
 use crate::registry::RegistryClient;
 use colored::Colorize;
@@ -73,10 +73,10 @@ pub async fn delete_credentials() -> ToolResult<()> {
     }
 
     // Try to remove the directory if empty
-    if let Some(dir) = path.parent() {
-        if dir.exists() {
-            let _ = fs::remove_dir(dir).await; // Ignore error if not empty
-        }
+    if let Some(dir) = path.parent()
+        && dir.exists()
+    {
+        let _ = fs::remove_dir(dir).await; // Ignore error if not empty
     }
 
     Ok(())
@@ -130,9 +130,9 @@ pub async fn auth_login(token: Option<&str>) -> ToolResult<()> {
 
         // Read token with hidden input
         let term = Term::stderr();
-        let token = term
-            .read_secure_line()
-            .map_err(|e| crate::error::ToolError::Generic(format!("Failed to read token: {}", e)))?;
+        let token = term.read_secure_line().map_err(|e| {
+            crate::error::ToolError::Generic(format!("Failed to read token: {}", e))
+        })?;
         token.trim().to_string()
     };
 
@@ -269,10 +269,7 @@ pub async fn auth_status() -> ToolResult<()> {
                     "  {} Stored token is invalid or expired",
                     "✗".bright_yellow()
                 );
-                println!(
-                    "    Run {} to re-authenticate",
-                    "tool login".bright_cyan()
-                );
+                println!("    Run {} to re-authenticate", "tool login".bright_cyan());
             }
         }
     } else {

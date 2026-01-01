@@ -10,10 +10,10 @@ use crate::resolver::load_tool_from_path;
 use crate::system_config::allocate_system_config;
 use rmcp::model::{CallToolRequestParam, CallToolResult, ClientInfo, Tool};
 use rmcp::service::RunningService;
-use rmcp::transport::TokioChildProcess;
 use rmcp::transport::StreamableHttpClientTransport;
-use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::TokioChildProcess;
 use rmcp::transport::auth::AuthClient;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::{RoleClient, serve_client};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -76,6 +76,7 @@ impl std::fmt::Display for ToolType {
 }
 
 /// Result of attempting to connect to an MCP server.
+#[allow(clippy::large_enum_variant)]
 pub enum ConnectResult {
     /// Connected successfully.
     Connected(McpConnection),
@@ -175,10 +176,7 @@ fn check_entry_point_exists(resolved: &ResolvedMcpbManifest) -> ToolResult<()> {
 ///
 /// Returns `ConnectResult::Connected` on success, or `ConnectResult::AuthRequired`
 /// if OAuth authentication is needed.
-pub async fn connect(
-    resolved: &ResolvedMcpbManifest,
-    verbose: bool,
-) -> ToolResult<ConnectResult> {
+pub async fn connect(resolved: &ResolvedMcpbManifest, verbose: bool) -> ToolResult<ConnectResult> {
     // Check entry point exists before attempting to connect
     check_entry_point_exists(resolved)?;
 
@@ -204,11 +202,9 @@ async fn connect_stdio(
     resolved: &ResolvedMcpbManifest,
     verbose: bool,
 ) -> ToolResult<McpConnection> {
-    let command = resolved
-        .mcp_config
-        .command
-        .as_ref()
-        .ok_or_else(|| ToolError::Generic("stdio transport requires 'command' in mcp_config".into()))?;
+    let command = resolved.mcp_config.command.as_ref().ok_or_else(|| {
+        ToolError::Generic("stdio transport requires 'command' in mcp_config".into())
+    })?;
 
     let args = &resolved.mcp_config.args;
     let env = &resolved.mcp_config.env;
@@ -250,10 +246,11 @@ async fn connect_stdio(
         .await
         .map_err(|e| ToolError::Generic(format!("Failed to connect to MCP server: {}", e)))?;
 
-    if verbose {
-        if let Some(info) = client.peer_info() {
-            eprintln!("Connected: {} v{}", info.server_info.name, info.server_info.version);
-        }
+    if verbose && let Some(info) = client.peer_info() {
+        eprintln!(
+            "Connected: {} v{}",
+            info.server_info.name, info.server_info.version
+        );
     }
 
     Ok(McpConnection {
@@ -277,11 +274,10 @@ async fn connect_http_direct(
     resolved: &ResolvedMcpbManifest,
     verbose: bool,
 ) -> ToolResult<ConnectResult> {
-    let url = resolved
-        .mcp_config
-        .url
-        .as_ref()
-        .ok_or_else(|| ToolError::Generic("HTTP transport requires 'url' in mcp_config".into()))?;
+    let url =
+        resolved.mcp_config.url.as_ref().ok_or_else(|| {
+            ToolError::Generic("HTTP transport requires 'url' in mcp_config".into())
+        })?;
 
     if verbose {
         eprintln!("Connecting to: {}", url);
@@ -293,10 +289,11 @@ async fn connect_http_direct(
 
     match serve_client(client_info, transport).await {
         Ok(client) => {
-            if verbose {
-                if let Some(info) = client.peer_info() {
-                    eprintln!("Connected: {} v{}", info.server_info.name, info.server_info.version);
-                }
+            if verbose && let Some(info) = client.peer_info() {
+                eprintln!(
+                    "Connected: {} v{}",
+                    info.server_info.name, info.server_info.version
+                );
             }
             Ok(ConnectResult::Connected(McpConnection {
                 client,
@@ -320,13 +317,17 @@ async fn connect_http_direct(
                 let session = crate::oauth::prepare_auth_session(
                     url,
                     resolved.mcp_config.oauth_config.clone(),
-                ).await?;
+                )
+                .await?;
                 Ok(ConnectResult::AuthRequired {
                     session,
                     spawned_server: None,
                 })
             } else {
-                Err(ToolError::Generic(format!("Failed to connect to HTTP MCP server: {}", e)))
+                Err(ToolError::Generic(format!(
+                    "Failed to connect to HTTP MCP server: {}",
+                    e
+                )))
             }
         }
     }
@@ -337,11 +338,10 @@ async fn connect_http_spawned(
     resolved: &ResolvedMcpbManifest,
     verbose: bool,
 ) -> ToolResult<ConnectResult> {
-    let command = resolved
-        .mcp_config
-        .command
-        .as_ref()
-        .ok_or_else(|| ToolError::Generic("Bundle HTTP requires 'command' in mcp_config".into()))?;
+    let command =
+        resolved.mcp_config.command.as_ref().ok_or_else(|| {
+            ToolError::Generic("Bundle HTTP requires 'command' in mcp_config".into())
+        })?;
 
     let url = resolved
         .mcp_config
@@ -415,10 +415,11 @@ async fn connect_http_spawned(
 
     match serve_client(client_info, transport).await {
         Ok(client) => {
-            if verbose {
-                if let Some(info) = client.peer_info() {
-                    eprintln!("Connected: {} v{}", info.server_info.name, info.server_info.version);
-                }
+            if verbose && let Some(info) = client.peer_info() {
+                eprintln!(
+                    "Connected: {} v{}",
+                    info.server_info.name, info.server_info.version
+                );
             }
             Ok(ConnectResult::Connected(McpConnection {
                 client,
@@ -444,13 +445,17 @@ async fn connect_http_spawned(
                 let session = crate::oauth::prepare_auth_session(
                     url,
                     resolved.mcp_config.oauth_config.clone(),
-                ).await?;
+                )
+                .await?;
                 Ok(ConnectResult::AuthRequired {
                     session,
                     spawned_server: Some(child),
                 })
             } else {
-                Err(ToolError::Generic(format!("Failed to connect to HTTP MCP server: {}", e)))
+                Err(ToolError::Generic(format!(
+                    "Failed to connect to HTTP MCP server: {}",
+                    e
+                )))
             }
         }
     }
@@ -550,22 +555,24 @@ pub async fn connect_with_oauth(
     tool_ref: &str,
     verbose: bool,
 ) -> ToolResult<McpConnection> {
-    use crate::security::{EnvSecretProvider, CredentialCrypto};
-    use crate::oauth::{run_interactive_oauth, OAuthFlowOptions};
+    use crate::oauth::{OAuthFlowOptions, run_interactive_oauth};
+    use crate::security::{CredentialCrypto, EnvSecretProvider};
 
     match connect(resolved, verbose).await? {
         ConnectResult::Connected(conn) => Ok(conn),
-        ConnectResult::AuthRequired { session, spawned_server } => {
+        ConnectResult::AuthRequired {
+            session,
+            spawned_server,
+        } => {
             // Check if CREDENTIALS_SECRET_KEY is set
-            let provider = EnvSecretProvider::new().map_err(|_| {
-                ToolError::AuthRequired {
-                    tool_ref: tool_ref.to_string(),
-                }
+            let provider = EnvSecretProvider::new().map_err(|_| ToolError::AuthRequired {
+                tool_ref: tool_ref.to_string(),
             })?;
 
-            let key = provider.get_encryption_key("default").await.map_err(|e| {
-                ToolError::Generic(format!("Failed to get encryption key: {}", e))
-            })?;
+            let key = provider
+                .get_encryption_key("default")
+                .await
+                .map_err(|e| ToolError::Generic(format!("Failed to get encryption key: {}", e)))?;
 
             let crypto = CredentialCrypto::new(&key);
 
@@ -586,7 +593,10 @@ pub async fn connect_with_oauth(
             }
 
             // Retry with new credentials - use reconnect_http with stored credentials
-            let new_credentials = crate::oauth::load_credentials(tool_ref).await.ok().flatten();
+            let new_credentials = crate::oauth::load_credentials(tool_ref)
+                .await
+                .ok()
+                .flatten();
             reconnect_http(
                 &server_url,
                 tool_ref,
@@ -696,11 +706,12 @@ pub async fn get_tool_info_from_path(
     let manifest_path = resolved_plugin.path.clone();
 
     // Get tool name for OAuth
-    let tool_name = resolved_plugin
-        .template
-        .name
-        .clone()
-        .unwrap_or_else(|| path.file_name().unwrap_or_default().to_string_lossy().to_string());
+    let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
+        path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
 
     let connection = connect_with_oauth(&resolved, &tool_name, verbose).await?;
 
@@ -801,18 +812,20 @@ pub async fn call_tool_from_path(
         .resolve(user_config, &system_config)?;
 
     // Get tool name for OAuth
-    let tool_name = resolved_plugin
-        .template
-        .name
-        .clone()
-        .unwrap_or_else(|| path.file_name().unwrap_or_default().to_string_lossy().to_string());
+    let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
+        path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
 
     let connection = connect_with_oauth(&resolved, &tool_name, verbose).await?;
 
-    if verbose {
-        if let Some(info) = connection.peer_info() {
-            eprintln!("Connected: {} v{}", info.server_info.name, info.server_info.version);
-        }
+    if verbose && let Some(info) = connection.peer_info() {
+        eprintln!(
+            "Connected: {} v{}",
+            info.server_info.name, info.server_info.version
+        );
     }
 
     // Call the tool

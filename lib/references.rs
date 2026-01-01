@@ -72,7 +72,11 @@ impl PluginRef {
             let version = VersionReq::parse(ver_str).map_err(|e| {
                 ToolError::InvalidReference(format!("Invalid version '{}': {}", ver_str, e))
             })?;
-            (input[..at_pos].to_string(), Some(version), Some(ver_str.to_string()))
+            (
+                input[..at_pos].to_string(),
+                Some(version),
+                Some(ver_str.to_string()),
+            )
         } else {
             (input.to_string(), None, None)
         };

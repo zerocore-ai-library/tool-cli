@@ -4,7 +4,9 @@
 //! template functions like `${base64(value)}` in mcp_config args, env, and header values.
 
 use crate::error::{ToolError, ToolResult};
-use crate::mcpb::{McpbSystemConfigField, McpbSystemConfigType, McpbUserConfigField, McpbUserConfigType};
+use crate::mcpb::{
+    McpbSystemConfigField, McpbSystemConfigType, McpbUserConfigField, McpbUserConfigType,
+};
 use regex::Regex;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -31,9 +33,8 @@ static SYSTEM_CONFIG_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(SYSTEM_CONFIG_VAR_PATTERN).expect("Invalid regex pattern"));
 
 /// Regex for all variable patterns.
-static VAR_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\$\{([^}]+)\}").expect("Invalid regex pattern")
-});
+static VAR_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\$\{([^}]+)\}").expect("Invalid regex pattern"));
 
 //--------------------------------------------------------------------------------------------------
 // Functions
@@ -163,24 +164,18 @@ pub fn validate_user_config(
         if let Some(v) = value {
             match field.field_type {
                 McpbUserConfigType::Number => {
-                    let num: f64 = v.parse().map_err(|_| {
-                        ToolError::Generic(format!("'{}' must be a number", name))
-                    })?;
+                    let num: f64 = v
+                        .parse()
+                        .map_err(|_| ToolError::Generic(format!("'{}' must be a number", name)))?;
                     if let Some(min) = field.min
                         && num < min
                     {
-                        return Err(ToolError::Generic(format!(
-                            "'{}' must be >= {}",
-                            name, min
-                        )));
+                        return Err(ToolError::Generic(format!("'{}' must be >= {}", name, min)));
                     }
                     if let Some(max) = field.max
                         && num > max
                     {
-                        return Err(ToolError::Generic(format!(
-                            "'{}' must be <= {}",
-                            name, max
-                        )));
+                        return Err(ToolError::Generic(format!("'{}' must be <= {}", name, max)));
                     }
                 }
                 McpbUserConfigType::String => {
@@ -228,9 +223,9 @@ pub fn validate_system_config(
         if let Some(v) = value {
             match field.field_type {
                 McpbSystemConfigType::Port => {
-                    let num: f64 = v.parse().map_err(|_| {
-                        ToolError::Generic(format!("'{}' must be a number", name))
-                    })?;
+                    let num: f64 = v
+                        .parse()
+                        .map_err(|_| ToolError::Generic(format!("'{}' must be a number", name)))?;
                     if !(1.0..=65535.0).contains(&num) {
                         return Err(ToolError::Generic(format!(
                             "'{}' must be a valid port (1-65535)",

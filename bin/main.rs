@@ -1,9 +1,9 @@
 //! `tool` is the primary CLI binary.
 
 use clap::{CommandFactory, Parser};
-use tool_cli::{Cli, Command, ToolError, ToolResult};
 use tool_cli::handlers;
 use tool_cli::tree::try_show_tree;
+use tool_cli::{Cli, Command, ToolError, ToolResult};
 use tracing_subscriber::EnvFilter;
 
 //--------------------------------------------------------------------------------------------------
@@ -37,8 +37,7 @@ fn init_tracing() {
     }
 
     // Build filter from RUST_LOG, suppress rmcp logs unless explicitly included
-    let base_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let base_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let env_filter = if std::env::var("RUST_LOG")
         .ok()

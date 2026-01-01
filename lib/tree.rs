@@ -285,17 +285,17 @@ impl TreeBuilder {
 
         if let Some(about) = cmd.get_about() {
             let about_str = about.to_string();
-            if let Some(first_line) = about_str.lines().next() {
-                if !first_line.is_empty() {
-                    write!(
-                        &mut self.output,
-                        "{:width$}{}",
-                        "",
-                        first_line.white(),
-                        width = padding_needed
-                    )
-                    .unwrap();
-                }
+            if let Some(first_line) = about_str.lines().next()
+                && !first_line.is_empty()
+            {
+                write!(
+                    &mut self.output,
+                    "{:width$}{}",
+                    "",
+                    first_line.white(),
+                    width = padding_needed
+                )
+                .unwrap();
             }
         }
 
@@ -356,10 +356,10 @@ impl TreeBuilder {
 
                     if let Some(help) = arg.get_help() {
                         let help_str = help.to_string();
-                        if let Some(first_line) = help_str.lines().next() {
-                            if !first_line.is_empty() {
-                                desc_str = Some(first_line.to_string());
-                            }
+                        if let Some(first_line) = help_str.lines().next()
+                            && !first_line.is_empty()
+                        {
+                            desc_str = Some(first_line.to_string());
                         }
                     }
                     options.push((opt_str, desc_str));
@@ -381,10 +381,10 @@ impl TreeBuilder {
 
                 if let Some(help) = arg.get_help() {
                     let help_str = help.to_string();
-                    if let Some(first_line) = help_str.lines().next() {
-                        if !first_line.is_empty() {
-                            desc_str = Some(first_line.to_string());
-                        }
+                    if let Some(first_line) = help_str.lines().next()
+                        && !first_line.is_empty()
+                    {
+                        desc_str = Some(first_line.to_string());
                     }
                 }
                 options.push((opt_str, desc_str));
@@ -436,10 +436,10 @@ impl TreeBuilder {
 
             if let Some(help) = arg.get_help() {
                 let help_str = help.to_string();
-                if let Some(first_line) = help_str.lines().next() {
-                    if !first_line.is_empty() {
-                        desc_str = Some(first_line.to_string());
-                    }
+                if let Some(first_line) = help_str.lines().next()
+                    && !first_line.is_empty()
+                {
+                    desc_str = Some(first_line.to_string());
                 }
             }
 

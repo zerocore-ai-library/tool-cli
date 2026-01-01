@@ -135,9 +135,12 @@ impl FilePluginResolver {
             }
 
             // Try versioned: search_path/name@version/manifest.json
-            if let Some(resolved) =
-                self.find_versioned_tool(&tool_dir.parent().unwrap_or(&tool_dir), name, namespace, version_req)?
-            {
+            if let Some(resolved) = self.find_versioned_tool(
+                tool_dir.parent().unwrap_or(&tool_dir),
+                name,
+                namespace,
+                version_req,
+            )? {
                 return Ok(Some(resolved));
             }
         }
@@ -174,19 +177,18 @@ impl FilePluginResolver {
         // Auto-install: fetch from registry if enabled and has namespace
         if let Some(ref client) = self.auto_install
             && let Some(ns) = namespace
+            && let Some((bundle_content, version)) = client.fetch_tool(plugin_ref).await?
         {
-            if let Some((bundle_content, version)) = client.fetch_tool(plugin_ref).await? {
-                // Install the fetched tool
-                self.install_fetched_tool(ns, name, &bundle_content, &version)
-                    .await?;
+            // Install the fetched tool
+            self.install_fetched_tool(ns, name, &bundle_content, &version)
+                .await?;
 
-                // Retry local resolution (without auto-install to avoid infinite loop)
-                let local_resolver = FilePluginResolver {
-                    search_paths: self.search_paths.clone(),
-                    auto_install: None,
-                };
-                return Box::pin(local_resolver.resolve_tool_internal(plugin_ref)).await;
-            }
+            // Retry local resolution (without auto-install to avoid infinite loop)
+            let local_resolver = FilePluginResolver {
+                search_paths: self.search_paths.clone(),
+                auto_install: None,
+            };
+            return Box::pin(local_resolver.resolve_tool_internal(plugin_ref)).await;
         }
 
         Ok(None)
@@ -216,16 +218,16 @@ impl FilePluginResolver {
                     let entry_name = &dir_name[..at_pos];
                     let version_str = &dir_name[at_pos + 1..];
 
-                    if entry_name == name {
-                        if let Ok(version) = Version::parse(version_str) {
-                            // Check version requirement
-                            if let Some(req) = version_req {
-                                if req.matches(&version) {
-                                    candidates.push((entry.path(), version));
-                                }
-                            } else {
+                    if entry_name == name
+                        && let Ok(version) = Version::parse(version_str)
+                    {
+                        // Check version requirement
+                        if let Some(req) = version_req {
+                            if req.matches(&version) {
                                 candidates.push((entry.path(), version));
                             }
+                        } else {
+                            candidates.push((entry.path(), version));
                         }
                     }
                 }
@@ -241,7 +243,8 @@ impl FilePluginResolver {
                 if let Some(ns) = namespace {
                     plugin_ref = plugin_ref.with_namespace(ns)?;
                 }
-                plugin_ref = plugin_ref.with_version(VersionReq::parse(&version.to_string()).unwrap());
+                plugin_ref =
+                    plugin_ref.with_version(VersionReq::parse(&version.to_string()).unwrap());
                 return Ok(Some(ResolvedPlugin {
                     path: manifest_path,
                     template: manifest,
@@ -276,12 +279,11 @@ impl FilePluginResolver {
                         let tool_dir = entry.path().join(name);
                         let manifest_path = tool_dir.join(MCPB_MANIFEST_FILE);
 
-                        if manifest_path.exists() {
-                            if let Ok(plugin_ref) =
+                        if manifest_path.exists()
+                            && let Ok(plugin_ref) =
                                 PluginRef::new(name).and_then(|r| r.with_namespace(&namespace))
-                            {
-                                matches.push(plugin_ref);
-                            }
+                        {
+                            matches.push(plugin_ref);
                         }
                     }
                 }
@@ -308,6 +310,7 @@ impl FilePluginResolver {
     }
 
     /// Recursively collect tools from a directory.
+    #[allow(clippy::only_used_in_recursion)]
     fn collect_tools_recursive(
         &self,
         dir: &Path,
@@ -361,12 +364,7 @@ impl FilePluginResolver {
                         }
                     } else if namespace.is_none() {
                         // This might be a namespace directory - recurse
-                        self.collect_tools_recursive(
-                            &entry_path,
-                            Some(&entry_name),
-                            tools,
-                            seen,
-                        )?;
+                        self.collect_tools_recursive(&entry_path, Some(&entry_name), tools, seen)?;
                     }
                 }
             }
@@ -384,10 +382,9 @@ impl FilePluginResolver {
         version: &str,
     ) -> ToolResult<()> {
         // Use the first search path as the install location (typically ~/.tool/tools)
-        let install_base = self
-            .search_paths
-            .first()
-            .ok_or_else(|| ToolError::Generic("No search paths configured for installation".into()))?;
+        let install_base = self.search_paths.first().ok_or_else(|| {
+            ToolError::Generic("No search paths configured for installation".into())
+        })?;
 
         // Build the target directory: ~/.tool/tools/<namespace>/<name>@<version>/
         let target_dir = install_base
@@ -395,9 +392,12 @@ impl FilePluginResolver {
             .join(format!("{}@{}", name, version));
 
         // Create the target directory
-        tokio::fs::create_dir_all(&target_dir)
-            .await
-            .map_err(|e| ToolError::Generic(format!("Failed to create tool directory {:?}: {}", target_dir, e)))?;
+        tokio::fs::create_dir_all(&target_dir).await.map_err(|e| {
+            ToolError::Generic(format!(
+                "Failed to create tool directory {:?}: {}",
+                target_dir, e
+            ))
+        })?;
 
         // Extract the ZIP bundle
         self.extract_bundle(bundle_content, &target_dir)?;
@@ -444,12 +444,13 @@ impl FilePluginResolver {
                 })?;
             } else {
                 let mut file_content = Vec::new();
-                entry
-                    .read_to_end(&mut file_content)
-                    .map_err(|e| ToolError::Generic(format!("Failed to read entry content: {}", e)))?;
+                entry.read_to_end(&mut file_content).map_err(|e| {
+                    ToolError::Generic(format!("Failed to read entry content: {}", e))
+                })?;
 
-                std::fs::write(&dest_path, &file_content)
-                    .map_err(|e| ToolError::Generic(format!("Failed to write file {:?}: {}", dest_path, e)))?;
+                std::fs::write(&dest_path, &file_content).map_err(|e| {
+                    ToolError::Generic(format!("Failed to write file {:?}: {}", dest_path, e))
+                })?;
 
                 // Restore Unix permissions if available
                 #[cfg(unix)]
@@ -457,7 +458,10 @@ impl FilePluginResolver {
                     use std::os::unix::fs::PermissionsExt;
                     let permissions = std::fs::Permissions::from_mode(mode);
                     std::fs::set_permissions(&dest_path, permissions).map_err(|e| {
-                        ToolError::Generic(format!("Failed to set permissions on {:?}: {}", dest_path, e))
+                        ToolError::Generic(format!(
+                            "Failed to set permissions on {:?}: {}",
+                            dest_path, e
+                        ))
                     })?;
                 }
             }
@@ -500,9 +504,8 @@ pub fn load_tool_from_path(path: &Path) -> ToolResult<ResolvedPlugin<McpbManifes
         })
         .collect();
 
-    let plugin_ref = PluginRef::parse(&sanitized_name).unwrap_or_else(|_| {
-        PluginRef::parse("local-tool").expect("static ref should be valid")
-    });
+    let plugin_ref = PluginRef::parse(&sanitized_name)
+        .unwrap_or_else(|_| PluginRef::parse("local-tool").expect("static ref should be valid"));
 
     // Look for manifest.json
     let manifest_path = abs_path.join(MCPB_MANIFEST_FILE);
