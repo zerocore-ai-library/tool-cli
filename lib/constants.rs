@@ -48,8 +48,7 @@ pub static DEFAULT_CREDENTIALS_PATH: LazyLock<PathBuf> =
     LazyLock::new(|| DEFAULT_HOME_PATH.join("credentials"));
 
 /// Default path for registry authentication.
-pub static REGISTRY_AUTH_DIR: LazyLock<PathBuf> =
-    LazyLock::new(|| DEFAULT_HOME_PATH.join("auth"));
+pub static REGISTRY_AUTH_DIR: LazyLock<PathBuf> = LazyLock::new(|| DEFAULT_HOME_PATH.join("auth"));
 
 //--------------------------------------------------------------------------------------------------
 // Functions

@@ -1,10 +1,10 @@
 //! Security utilities for credential encryption and storage.
 
+use crate::constants::DEFAULT_CREDENTIALS_PATH;
 use aes_gcm::Aes256Gcm;
 use aes_gcm::aead::{AeadInPlace, KeyInit, OsRng};
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use crate::constants::DEFAULT_CREDENTIALS_PATH;
 use rand::RngCore;
 use rmcp::transport::auth::{AuthError, CredentialStore, StoredCredentials};
 use serde::{Deserialize, Serialize};
@@ -137,7 +137,10 @@ impl EnvSecretProvider {
     }
 
     /// Get the encryption key.
-    pub async fn get_encryption_key(&self, _key_id: &str) -> Result<SecretKey, SecretProviderError> {
+    pub async fn get_encryption_key(
+        &self,
+        _key_id: &str,
+    ) -> Result<SecretKey, SecretProviderError> {
         Ok(SecretKey {
             key_id: self.key_id.clone(),
             key_material: self.key_material,

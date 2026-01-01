@@ -202,7 +202,7 @@ pub enum Command {
 
     /// Download a tool from the registry.
     Download {
-        /// Tool reference (namespace/name[@version]).
+        /// Tool reference (`namespace/name[@version]`).
         name: String,
 
         /// Download to this directory (defaults to current directory).
@@ -212,7 +212,7 @@ pub enum Command {
 
     /// Add a tool from the registry.
     Add {
-        /// Tool reference (namespace/name[@version]).
+        /// Tool reference (`namespace/name[@version]`).
         name: String,
     },
 

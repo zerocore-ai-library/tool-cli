@@ -1,6 +1,6 @@
 //! Registry client for tool.store.
 
-use crate::constants::{get_registry_url, REGISTRY_TOKEN_ENV};
+use crate::constants::{REGISTRY_TOKEN_ENV, get_registry_url};
 use crate::error::{ToolError, ToolResult};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -213,11 +213,7 @@ impl RegistryClient {
     }
 
     /// Get artifact details from the registry.
-    pub async fn get_artifact(
-        &self,
-        namespace: &str,
-        name: &str,
-    ) -> ToolResult<ArtifactDetails> {
+    pub async fn get_artifact(&self, namespace: &str, name: &str) -> ToolResult<ArtifactDetails> {
         let url = format!(
             "{}{}/artifacts/{}/{}",
             self.url, API_PREFIX, namespace, name
@@ -256,11 +252,7 @@ impl RegistryClient {
     }
 
     /// List all versions of an artifact.
-    pub async fn list_versions(
-        &self,
-        namespace: &str,
-        name: &str,
-    ) -> ToolResult<Vec<VersionInfo>> {
+    pub async fn list_versions(&self, namespace: &str, name: &str) -> ToolResult<Vec<VersionInfo>> {
         let url = format!(
             "{}{}/artifacts/{}/{}/versions",
             self.url, API_PREFIX, namespace, name
@@ -635,10 +627,10 @@ impl RegistryClient {
     ) -> ToolResult<Option<String>> {
         let versions = self.list_versions(namespace, name).await?;
         for v in versions {
-            if let Ok(version) = semver::Version::parse(&v.version) {
-                if req.matches(&version) {
-                    return Ok(Some(v.version));
-                }
+            if let Ok(version) = semver::Version::parse(&v.version)
+                && req.matches(&version)
+            {
+                return Ok(Some(v.version));
             }
         }
         Ok(None)

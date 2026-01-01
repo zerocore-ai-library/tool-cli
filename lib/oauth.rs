@@ -257,9 +257,10 @@ impl AuthSession {
                 ToolError::Generic(format!("Failed to exchange code for tokens: {}", e))
             })?;
 
-        let (client_id, _) = self.manager.get_credentials().await.map_err(|e| {
-            ToolError::Generic(format!("Failed to get client credentials: {}", e))
-        })?;
+        let (client_id, _) =
+            self.manager.get_credentials().await.map_err(|e| {
+                ToolError::Generic(format!("Failed to get client credentials: {}", e))
+            })?;
 
         Ok(OAuthCredentials::from_token_response(
             &token_response,
@@ -315,9 +316,10 @@ pub async fn prepare_auth_session(
         }
     } else {
         // No config - RFC 8414 discovery
-        manager.discover_metadata().await.map_err(|e| {
-            ToolError::Generic(format!("OAuth metadata discovery failed: {}", e))
-        })?
+        manager
+            .discover_metadata()
+            .await
+            .map_err(|e| ToolError::Generic(format!("OAuth metadata discovery failed: {}", e)))?
     };
 
     manager.set_metadata(metadata);
@@ -381,7 +383,10 @@ pub async fn run_interactive_oauth(
     let server_handle = start_callback_server(options.callback_port, callback_state);
 
     // Open browser
-    eprintln!("    {} Opening browser for authorization...", "→".bright_blue());
+    eprintln!(
+        "    {} Opening browser for authorization...",
+        "→".bright_blue()
+    );
     eprintln!(
         "    {} If browser doesn't open, visit:\n      {}\n",
         "?".bright_yellow(),
@@ -389,11 +394,7 @@ pub async fn run_interactive_oauth(
     );
 
     if let Err(e) = open::that(auth_url.as_str()) {
-        eprintln!(
-            "    {} Failed to open browser: {}",
-            "!".bright_yellow(),
-            e
-        );
+        eprintln!("    {} Failed to open browser: {}", "!".bright_yellow(), e);
         eprintln!("      Please manually open the URL above.");
     }
 

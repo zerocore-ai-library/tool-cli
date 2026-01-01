@@ -2,7 +2,7 @@
 
 use crate::constants::MCPB_MANIFEST_FILE;
 use crate::error::{ToolError, ToolResult};
-use crate::mcp::{ToolType, get_tool_info_from_path, call_tool_from_path};
+use crate::mcp::{ToolType, call_tool_from_path, get_tool_info_from_path};
 use crate::mcpb::{
     InitMode, McpbAuthor, McpbManifest, McpbServerType, McpbTransport, McpbUserConfigField,
     NodePackageManager, PackageManager, PythonPackageManager,
@@ -113,9 +113,9 @@ pub async fn init_mcpb(
     // Get final values based on -y flag
     let (pkg_name, mode, is_rust, description, license, author) = if yes {
         // Non-interactive: use CLI args or defaults
-        let pkg_name = resolved_name
-            .or(default_name.clone())
-            .ok_or_else(|| ToolError::Generic("Could not determine package name. Use --name.".into()))?;
+        let pkg_name = resolved_name.or(default_name.clone()).ok_or_else(|| {
+            ToolError::Generic("Could not determine package name. Use --name.".into())
+        })?;
         let mode = build_init_mode(reference, parsed_server_type, parsed_transport, parsed_pm);
         // Detect if this is a Rust bundle from CLI flag
         let is_rust = server_type
@@ -135,11 +135,7 @@ pub async fn init_mcpb(
             license,
             author,
         };
-        let result = prompt_init_mcpb(
-            prefill,
-            default_name.as_deref(),
-            default_author.as_deref(),
-        )?;
+        let result = prompt_init_mcpb(prefill, default_name.as_deref(), default_author.as_deref())?;
         // Use is_rust from prompt result, or fall back to CLI flag if prefilled
         let is_rust = result.is_rust
             || server_type
@@ -154,8 +150,6 @@ pub async fn init_mcpb(
             result.author,
         )
     };
-
-    let mode = mode;
 
     // Validate name format
     if !is_valid_package_name(&pkg_name) {
@@ -654,7 +648,11 @@ fn output_full(result: &ValidationResult, strict: bool, format_name: &str) {
                 error_count,
                 if error_count == 1 { "error" } else { "errors" },
                 warning_count,
-                if warning_count == 1 { "warning" } else { "warnings" }
+                if warning_count == 1 {
+                    "warning"
+                } else {
+                    "warnings"
+                }
             )
         } else if error_count == 1 {
             "1 error".to_string()
@@ -667,7 +665,11 @@ fn output_full(result: &ValidationResult, strict: bool, format_name: &str) {
             "  {} valid ({} {})",
             "✓".bright_green(),
             warning_count,
-            if warning_count == 1 { "warning" } else { "warnings" }
+            if warning_count == 1 {
+                "warning"
+            } else {
+                "warnings"
+            }
         );
     } else {
         println!("  {} valid", "✓".bright_green());
@@ -806,8 +808,8 @@ pub async fn run_script(
     }
 
     let content = std::fs::read_to_string(&manifest_path)?;
-    let manifest: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| ToolError::Generic(format!("Invalid JSON: {}", e)))?;
+    let manifest: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| ToolError::Generic(format!("Invalid JSON: {}", e)))?;
 
     // Extract script from _meta.company.superrad.radical.scripts
     let script_cmd = manifest
@@ -867,8 +869,8 @@ pub async fn list_scripts(path: Option<String>) -> ToolResult<()> {
     }
 
     let content = std::fs::read_to_string(&manifest_path)?;
-    let manifest: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| ToolError::Generic(format!("Invalid JSON: {}", e)))?;
+    let manifest: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| ToolError::Generic(format!("Invalid JSON: {}", e)))?;
 
     let scripts = manifest
         .get("_meta")
@@ -959,6 +961,7 @@ fn format_size(bytes: u64) -> String {
 }
 
 /// Get info about a tool (list tools, prompts, resources).
+#[allow(clippy::too_many_arguments)]
 pub async fn tool_info(
     tool: String,
     show_tools: bool,
@@ -1034,7 +1037,10 @@ pub async fn tool_info(
                     "       {}\n",
                     "export CREDENTIALS_SECRET_KEY=\"<your-key>\"".bright_white()
                 );
-                println!("    {}  Re-run this command to start OAuth flow", "3.".dimmed());
+                println!(
+                    "    {}  Re-run this command to start OAuth flow",
+                    "3.".dimmed()
+                );
                 std::process::exit(1);
             }
             Err(e) => return Err(e),
@@ -1066,44 +1072,81 @@ pub async fn tool_info(
     println!();
 
     // Tools section
-    if show_all || show_tools {
-        if !capabilities.tools.is_empty() {
-            println!("    {}:", "Tools".dimmed());
-            for (idx, tool) in capabilities.tools.iter().enumerate() {
-                let desc = tool
-                    .description
-                    .as_ref()
-                    .map(|d| format!("  {}", d.dimmed()))
-                    .unwrap_or_default();
-                println!("      {}{}", tool.name.bright_cyan(), desc);
+    if (show_all || show_tools) && !capabilities.tools.is_empty() {
+        println!("    {}:", "Tools".dimmed());
+        for (idx, tool) in capabilities.tools.iter().enumerate() {
+            let desc = tool
+                .description
+                .as_ref()
+                .map(|d| format!("  {}", d.dimmed()))
+                .unwrap_or_default();
+            println!("      {}{}", tool.name.bright_cyan(), desc);
 
-                let has_input = tool
-                    .input_schema
+            let has_input = tool
+                .input_schema
+                .get("properties")
+                .and_then(|p| p.as_object())
+                .is_some_and(|p| !p.is_empty());
+            let has_output = tool.output_schema.is_some();
+
+            // Show input parameters with tree structure
+            if has_input {
+                let schema = &tool.input_schema;
+                let props = schema
                     .get("properties")
                     .and_then(|p| p.as_object())
-                    .is_some_and(|p| !p.is_empty());
-                let has_output = tool.output_schema.is_some();
+                    .unwrap();
+                let required: Vec<&str> = schema
+                    .get("required")
+                    .and_then(|r| r.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
 
-                // Show input parameters with tree structure
-                if has_input {
-                    let schema = &tool.input_schema;
-                    let props = schema
-                        .get("properties")
-                        .and_then(|p| p.as_object())
-                        .unwrap();
-                    let required: Vec<&str> = schema
+                let input_branch = if has_output { "├──" } else { "└──" };
+                println!("      {} {}", input_branch.dimmed(), "Input".dimmed());
+
+                let prop_count = props.len();
+                for (i, (name, prop)) in props.iter().enumerate() {
+                    let is_last = i == prop_count - 1;
+                    let prefix = if has_output { "│" } else { " " };
+                    let branch = if is_last { "└──" } else { "├──" };
+                    let type_str = prop.get("type").and_then(|t| t.as_str()).unwrap_or("any");
+                    let req_marker = if required.contains(&name.as_str()) {
+                        "*"
+                    } else {
+                        ""
+                    };
+                    let param_desc = prop
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("");
+
+                    let param_name = format!("{}{}", name, req_marker);
+                    println!(
+                        "      {}   {} {:<20} {:<10} {}",
+                        prefix.dimmed(),
+                        branch.dimmed(),
+                        param_name,
+                        type_str.dimmed(),
+                        param_desc.dimmed()
+                    );
+                }
+            }
+
+            // Show output schema with tree structure
+            if let Some(output_schema) = &tool.output_schema {
+                println!("      {} {}", "└──".dimmed(), "Output".dimmed());
+
+                if let Some(props) = output_schema.get("properties").and_then(|p| p.as_object()) {
+                    let required: Vec<&str> = output_schema
                         .get("required")
                         .and_then(|r| r.as_array())
                         .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
                         .unwrap_or_default();
 
-                    let input_branch = if has_output { "├──" } else { "└──" };
-                    println!("      {} {}", input_branch.dimmed(), "Input".dimmed());
-
                     let prop_count = props.len();
                     for (i, (name, prop)) in props.iter().enumerate() {
                         let is_last = i == prop_count - 1;
-                        let prefix = if has_output { "│" } else { " " };
                         let branch = if is_last { "└──" } else { "├──" };
                         let type_str = prop.get("type").and_then(|t| t.as_str()).unwrap_or("any");
                         let req_marker = if required.contains(&name.as_str()) {
@@ -1118,8 +1161,7 @@ pub async fn tool_info(
 
                         let param_name = format!("{}{}", name, req_marker);
                         println!(
-                            "      {}   {} {:<20} {:<10} {}",
-                            prefix.dimmed(),
+                            "          {} {:<20} {:<10} {}",
                             branch.dimmed(),
                             param_name,
                             type_str.dimmed(),
@@ -1127,134 +1169,92 @@ pub async fn tool_info(
                         );
                     }
                 }
-
-                // Show output schema with tree structure
-                if let Some(output_schema) = &tool.output_schema {
-                    println!("      {} {}", "└──".dimmed(), "Output".dimmed());
-
-                    if let Some(props) = output_schema.get("properties").and_then(|p| p.as_object()) {
-                        let required: Vec<&str> = output_schema
-                            .get("required")
-                            .and_then(|r| r.as_array())
-                            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-                            .unwrap_or_default();
-
-                        let prop_count = props.len();
-                        for (i, (name, prop)) in props.iter().enumerate() {
-                            let is_last = i == prop_count - 1;
-                            let branch = if is_last { "└──" } else { "├──" };
-                            let type_str = prop.get("type").and_then(|t| t.as_str()).unwrap_or("any");
-                            let req_marker = if required.contains(&name.as_str()) {
-                                "*"
-                            } else {
-                                ""
-                            };
-                            let param_desc = prop
-                                .get("description")
-                                .and_then(|d| d.as_str())
-                                .unwrap_or("");
-
-                            let param_name = format!("{}{}", name, req_marker);
-                            println!(
-                                "          {} {:<20} {:<10} {}",
-                                branch.dimmed(),
-                                param_name,
-                                type_str.dimmed(),
-                                param_desc.dimmed()
-                            );
-                        }
-                    }
-                }
-
-                // Add spacing between tools
-                if idx < capabilities.tools.len() - 1 {
-                    println!();
-                }
             }
-            println!();
+
+            // Add spacing between tools
+            if idx < capabilities.tools.len() - 1 {
+                println!();
+            }
         }
+        println!();
     }
 
     // Prompts section
-    if show_all || show_prompts {
-        if !capabilities.prompts.is_empty() {
-            println!("    {}:", "Prompts".dimmed());
-            for (idx, prompt) in capabilities.prompts.iter().enumerate() {
-                let desc = prompt
-                    .description
-                    .as_ref()
-                    .map(|d| format!("  {}", d.dimmed()))
-                    .unwrap_or_default();
-                println!("      {}{}", prompt.name.to_string().bright_magenta(), desc);
+    if (show_all || show_prompts) && !capabilities.prompts.is_empty() {
+        println!("    {}:", "Prompts".dimmed());
+        for (idx, prompt) in capabilities.prompts.iter().enumerate() {
+            let desc = prompt
+                .description
+                .as_ref()
+                .map(|d| format!("  {}", d.dimmed()))
+                .unwrap_or_default();
+            println!("      {}{}", prompt.name.to_string().bright_magenta(), desc);
 
-                // Show arguments if available
-                if let Some(args) = &prompt.arguments {
-                    if !args.is_empty() {
-                        for (i, arg) in args.iter().enumerate() {
-                            let is_last = i == args.len() - 1;
-                            let req_marker = if arg.required.unwrap_or(false) {
-                                "*"
-                            } else {
-                                ""
-                            };
-                            let arg_name = format!("{}{}", arg.name, req_marker);
-                            let arg_desc = arg.description.as_deref().unwrap_or("");
-                            let branch = if is_last { "└──" } else { "├──" };
-                            println!(
-                                "      {} {:<20} {:<10} {}",
-                                branch.dimmed(),
-                                arg_name.bright_white(),
-                                "string".dimmed(),
-                                arg_desc.dimmed()
-                            );
-                        }
-                    }
-                }
-
-                if idx < capabilities.prompts.len() - 1 {
-                    println!();
+            // Show arguments if available
+            if let Some(args) = &prompt.arguments
+                && !args.is_empty()
+            {
+                for (i, arg) in args.iter().enumerate() {
+                    let is_last = i == args.len() - 1;
+                    let req_marker = if arg.required.unwrap_or(false) {
+                        "*"
+                    } else {
+                        ""
+                    };
+                    let arg_name = format!("{}{}", arg.name, req_marker);
+                    let arg_desc = arg.description.as_deref().unwrap_or("");
+                    let branch = if is_last { "└──" } else { "├──" };
+                    println!(
+                        "      {} {:<20} {:<10} {}",
+                        branch.dimmed(),
+                        arg_name.bright_white(),
+                        "string".dimmed(),
+                        arg_desc.dimmed()
+                    );
                 }
             }
-            println!();
+
+            if idx < capabilities.prompts.len() - 1 {
+                println!();
+            }
         }
+        println!();
     }
 
     // Resources section
-    if show_all || show_resources {
-        if !capabilities.resources.is_empty() {
-            println!("    {}:", "Resources".dimmed());
-            for (idx, resource) in capabilities.resources.iter().enumerate() {
-                let desc = resource
-                    .description
-                    .as_ref()
-                    .map(|d| format!("  {}", d.dimmed()))
-                    .unwrap_or_default();
-                println!("      {}{}", resource.uri.to_string().bright_yellow(), desc);
+    if (show_all || show_resources) && !capabilities.resources.is_empty() {
+        println!("    {}:", "Resources".dimmed());
+        for (idx, resource) in capabilities.resources.iter().enumerate() {
+            let desc = resource
+                .description
+                .as_ref()
+                .map(|d| format!("  {}", d.dimmed()))
+                .unwrap_or_default();
+            println!("      {}{}", resource.uri.to_string().bright_yellow(), desc);
 
-                // Show resource details
-                let has_name = !resource.name.is_empty();
-                let has_mime = resource.mime_type.is_some();
+            // Show resource details
+            let has_name = !resource.name.is_empty();
+            let has_mime = resource.mime_type.is_some();
 
-                if has_name {
-                    let branch = if has_mime { "├──" } else { "└──" };
-                    println!(
-                        "      {} {:<12} {}",
-                        branch.dimmed(),
-                        "name".dimmed(),
-                        resource.name
-                    );
-                }
-
-                if let Some(mime) = &resource.mime_type {
-                    println!("      {} {:<12} {}", "└──".dimmed(), "mime".dimmed(), mime);
-                }
-
-                if idx < capabilities.resources.len() - 1 {
-                    println!();
-                }
+            if has_name {
+                let branch = if has_mime { "├──" } else { "└──" };
+                println!(
+                    "      {} {:<12} {}",
+                    branch.dimmed(),
+                    "name".dimmed(),
+                    resource.name
+                );
             }
-            println!();
+
+            if let Some(mime) = &resource.mime_type {
+                println!("      {} {:<12} {}", "└──".dimmed(), "mime".dimmed(), mime);
+            }
+
+            if idx < capabilities.resources.len() - 1 {
+                println!();
+            }
         }
+        println!();
     }
 
     Ok(())
@@ -1298,7 +1298,6 @@ fn output_tool_info_json(
     Ok(())
 }
 
-
 /// Call a tool method.
 pub async fn tool_call(
     tool: String,
@@ -1332,59 +1331,63 @@ pub async fn tool_call(
         .unwrap_or(&tool);
 
     // Call the tool - handle EntryPointNotFound specially
-    let result = match call_tool_from_path(&tool_path, &method, arguments, &user_config, verbose).await {
-        Ok(result) => result,
-        Err(ToolError::EntryPointNotFound {
-            entry_point,
-            full_path: _,
-            build_script,
-            bundle_path,
-        }) => {
-            println!(
-                "  {} Entry point not found: {}\n",
-                "✗".bright_red(),
-                entry_point.bright_white()
-            );
-            if let Some(build_cmd) = build_script {
-                println!("    The tool needs to be built before it can be run.\n");
-                println!("    {}:", "To build".dimmed());
-                println!("      cd {} && tool build\n", bundle_path);
-                println!("    {}: {}", "Runs".dimmed(), build_cmd.dimmed());
-            } else {
-                println!("    {}:", "If this tool requires building".dimmed());
-                println!("      Add a build script to manifest.json:\n");
-                println!("      {}", "\"_meta\": {".dimmed());
-                println!("        {}", "\"company.superrad.radical\": {".dimmed());
+    let result =
+        match call_tool_from_path(&tool_path, &method, arguments, &user_config, verbose).await {
+            Ok(result) => result,
+            Err(ToolError::EntryPointNotFound {
+                entry_point,
+                full_path: _,
+                build_script,
+                bundle_path,
+            }) => {
                 println!(
-                    "          {}",
-                    "\"scripts\": { \"build\": \"...\" }".dimmed()
+                    "  {} Entry point not found: {}\n",
+                    "✗".bright_red(),
+                    entry_point.bright_white()
                 );
-                println!("        {}", "}".dimmed());
-                println!("      {}", "}".dimmed());
+                if let Some(build_cmd) = build_script {
+                    println!("    The tool needs to be built before it can be run.\n");
+                    println!("    {}:", "To build".dimmed());
+                    println!("      cd {} && tool build\n", bundle_path);
+                    println!("    {}: {}", "Runs".dimmed(), build_cmd.dimmed());
+                } else {
+                    println!("    {}:", "If this tool requires building".dimmed());
+                    println!("      Add a build script to manifest.json:\n");
+                    println!("      {}", "\"_meta\": {".dimmed());
+                    println!("        {}", "\"company.superrad.radical\": {".dimmed());
+                    println!(
+                        "          {}",
+                        "\"scripts\": { \"build\": \"...\" }".dimmed()
+                    );
+                    println!("        {}", "}".dimmed());
+                    println!("      {}", "}".dimmed());
+                }
+                std::process::exit(1);
             }
-            std::process::exit(1);
-        }
-        Err(ToolError::OAuthNotConfigured) | Err(ToolError::AuthRequired { tool_ref: _ }) => {
-            println!(
-                "  {} This tool requires OAuth authentication\n",
-                "✗".bright_red()
-            );
-            println!(
-                "    To enable OAuth, set the {} environment variable:\n",
-                "CREDENTIALS_SECRET_KEY".bright_cyan()
-            );
-            println!("    {}  Generate a key:", "1.".dimmed());
-            println!("       {}\n", "openssl rand -base64 32".bright_white());
-            println!("    {}  Set it in your shell:", "2.".dimmed());
-            println!(
-                "       {}\n",
-                "export CREDENTIALS_SECRET_KEY=\"<your-key>\"".bright_white()
-            );
-            println!("    {}  Re-run this command to start OAuth flow", "3.".dimmed());
-            std::process::exit(1);
-        }
-        Err(e) => return Err(e),
-    };
+            Err(ToolError::OAuthNotConfigured) | Err(ToolError::AuthRequired { tool_ref: _ }) => {
+                println!(
+                    "  {} This tool requires OAuth authentication\n",
+                    "✗".bright_red()
+                );
+                println!(
+                    "    To enable OAuth, set the {} environment variable:\n",
+                    "CREDENTIALS_SECRET_KEY".bright_cyan()
+                );
+                println!("    {}  Generate a key:", "1.".dimmed());
+                println!("       {}\n", "openssl rand -base64 32".bright_white());
+                println!("    {}  Set it in your shell:", "2.".dimmed());
+                println!(
+                    "       {}\n",
+                    "export CREDENTIALS_SECRET_KEY=\"<your-key>\"".bright_white()
+                );
+                println!(
+                    "    {}  Re-run this command to start OAuth flow",
+                    "3.".dimmed()
+                );
+                std::process::exit(1);
+            }
+            Err(e) => return Err(e),
+        };
 
     let is_error = result.result.is_error.unwrap_or(false);
 
@@ -1809,9 +1812,9 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
     use crate::registry::RegistryClient;
 
     // Parse tool reference
-    let plugin_ref = name.parse::<PluginRef>().map_err(|e| {
-        ToolError::Generic(format!("Invalid tool reference '{}': {}", name, e))
-    })?;
+    let plugin_ref = name
+        .parse::<PluginRef>()
+        .map_err(|e| ToolError::Generic(format!("Invalid tool reference '{}': {}", name, e)))?;
 
     if plugin_ref.namespace().is_none() {
         println!(
@@ -1843,16 +1846,12 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
         );
 
         let artifact = client.get_artifact(namespace, tool_name).await?;
-        let ver = artifact
-            .latest_version
-            .map(|v| v.version)
-            .ok_or_else(|| {
-                ToolError::Generic(format!(
-                    "No versions published for {}/{}",
-                    namespace, tool_name
-                ))
-            })?;
-        ver
+        artifact.latest_version.map(|v| v.version).ok_or_else(|| {
+            ToolError::Generic(format!(
+                "No versions published for {}/{}",
+                namespace, tool_name
+            ))
+        })?
     };
 
     // Determine output path
@@ -1870,10 +1869,10 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
     };
 
     // Create parent directory if it doesn't exist
-    if let Some(parent) = output_path.parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = output_path.parent()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent)?;
     }
 
     let download_ref = format!("{}/{}@{}", namespace, tool_name, version);
@@ -1902,9 +1901,9 @@ pub async fn add_tool(name: &str) -> ToolResult<()> {
     use crate::references::PluginRef;
     use crate::registry::RegistryClient;
 
-    let plugin_ref = name.parse::<PluginRef>().map_err(|e| {
-        ToolError::Generic(format!("Invalid tool reference '{}': {}", name, e))
-    })?;
+    let plugin_ref = name
+        .parse::<PluginRef>()
+        .map_err(|e| ToolError::Generic(format!("Invalid tool reference '{}': {}", name, e)))?;
 
     // Check if it has a namespace (required for registry fetch)
     if plugin_ref.namespace().is_none() {
@@ -1974,9 +1973,9 @@ pub async fn remove_tool(name: &str) -> ToolResult<()> {
             );
 
             // Remove the directory
-            fs::remove_dir_all(tool_dir)
-                .await
-                .map_err(|e| ToolError::Generic(format!("Failed to remove tool directory: {}", e)))?;
+            fs::remove_dir_all(tool_dir).await.map_err(|e| {
+                ToolError::Generic(format!("Failed to remove tool directory: {}", e))
+            })?;
 
             println!(
                 "  {} Removed {}",
@@ -2060,7 +2059,7 @@ pub async fn search_tools(query: &str) -> ToolResult<()> {
 /// Publish a tool to the registry.
 pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
     use crate::handlers::auth::{get_registry_token, load_credentials};
-    use crate::pack::{pack_bundle, PackOptions};
+    use crate::pack::{PackOptions, pack_bundle};
     use crate::registry::RegistryClient;
     use sha2::{Digest, Sha256};
 
@@ -2109,9 +2108,9 @@ pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
             None => ("<your-username>".to_string(), None),
         }
     } else {
-        let token = get_registry_token()
-            .await?
-            .ok_or_else(|| ToolError::Generic("Authentication required. Run `tool login` first.".into()))?;
+        let token = get_registry_token().await?.ok_or_else(|| {
+            ToolError::Generic("Authentication required. Run `tool login` first.".into())
+        })?;
         let client = RegistryClient::new().with_auth_token(&token);
         let user = client.validate_token().await?;
         (user.username, Some(token))
@@ -2214,7 +2213,9 @@ pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
         .await?;
 
     // Upload to presigned URL
-    client.upload_bundle(&upload_info.upload_url, &bundle).await?;
+    client
+        .upload_bundle(&upload_info.upload_url, &bundle)
+        .await?;
     println!("    {} Upload complete", "✓".bright_green());
 
     // Publish the version
