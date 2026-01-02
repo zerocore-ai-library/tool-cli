@@ -21,6 +21,33 @@ pub struct Cli {
 /// Available commands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Detect an existing MCP server and generate MCPB scaffolding.
+    Detect {
+        /// Path to project directory (defaults to current directory).
+        #[arg(default_value = ".")]
+        path: String,
+
+        /// Write manifest.json and .mcpbignore files.
+        #[arg(long)]
+        write: bool,
+
+        /// Override detected entry point.
+        #[arg(short, long)]
+        entry: Option<String>,
+
+        /// Override detected transport (stdio or http).
+        #[arg(long)]
+        transport: Option<String>,
+
+        /// Override package name.
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Force overwrite existing files.
+        #[arg(short, long)]
+        force: bool,
+    },
+
     /// Initialize a new tool package.
     Init {
         /// Directory path to initialize (defaults to current directory).
