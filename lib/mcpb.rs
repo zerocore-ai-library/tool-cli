@@ -1045,6 +1045,36 @@ pub enum PackageManager {
     Python(PythonPackageManager),
 }
 
+impl std::fmt::Display for NodePackageManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Npm => write!(f, "npm"),
+            Self::Pnpm => write!(f, "pnpm"),
+            Self::Yarn => write!(f, "yarn"),
+            Self::Bun => write!(f, "bun"),
+        }
+    }
+}
+
+impl std::fmt::Display for PythonPackageManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Uv => write!(f, "uv"),
+            Self::Pip => write!(f, "pip"),
+            Self::Poetry => write!(f, "poetry"),
+        }
+    }
+}
+
+impl std::fmt::Display for PackageManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Node(pm) => write!(f, "{}", pm),
+            Self::Python(pm) => write!(f, "{}", pm),
+        }
+    }
+}
+
 /// MCP execution configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpbMcpConfig {

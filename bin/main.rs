@@ -66,6 +66,15 @@ async fn run() -> ToolResult<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Detect {
+            path,
+            write,
+            entry,
+            transport,
+            name,
+            force,
+        } => handlers::detect_mcpb(path, write, entry, transport, name, force).await,
+
         Command::Init {
             path,
             name,

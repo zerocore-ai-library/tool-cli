@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod constants;
+pub mod detect;
 pub mod error;
 pub mod handlers;
 pub mod mcp;
@@ -26,6 +27,7 @@ pub mod vars;
 
 pub use commands::*;
 pub use constants::*;
+pub use detect::*;
 pub use error::*;
 pub use handlers::*;
 pub use mcp::*;
