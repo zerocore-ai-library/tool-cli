@@ -1,6 +1,6 @@
 <div align="center">
 
-  <h3>[ tool-cli ]</h3>
+  <h3>[ tool ]</h3>
   <h4>———&nbsp;&nbsp;&nbsp;The Package Manager for MCP Tools&nbsp;&nbsp;&nbsp;———</h4>
 
 </div>
@@ -11,9 +11,10 @@
   <video autoplay src="https://github.com/user-attachments/assets/23618f92-5897-44d1-bfa6-1058f30c09e" width="800" controls></video>
 </div>
 
+<!--
 <div align="center">
   <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDp" target="_blank"><img src="https://cdn.simpleicons.org/gnometerminal" height="12"/></a> <sup><sub><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDp" target="_blank">SEE HOW IT WORKS HERE →</a></sub></sup>
-</div>
+</div> -->
 
 <br />
 
@@ -30,7 +31,7 @@
 ## INSTALL
 
 ```sh
-<tbd>
+curl -fsSL https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/scripts/install.sh | sh
 ```
 
 <br />
