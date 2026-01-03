@@ -8,7 +8,7 @@ license = "MIT"
 
 [[bin]]
 name = "tool"
-path = "bin/main.rs"
+path = "bin/tool.rs"
 
 [lib]
 name = "tool_cli"
