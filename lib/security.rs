@@ -339,7 +339,8 @@ impl CredentialStore for FileCredentialStore {
 
 /// Check if we're running in an interactive terminal.
 pub fn is_interactive() -> bool {
-    atty::is(atty::Stream::Stdin) && atty::is(atty::Stream::Stdout)
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
 /// Get credential crypto from environment.
