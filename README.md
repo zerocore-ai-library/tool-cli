@@ -31,7 +31,7 @@
 ## INSTALL
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/install.sh | sh
 ```
 
 <br />
@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/scripts/i
 tool init
 ```
 
-Interactive prompts walk you through it — name, description, language (Node.js, Python, or Rust), package manager. You get a working scaffold with `manifest.json` configured correctly.
+Interactive prompts walk you through creating an MCPB package. You get a working scaffold with `manifest.json` configured correctly.
 
 > <details>
 > <summary>&nbsp;Want to skip the prompts?</summary>

@@ -1,6 +1,6 @@
 #!/bin/sh
 # install.sh - Tool CLI installer with animated progress
-# Usage: curl -fsSL https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/scripts/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/install.sh | sh
 #    or: ./install.sh [options]
 #
 # Options:
@@ -718,7 +718,7 @@ do_install() {
         log "    ${SYM_BULLET} ${BOLD}$_bin${RESET} ${DIM}$PREFIX/bin/$_bin${RESET} ${DIM}$_ver${RESET}"
     done
     log ""
-    log "  Run ${CYAN}tool --help${RESET} to get started."
+    log "  Run ${CYAN}tool --help${RESET} or ${CYAN}tool --tree${RESET} to get started."
     log ""
 }
 
@@ -728,7 +728,7 @@ do_install() {
 
 show_help() {
     printf '%b\n' "${BOLD}USAGE${RESET}"
-    printf '    curl -fsSL https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/scripts/install.sh | sh\n'
+    printf '    curl -fsSL https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/install.sh | sh\n'
     printf '    ./install.sh [OPTIONS]\n'
     printf '\n'
     printf '%b\n' "${BOLD}OPTIONS${RESET}"
