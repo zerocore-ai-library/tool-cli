@@ -275,7 +275,7 @@ impl McpbManifest {
     pub fn static_responses(&self) -> Option<StaticResponses> {
         self.meta
             .as_ref()?
-            .get("company.superrad.radical")?
+            .get("company.superrad.mcpb")?
             .get("static_responses")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
@@ -284,7 +284,7 @@ impl McpbManifest {
     pub fn scripts(&self) -> Option<Scripts> {
         self.meta
             .as_ref()?
-            .get("company.superrad.radical")?
+            .get("company.superrad.mcpb")?
             .get("scripts")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
@@ -412,7 +412,7 @@ impl McpbManifest {
                     None,
                     None,
                     Some(serde_json::json!({
-                        "company.superrad.radical": {
+                        "company.superrad.mcpb": {
                             "scripts": {
                                 "build": build_cmd
                             }
@@ -440,7 +440,7 @@ impl McpbManifest {
                         None,
                         None,
                         Some(serde_json::json!({
-                            "company.superrad.radical": {
+                            "company.superrad.mcpb": {
                                 "scripts": {
                                     "build": build_cmd
                                 }
@@ -492,7 +492,7 @@ impl McpbManifest {
                         None,
                         Some(sys_cfg),
                         Some(serde_json::json!({
-                            "company.superrad.radical": {
+                            "company.superrad.mcpb": {
                                 "scripts": {
                                     "build": build_cmd
                                 }
@@ -550,7 +550,7 @@ impl McpbManifest {
                         None,
                         Some(sys_cfg),
                         Some(serde_json::json!({
-                            "company.superrad.radical": {
+                            "company.superrad.mcpb": {
                                 "scripts": {
                                     "build": build_cmd
                                 }
@@ -820,7 +820,7 @@ impl McpbManifest {
             privacy_policies: None,
             localization: None,
             meta: Some(serde_json::json!({
-                "company.superrad.radical": {
+                "company.superrad.mcpb": {
                     "scripts": {
                         "build": "cargo build --release"
                     }

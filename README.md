@@ -82,7 +82,7 @@ Define scripts in your manifest:
 ```json
 {
   "_meta": {
-    "company.superrad.radical": {
+    "company.superrad.mcpb": {
       "scripts": {
         "build": "npm run build",
         "test": "npm test",

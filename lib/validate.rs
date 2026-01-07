@@ -1046,7 +1046,7 @@ fn validate_tools(
 
         for (i, tool) in tools_list.tools.iter().enumerate() {
             let location = format!(
-                "manifest.json:_meta[\"company.superrad.radical\"][\"static_responses\"][\"tools/list\"].tools[{}]",
+                "manifest.json:_meta[\"company.superrad.mcpb\"][\"static_responses\"][\"tools/list\"].tools[{}]",
                 i
             );
 
@@ -1139,7 +1139,7 @@ fn validate_json_schema(
             code: ErrorCode::InvalidInputSchema.into(),
             message: format!("invalid {}", field_name),
             location: format!(
-                "manifest.json:_meta[\"company.superrad.radical\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}",
+                "manifest.json:_meta[\"company.superrad.mcpb\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}",
                 tool_name, field_name
             ),
             details: format!(
@@ -1163,7 +1163,7 @@ fn validate_json_schema(
             code: ErrorCode::InvalidInputSchema.into(),
             message: format!("invalid {} properties", field_name),
             location: format!(
-                "manifest.json:_meta[\"company.superrad.radical\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}.properties",
+                "manifest.json:_meta[\"company.superrad.mcpb\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}.properties",
                 tool_name, field_name
             ),
             details: "`properties` must be an object".into(),
@@ -1179,7 +1179,7 @@ fn validate_json_schema(
             code: ErrorCode::InvalidInputSchema.into(),
             message: format!("invalid {} required", field_name),
             location: format!(
-                "manifest.json:_meta[\"company.superrad.radical\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}.required",
+                "manifest.json:_meta[\"company.superrad.mcpb\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}.required",
                 tool_name, field_name
             ),
             details: "`required` must be an array of property names".into(),
