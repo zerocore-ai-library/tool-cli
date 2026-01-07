@@ -244,7 +244,7 @@ impl ProjectDetector for RustDetector {
         // Build manifest
         let manifest = McpbManifest {
             manifest_version: "0.3".to_string(),
-            name: Some(name),
+            name: Some(name.clone()),
             version: Some("0.1.0".to_string()),
             description: Some("An MCP server".to_string()),
             author: None,
@@ -308,7 +308,7 @@ impl ProjectDetector for RustDetector {
 
         Ok(GeneratedScaffold {
             manifest,
-            mcpbignore: rust_mcpbignore_template().to_string(),
+            mcpbignore: rust_mcpbignore_template(&name),
             files_to_create,
             files_to_overwrite,
         })

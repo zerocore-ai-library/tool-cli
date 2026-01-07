@@ -649,8 +649,9 @@ tracing-subscriber = {{ version = "0.3", features = ["env-filter"] }}
 }
 
 /// Generate .mcpbignore content for Rust projects.
-pub fn rust_mcpbignore_template() -> &'static str {
-    r#"# OS files
+pub fn rust_mcpbignore_template(name: &str) -> String {
+    format!(
+        r#"# OS files
 .DS_Store
 Thumbs.db
 
@@ -671,11 +672,11 @@ Thumbs.db
 src/
 Cargo.lock
 
-# Rust build artifacts (ignore everything except release and debug binaries)
-target/
-!target/release/**
-!target/debug/**
+# Rust build artifacts
+target/**
+!target/release/{name}
 "#
+    )
 }
 
 /// Generate .mcpbignore content (same for all types).
@@ -860,13 +861,12 @@ mod tests {
 
     #[test]
     fn test_rust_mcpbignore() {
-        let content = rust_mcpbignore_template();
+        let content = rust_mcpbignore_template("my-tool");
         assert!(content.contains(".DS_Store"));
         assert!(content.contains(".git/"));
         assert!(content.contains("Cargo.lock"));
-        assert!(content.contains("target/"));
-        assert!(content.contains("!target/release/**"));
-        assert!(content.contains("!target/debug/**"));
+        assert!(content.contains("target/**"));
+        assert!(content.contains("!target/release/my-tool"));
         assert!(content.contains("src/"));
     }
 }

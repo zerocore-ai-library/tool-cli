@@ -187,12 +187,12 @@ pub async fn init_mcpb(
 
     // Write .mcpbignore
     let mcpbignore_path = target_dir.join(".mcpbignore");
-    let mcpbignore_content = if is_rust {
-        rust_mcpbignore_template()
+    let mcpbignore_content: String = if is_rust {
+        rust_mcpbignore_template(&pkg_name)
     } else {
-        mcpbignore_template()
+        mcpbignore_template().to_string()
     };
-    std::fs::write(&mcpbignore_path, mcpbignore_content)?;
+    std::fs::write(&mcpbignore_path, &mcpbignore_content)?;
 
     // Write README.md
     let readme_path = target_dir.join("README.md");
