@@ -2399,7 +2399,7 @@ pub async fn detect_mcpb(
 
         println!(
             "\n  Run {} to generate files.",
-            format!("tool detect{} --write", path_arg).bright_cyan()
+            format!("tool migrate{}", path_arg).bright_cyan()
         );
         return Ok(());
     }
