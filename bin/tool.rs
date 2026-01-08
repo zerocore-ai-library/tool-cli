@@ -73,14 +73,6 @@ async fn run() -> ToolResult<()> {
             name,
         } => handlers::detect_mcpb(path, false, entry, transport, name, false).await,
 
-        Command::Migrate {
-            path,
-            entry,
-            transport,
-            name,
-            force,
-        } => handlers::detect_mcpb(path, true, entry, transport, name, force).await,
-
         Command::Init {
             path,
             name,
@@ -92,6 +84,9 @@ async fn run() -> ToolResult<()> {
             reference,
             yes,
             package_manager,
+            entry,
+            transport,
+            force,
         } => {
             handlers::init_mcpb(
                 path,
@@ -104,6 +99,9 @@ async fn run() -> ToolResult<()> {
                 reference,
                 yes,
                 package_manager,
+                entry,
+                transport,
+                force,
             )
             .await
         }
