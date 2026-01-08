@@ -40,29 +40,6 @@ pub enum Command {
         name: Option<String>,
     },
 
-    /// Migrate an existing MCP server to MCPB format.
-    Migrate {
-        /// Path to project directory (defaults to current directory).
-        #[arg(default_value = ".")]
-        path: String,
-
-        /// Override detected entry point.
-        #[arg(short, long)]
-        entry: Option<String>,
-
-        /// Override detected transport (stdio or http).
-        #[arg(long)]
-        transport: Option<String>,
-
-        /// Override package name.
-        #[arg(short, long)]
-        name: Option<String>,
-
-        /// Force overwrite existing files.
-        #[arg(short, long)]
-        force: bool,
-    },
-
     /// Initialize a new tool package.
     Init {
         /// Directory path to initialize (defaults to current directory).
@@ -103,6 +80,18 @@ pub enum Command {
         /// Package manager: npm, pnpm, bun, yarn, uv, pip, poetry.
         #[arg(long = "pm")]
         package_manager: Option<String>,
+
+        /// Override detected entry point (for existing projects).
+        #[arg(short, long)]
+        entry: Option<String>,
+
+        /// Override detected transport (stdio or http) for existing projects.
+        #[arg(long)]
+        transport: Option<String>,
+
+        /// Force overwrite existing manifest.json.
+        #[arg(short, long)]
+        force: bool,
     },
 
     /// Validate a tool manifest.

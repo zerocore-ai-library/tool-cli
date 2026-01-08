@@ -47,6 +47,9 @@ pub async fn init_mcpb(
     reference: bool,
     yes: bool,
     package_manager: Option<String>,
+    entry: Option<String>,
+    transport: Option<String>,
+    force: bool,
 ) -> ToolResult<()> {
     use crate::prompt::{McpbPrefill, get_git_author_name, prompt_init_mcpb};
 
@@ -68,12 +71,31 @@ pub async fn init_mcpb(
         None => std::env::current_dir()?,
     };
 
-    // Check if manifest.json already exists
+    // Check directory state
     let manifest_path = target_dir.join(MCPB_MANIFEST_FILE);
-    if manifest_path.exists() {
+    let manifest_exists = manifest_path.exists();
+    let is_empty = is_dir_empty(&target_dir)?;
+
+    // Check if manifest.json already exists
+    if manifest_exists && !force {
         return Err(ToolError::Generic(
             "manifest.json already exists. Use --force to overwrite.".into(),
         ));
+    }
+
+    // Non-empty directory -> migration flow (detection-based)
+    // Handles both: new migration and re-migration with --force
+    if !is_empty {
+        return init_migrate(
+            target_dir,
+            name,
+            entry,
+            transport,
+            yes,
+            force,
+            path.as_deref(),
+        )
+        .await;
     }
 
     // Resolve name: --name flag OR path argument (directory name)
@@ -301,6 +323,218 @@ fn parse_package_manager(pm: &str) -> Option<PackageManager> {
         "poetry" => Some(PackageManager::Python(PythonPackageManager::Poetry)),
         _ => None,
     }
+}
+
+/// Check if a directory is empty (ignoring hidden files like .git).
+fn is_dir_empty(dir: &Path) -> ToolResult<bool> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        // Ignore hidden files/directories (like .git)
+        if !name_str.starts_with('.') {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Handle migration of existing project to MCPB format.
+async fn init_migrate(
+    target_dir: PathBuf,
+    name: Option<String>,
+    entry: Option<String>,
+    transport: Option<String>,
+    yes: bool,
+    _force: bool,
+    display_path: Option<&str>,
+) -> ToolResult<()> {
+    use crate::detect::{DetectOptions, DetectorRegistry};
+    use crate::mcpb::McpbTransport;
+    use std::io::IsTerminal;
+
+    let manifest_path = target_dir.join(MCPB_MANIFEST_FILE);
+
+    // Run detection
+    let registry = DetectorRegistry::new();
+    let detection = registry.detect(&target_dir).ok_or_else(|| {
+        ToolError::Generic(
+            "No MCP server project detected in this directory.\n\n    \
+             If this is a new project, remove existing files or use an empty directory.\n\n    \
+             Checked for:\n    \
+             - Node.js with @modelcontextprotocol/sdk\n    \
+             - Python with mcp package\n    \
+             - Rust with rmcp crate"
+                .into(),
+        )
+    })?;
+
+    // Parse transport override
+    let transport_override = transport
+        .as_ref()
+        .map(|t| match t.to_lowercase().as_str() {
+            "http" => Ok(McpbTransport::Http),
+            "stdio" => Ok(McpbTransport::Stdio),
+            _ => Err(ToolError::Generic(format!(
+                "Invalid transport '{}'. Use 'stdio' or 'http'.",
+                t
+            ))),
+        })
+        .transpose()?;
+
+    // Build options
+    let options = DetectOptions {
+        entry_point: entry.clone(),
+        transport: transport_override,
+        package_manager: None,
+        name: name.clone(),
+    };
+
+    // Print detection result
+    let entry_display = options.entry_point.as_ref().or(detection
+        .result
+        .details
+        .entry_point
+        .as_ref());
+    let transport_display = options
+        .transport
+        .or(detection.result.details.transport)
+        .unwrap_or(McpbTransport::Stdio);
+
+    println!(
+        "\n  {} Detected {} MCP server\n",
+        "✓".bright_green(),
+        detection.display_name.bold()
+    );
+
+    println!("    {:<12} {}", "Type".dimmed(), detection.display_name);
+    println!(
+        "    {:<12} {}",
+        "Transport".dimmed(),
+        transport_display.to_string().to_lowercase()
+    );
+
+    if let Some(ep) = entry_display {
+        let ep_exists = target_dir.join(ep).exists();
+        if ep_exists {
+            println!("    {:<12} {}", "Entry".dimmed(), ep);
+        } else {
+            println!(
+                "    {:<12} {} {}",
+                "Entry".dimmed(),
+                ep,
+                "(not found)".bright_yellow()
+            );
+        }
+    } else {
+        println!(
+            "    {:<12} {}",
+            "Entry".dimmed(),
+            "(not detected)".bright_yellow()
+        );
+    }
+
+    if let Some(pm) = &detection.result.details.package_manager {
+        println!("    {:<12} {}", "Package".dimmed(), pm);
+    }
+
+    println!(
+        "    {:<12} {:.0}%",
+        "Confidence".dimmed(),
+        detection.result.confidence * 100.0
+    );
+
+    // Show build command
+    if let Some(build_cmd) = &detection.result.details.build_command {
+        println!("    {:<12} {}", "Build".dimmed(), build_cmd.dimmed());
+    }
+
+    // Show notes/warnings
+    for note in &detection.result.details.notes {
+        println!("\n    {} {}", "⚠".bright_yellow(), note.bright_yellow());
+    }
+
+    // Show preview of files to create
+    println!("\n  {}:", "Files to create".dimmed());
+    println!("    manifest.json");
+    println!("    .mcpbignore");
+
+    // Confirmation prompt (unless --yes)
+    if !yes && std::io::stdin().is_terminal() {
+        let confirmed: bool = cliclack::confirm("Proceed with migration?")
+            .initial_value(true)
+            .interact()?;
+
+        if !confirmed {
+            println!("\n  {} Migration cancelled.", "✗".bright_red());
+            return Ok(());
+        }
+    }
+
+    // Generate scaffolding (manifest + mcpbignore only)
+    let scaffold = registry.generate(
+        detection.detector_name,
+        &target_dir,
+        &detection.result,
+        &options,
+    )?;
+
+    // Write manifest.json
+    let manifest_json = serde_json::to_string_pretty(&scaffold.manifest)?;
+    std::fs::write(&manifest_path, &manifest_json)?;
+
+    // Write .mcpbignore
+    let mcpbignore_path = target_dir.join(".mcpbignore");
+    std::fs::write(&mcpbignore_path, &scaffold.mcpbignore)?;
+
+    println!("\n  {} Created manifest.json", "✓".bright_green());
+    println!("  {} Created .mcpbignore", "✓".bright_green());
+
+    // Print next steps
+    print_migrate_next_steps(&detection, &target_dir, entry_display, display_path);
+
+    Ok(())
+}
+
+/// Print next steps after migration.
+fn print_migrate_next_steps(
+    detection: &crate::detect::DetectionMatch,
+    target_dir: &Path,
+    entry_display: Option<&String>,
+    display_path: Option<&str>,
+) {
+    println!("\n  {}:", "Next steps".bold());
+
+    let has_build = detection.result.details.build_command.is_some();
+    let entry_missing = entry_display
+        .map(|ep| !target_dir.join(ep).exists())
+        .unwrap_or(true);
+
+    let mut step = 1;
+
+    let display_path = display_path.unwrap_or(".");
+
+    if has_build && entry_missing {
+        println!(
+            "    {}. {}",
+            step,
+            format!("tool build {}", display_path).bright_white(),
+        );
+        step += 1;
+    }
+
+    println!(
+        "    {}. {}",
+        step,
+        format!("tool info {}", display_path).bright_white(),
+    );
+    step += 1;
+
+    println!(
+        "    {}. {}",
+        step,
+        format!("tool pack {}", display_path).bright_white(),
+    );
 }
 
 /// Validate package name format.
@@ -2399,7 +2633,7 @@ pub async fn detect_mcpb(
 
         println!(
             "\n  Run {} to generate files.",
-            format!("tool migrate{}", path_arg).bright_cyan()
+            format!("tool init{}", path_arg).bright_cyan()
         );
         return Ok(());
     }
