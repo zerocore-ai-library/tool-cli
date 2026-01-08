@@ -10,6 +10,13 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 //--------------------------------------------------------------------------------------------------
+// Constants
+//--------------------------------------------------------------------------------------------------
+
+/// Radical's MCPB namespace identifier for vendor extensions.
+pub const RADICAL_NAMESPACE: &str = "company.superrad.mcpb";
+
+//--------------------------------------------------------------------------------------------------
 // Types
 //--------------------------------------------------------------------------------------------------
 
@@ -290,6 +297,10 @@ impl McpbManifest {
     }
 
     /// Resolve the manifest with user/system config values.
+    ///
+    /// This method:
+    /// 1. Applies platform-specific overrides to mcp_config
+    /// 2. Evaluates template expressions (${__dirname}, ${user_config.*}, etc.)
     pub fn resolve(
         &self,
         user_config: &BTreeMap<String, String>,
@@ -302,6 +313,9 @@ impl McpbManifest {
             .unwrap_or_default();
 
         let mcp_config = if let Some(ref cfg) = self.server.mcp_config {
+            // Apply platform-specific overrides before template evaluation
+            let cfg = resolve_platform_overrides(cfg, self.meta.as_ref());
+
             ResolvedMcpConfig {
                 command: cfg
                     .command
@@ -408,6 +422,7 @@ impl McpbManifest {
                         url: None,
                         headers: BTreeMap::new(),
                         oauth_config: None,
+                        platform_overrides: BTreeMap::new(),
                     }),
                     None,
                     None,
@@ -436,6 +451,7 @@ impl McpbManifest {
                             url: None,
                             headers: BTreeMap::new(),
                             oauth_config: None,
+                            platform_overrides: BTreeMap::new(),
                         }),
                         None,
                         None,
@@ -488,6 +504,7 @@ impl McpbManifest {
                             ),
                             headers: BTreeMap::new(),
                             oauth_config: None,
+                            platform_overrides: BTreeMap::new(),
                         }),
                         None,
                         Some(sys_cfg),
@@ -546,6 +563,7 @@ impl McpbManifest {
                             ),
                             headers: BTreeMap::new(),
                             oauth_config: None,
+                            platform_overrides: BTreeMap::new(),
                         }),
                         None,
                         Some(sys_cfg),
@@ -631,6 +649,7 @@ impl McpbManifest {
                     url: None,
                     headers: BTreeMap::new(),
                     oauth_config: None,
+                    platform_overrides: BTreeMap::new(),
                 }),
                 None,
             ),
@@ -667,6 +686,7 @@ impl McpbManifest {
                         ),
                         headers: BTreeMap::new(),
                         oauth_config: None,
+                        platform_overrides: BTreeMap::new(),
                     }),
                     Some(sys_cfg),
                 )
@@ -739,6 +759,7 @@ impl McpbManifest {
                     url: None,
                     headers: BTreeMap::new(),
                     oauth_config: None,
+                    platform_overrides: BTreeMap::new(),
                 }),
                 None,
             ),
@@ -778,6 +799,7 @@ impl McpbManifest {
                         ),
                         headers: BTreeMap::new(),
                         oauth_config: None,
+                        platform_overrides: BTreeMap::new(),
                     }),
                     Some(sys_cfg),
                 )
@@ -883,6 +905,103 @@ pub fn detect_platform() -> McpbPlatform {
     } else {
         McpbPlatform::Linux
     }
+}
+
+/// Get the current platform as "{os}-{arch}" (e.g., "darwin-arm64", "linux-x86_64").
+pub fn get_current_platform() -> String {
+    format!("{}-{}", get_current_os(), get_current_arch())
+}
+
+/// Get the current OS in MCPB format (darwin, linux, win32).
+pub fn get_current_os() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win32",
+        os => os, // linux, etc. pass through
+    }
+}
+
+/// Get the current architecture in our format (arm64, x86_64).
+pub fn get_current_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        arch => arch, // x86_64 passes through
+    }
+}
+
+/// Resolve platform-specific overrides for mcp_config.
+///
+/// Resolution order:
+/// 1. `_meta.company.superrad.mcpb.mcp_config.platform_overrides["{os}-{arch}"]` (exact match)
+/// 2. `server.mcp_config.platform_overrides["{os}"]` (os-only fallback)
+/// 3. Base `mcp_config` (no override)
+///
+/// Returns a new McpbMcpConfig with overrides applied.
+pub fn resolve_platform_overrides(
+    base_config: &McpbMcpConfig,
+    meta: Option<&serde_json::Value>,
+) -> McpbMcpConfig {
+    let os = get_current_os();
+    let platform = get_current_platform();
+
+    // Try Radical namespace first (os-arch specific)
+    if let Some(override_config) = meta
+        .and_then(|m| m.get(RADICAL_NAMESPACE))
+        .and_then(|r| r.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|p| p.get(&platform))
+        && let Ok(platform_override) =
+            serde_json::from_value::<McpbPlatformOverride>(override_config.clone())
+    {
+        return apply_platform_override(base_config, &platform_override);
+    }
+
+    // Fall back to spec-level os-only overrides
+    if let Some(platform_override) = base_config.platform_overrides.get(os) {
+        return apply_platform_override(base_config, platform_override);
+    }
+
+    // No override found, return base config
+    base_config.clone()
+}
+
+/// Apply a platform override to a base mcp_config.
+fn apply_platform_override(
+    base: &McpbMcpConfig,
+    override_config: &McpbPlatformOverride,
+) -> McpbMcpConfig {
+    let mut result = base.clone();
+
+    // Override command if specified
+    if let Some(ref command) = override_config.command {
+        result.command = Some(command.clone());
+    }
+
+    // Override args if specified (replace, not merge)
+    if let Some(ref args) = override_config.args {
+        result.args = args.clone();
+    }
+
+    // Merge env (override values take precedence)
+    if let Some(ref env) = override_config.env {
+        for (k, v) in env {
+            result.env.insert(k.clone(), v.clone());
+        }
+    }
+
+    // Override url if specified
+    if let Some(ref url) = override_config.url {
+        result.url = Some(url.clone());
+    }
+
+    // Merge headers (override values take precedence)
+    if let Some(ref headers) = override_config.headers {
+        for (k, v) in headers {
+            result.headers.insert(k.clone(), v.clone());
+        }
+    }
+
+    result
 }
 
 /// Author information.
@@ -1075,6 +1194,32 @@ impl std::fmt::Display for PackageManager {
     }
 }
 
+/// Platform-specific override for mcp_config fields.
+///
+/// Used in `platform_overrides` to specify different values for different OS/arch combinations.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct McpbPlatformOverride {
+    /// Override command to execute.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+
+    /// Override command arguments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
+
+    /// Override environment variables (merged with base).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<BTreeMap<String, String>>,
+
+    /// Override HTTP endpoint URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+
+    /// Override HTTP headers (merged with base).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<BTreeMap<String, String>>,
+}
+
 /// MCP execution configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpbMcpConfig {
@@ -1101,6 +1246,12 @@ pub struct McpbMcpConfig {
     /// OAuth configuration for HTTP servers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_config: Option<OAuthConfig>,
+
+    /// Platform-specific overrides keyed by OS (darwin, linux, win32).
+    ///
+    /// Per MCPB spec, these override base mcp_config fields for specific platforms.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub platform_overrides: BTreeMap<String, McpbPlatformOverride>,
 }
 
 /// OAuth configuration for HTTP MCP servers.
