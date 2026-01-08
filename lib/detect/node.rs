@@ -354,6 +354,7 @@ impl ProjectDetector for NodeDetector {
                 url: None,
                 headers: BTreeMap::new(),
                 oauth_config: None,
+                platform_overrides: BTreeMap::new(),
             },
             McpbTransport::Http => McpbMcpConfig {
                 command: Some("node".to_string()),
@@ -366,6 +367,7 @@ impl ProjectDetector for NodeDetector {
                 url: Some("http://${system_config.hostname}:${system_config.port}/mcp".to_string()),
                 headers: BTreeMap::new(),
                 oauth_config: None,
+                platform_overrides: BTreeMap::new(),
             },
         };
 

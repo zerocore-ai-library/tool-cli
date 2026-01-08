@@ -1,7 +1,7 @@
 //! Tool manifest validation for MCPB format.
 
 use crate::constants::MCPB_MANIFEST_FILE;
-use crate::mcpb::{McpbManifest, McpbServerType};
+use crate::mcpb::{McpbManifest, McpbPlatformOverride, McpbServerType, RADICAL_NAMESPACE};
 use crate::vars::extract_user_config_vars;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -147,6 +147,22 @@ pub enum WarningCode {
     /// W012: Top-level tool missing from static_responses.
     #[serde(rename = "W012")]
     TopLevelToolMissingSchema,
+
+    /// W013: Invalid platform key format in platform_overrides.
+    #[serde(rename = "W013")]
+    InvalidPlatformKey,
+
+    /// W014: Radical namespace platforms don't cover spec-level platforms.
+    #[serde(rename = "W014")]
+    PlatformAlignmentMismatch,
+
+    /// W015: Binary path in platform_overrides doesn't exist.
+    #[serde(rename = "W015")]
+    BinaryOverridePathNotFound,
+
+    /// W016: compatibility.platforms doesn't match platform_overrides keys.
+    #[serde(rename = "W016")]
+    CompatibilityPlatformMismatch,
 }
 
 /// A validation code that can be either an error or warning.
@@ -234,6 +250,10 @@ impl fmt::Display for WarningCode {
             WarningCode::ReferencedFieldNoDefault => "W010",
             WarningCode::StaticToolNotInTopLevel => "W011",
             WarningCode::TopLevelToolMissingSchema => "W012",
+            WarningCode::InvalidPlatformKey => "W013",
+            WarningCode::PlatformAlignmentMismatch => "W014",
+            WarningCode::BinaryOverridePathNotFound => "W015",
+            WarningCode::CompatibilityPlatformMismatch => "W016",
         };
         write!(f, "{}", code)
     }
@@ -363,6 +383,18 @@ pub fn validate_manifest(dir: &Path) -> ValidationResult {
     // 11. Validate all standard-defined fields for extra fields
     validate_standard_fields(&raw_json, &mut result);
 
+    // 12. Validate platform override keys
+    validate_platform_override_keys(&manifest, &mut result);
+
+    // 13. Validate platform override alignment (Radical namespace covers spec-level)
+    validate_platform_alignment(&raw_json, &mut result);
+
+    // 14. Validate binary paths in platform_overrides exist
+    validate_binary_override_paths(dir, &manifest, &raw_json, &mut result);
+
+    // 15. Validate compatibility.platforms matches platform_overrides
+    validate_compatibility_platforms(&raw_json, &mut result);
+
     result
 }
 
@@ -400,7 +432,11 @@ fn validate_required_fields(manifest: &McpbManifest, result: &mut ValidationResu
     }
 
     // Server required fields (required for all server types per MCPB spec)
-    if manifest.server.entry_point.is_none() {
+    // Reference mode = no entry_point AND no type (HTTP reference to external server)
+    let is_reference_mode =
+        manifest.server.entry_point.is_none() && manifest.server.server_type.is_none();
+
+    if manifest.server.entry_point.is_none() && !is_reference_mode {
         result.errors.push(ValidationIssue {
             code: ErrorCode::MissingEntryPoint.into(),
             message: "missing entry point".into(),
@@ -1197,6 +1233,323 @@ fn schema_type_name(value: &serde_json::Value) -> &'static str {
         serde_json::Value::String(_) => "string",
         serde_json::Value::Array(_) => "array",
         serde_json::Value::Object(_) => "object",
+    }
+}
+
+/// Valid OS values for platform keys.
+const VALID_OS_VALUES: &[&str] = &["darwin", "linux", "win32"];
+
+/// Valid architecture values for platform keys.
+const VALID_ARCH_VALUES: &[&str] = &["arm64", "x86_64"];
+
+/// Validate platform override keys in mcp_config and Radical namespace.
+fn validate_platform_override_keys(manifest: &McpbManifest, result: &mut ValidationResult) {
+    // Validate spec-level platform_overrides
+    if let Some(mcp_config) = &manifest.server.mcp_config {
+        for key in mcp_config.platform_overrides.keys() {
+            validate_platform_key(key, "server.mcp_config.platform_overrides", result);
+        }
+    }
+
+    // Validate Radical namespace platform_overrides
+    if let Some(overrides) = manifest
+        .meta
+        .as_ref()
+        .and_then(|m| m.get(RADICAL_NAMESPACE))
+        .and_then(|r| r.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|p| p.as_object())
+    {
+        for key in overrides.keys() {
+            // Check if it deserializes as a valid McpbPlatformOverride
+            if let Some(value) = overrides.get(key)
+                && serde_json::from_value::<McpbPlatformOverride>(value.clone()).is_ok()
+            {
+                validate_platform_key(
+                    key,
+                    &format!(
+                        "_meta[\"{}\"].mcp_config.platform_overrides",
+                        RADICAL_NAMESPACE
+                    ),
+                    result,
+                );
+            }
+        }
+    }
+}
+
+/// Validate a single platform key.
+fn validate_platform_key(key: &str, location: &str, result: &mut ValidationResult) {
+    // Check for OS-only format (spec level)
+    if VALID_OS_VALUES.contains(&key) {
+        return;
+    }
+
+    // Check for OS-arch format (Radical extension)
+    if let Some((os, arch)) = key.split_once('-') {
+        if !VALID_OS_VALUES.contains(&os) {
+            result.warnings.push(ValidationIssue {
+                code: WarningCode::InvalidPlatformKey.into(),
+                message: "invalid platform OS".into(),
+                location: format!("manifest.json:{}.{}", location, key),
+                details: format!(
+                    "`{}` has invalid OS `{}`, expected one of: {}",
+                    key,
+                    os,
+                    VALID_OS_VALUES.join(", ")
+                ),
+                help: Some("use darwin, linux, or win32".into()),
+            });
+        }
+        if !VALID_ARCH_VALUES.contains(&arch) {
+            result.warnings.push(ValidationIssue {
+                code: WarningCode::InvalidPlatformKey.into(),
+                message: "invalid platform architecture".into(),
+                location: format!("manifest.json:{}.{}", location, key),
+                details: format!(
+                    "`{}` has invalid arch `{}`, expected one of: {}",
+                    key,
+                    arch,
+                    VALID_ARCH_VALUES.join(", ")
+                ),
+                help: Some("use arm64 or x86_64".into()),
+            });
+        }
+    } else {
+        // Neither OS-only nor OS-arch format
+        result.warnings.push(ValidationIssue {
+            code: WarningCode::InvalidPlatformKey.into(),
+            message: "invalid platform key format".into(),
+            location: format!("manifest.json:{}.{}", location, key),
+            details: format!(
+                "`{}` is not a valid platform key, expected OS (darwin/linux/win32) or OS-arch (darwin-arm64)",
+                key
+            ),
+            help: Some("use format: darwin, linux, win32, darwin-arm64, linux-x86_64, etc.".into()),
+        });
+    }
+}
+
+/// Validate that Radical namespace platforms align with spec-level platforms.
+///
+/// For each spec-level OS (e.g., "darwin"), there should be at least one
+/// corresponding Radical namespace platform (e.g., "darwin-arm64" or "darwin-x86_64").
+fn validate_platform_alignment(raw_json: &serde_json::Value, result: &mut ValidationResult) {
+    // Get spec-level platform keys
+    let spec_platforms: HashSet<String> = raw_json
+        .get("server")
+        .and_then(|s| s.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|p| p.as_object())
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+
+    // Get Radical namespace platform keys
+    let radical_platforms: HashSet<String> = raw_json
+        .get("_meta")
+        .and_then(|m| m.get("company.superrad.mcpb"))
+        .and_then(|r| r.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|p| p.as_object())
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+
+    // Skip if either is empty
+    if spec_platforms.is_empty() || radical_platforms.is_empty() {
+        return;
+    }
+
+    // Check each spec-level OS has at least one Radical namespace platform
+    for spec_os in &spec_platforms {
+        if !VALID_OS_VALUES.contains(&spec_os.as_str()) {
+            continue; // Skip invalid keys, they're warned about elsewhere
+        }
+
+        let has_coverage = radical_platforms
+            .iter()
+            .any(|p| p.starts_with(&format!("{}-", spec_os)));
+
+        if !has_coverage {
+            result.warnings.push(ValidationIssue {
+                code: WarningCode::PlatformAlignmentMismatch.into(),
+                message: "missing Radical namespace coverage".into(),
+                location:
+                    "manifest.json:_meta[\"company.superrad.mcpb\"].mcp_config.platform_overrides"
+                        .to_string(),
+                details: format!(
+                    "spec-level platform `{}` has no corresponding Radical namespace overrides",
+                    spec_os
+                ),
+                help: Some(format!(
+                    "add `{}-arm64` and/or `{}-x86_64` to Radical namespace platform_overrides",
+                    spec_os, spec_os
+                )),
+            });
+        }
+    }
+}
+
+/// Validate that binary paths in platform_overrides exist (for binary server type).
+fn validate_binary_override_paths(
+    dir: &Path,
+    manifest: &McpbManifest,
+    raw_json: &serde_json::Value,
+    result: &mut ValidationResult,
+) {
+    // Only validate for binary server type
+    if manifest.server.server_type != Some(McpbServerType::Binary) {
+        return;
+    }
+
+    // Check spec-level platform_overrides
+    if let Some(overrides) = raw_json
+        .get("server")
+        .and_then(|s| s.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|p| p.as_object())
+    {
+        for (platform, override_val) in overrides {
+            if let Some(command) = override_val.get("command").and_then(|c| c.as_str()) {
+                validate_binary_path(
+                    dir,
+                    command,
+                    &format!(
+                        "manifest.json:server.mcp_config.platform_overrides[\"{}\"].command",
+                        platform
+                    ),
+                    result,
+                );
+            }
+        }
+    }
+
+    // Check Radical namespace platform_overrides
+    if let Some(overrides) = raw_json
+        .get("_meta")
+        .and_then(|m| m.get("company.superrad.mcpb"))
+        .and_then(|r| r.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|p| p.as_object())
+    {
+        for (platform, override_val) in overrides {
+            if let Some(command) = override_val.get("command").and_then(|c| c.as_str()) {
+                validate_binary_path(
+                    dir,
+                    command,
+                    &format!(
+                        "manifest.json:_meta[\"company.superrad.mcpb\"].mcp_config.platform_overrides[\"{}\"].command",
+                        platform
+                    ),
+                    result,
+                );
+            }
+        }
+    }
+}
+
+/// Validate a binary path exists (stripping ${__dirname} prefix).
+fn validate_binary_path(dir: &Path, command: &str, location: &str, result: &mut ValidationResult) {
+    // Strip ${__dirname}/ or ${__dirname}\ prefix
+    let path = command
+        .strip_prefix("${__dirname}/")
+        .or_else(|| command.strip_prefix("${__dirname}\\"))
+        .unwrap_or(command);
+
+    // Skip if it's a system command (no path separators and no ${__dirname})
+    if !path.contains('/') && !path.contains('\\') && !command.contains("${__dirname}") {
+        return;
+    }
+
+    let full_path = dir.join(path);
+    if !full_path.exists() {
+        result.warnings.push(ValidationIssue {
+            code: WarningCode::BinaryOverridePathNotFound.into(),
+            message: "binary path not found".into(),
+            location: location.to_string(),
+            details: format!("binary `{}` does not exist", path),
+            help: Some("ensure the binary is built before packing".into()),
+        });
+    }
+}
+
+/// Validate consistency between compatibility.platforms and platform_overrides keys.
+fn validate_compatibility_platforms(raw_json: &serde_json::Value, result: &mut ValidationResult) {
+    // Check spec-level compatibility.platforms vs platform_overrides
+    let spec_compat: HashSet<String> = raw_json
+        .get("compatibility")
+        .and_then(|c| c.get("platforms"))
+        .and_then(|p| p.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let spec_overrides: HashSet<String> = raw_json
+        .get("server")
+        .and_then(|s| s.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|p| p.as_object())
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+
+    // Warn if compatibility lists platforms not in overrides
+    if !spec_compat.is_empty() && !spec_overrides.is_empty() {
+        for platform in &spec_compat {
+            if !spec_overrides.contains(platform) {
+                result.warnings.push(ValidationIssue {
+                    code: WarningCode::CompatibilityPlatformMismatch.into(),
+                    message: "compatibility platform missing override".into(),
+                    location: "manifest.json:compatibility.platforms".into(),
+                    details: format!(
+                        "`{}` listed in compatibility.platforms but not in platform_overrides",
+                        platform
+                    ),
+                    help: Some("add a platform_override for this platform or remove from compatibility.platforms".into()),
+                });
+            }
+        }
+    }
+
+    // Check Radical namespace compatibility.platforms vs platform_overrides
+    let radical_compat: HashSet<String> = raw_json
+        .get("_meta")
+        .and_then(|m| m.get("company.superrad.mcpb"))
+        .and_then(|r| r.get("compatibility"))
+        .and_then(|c| c.get("platforms"))
+        .and_then(|p| p.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let radical_overrides: HashSet<String> = raw_json
+        .get("_meta")
+        .and_then(|m| m.get("company.superrad.mcpb"))
+        .and_then(|r| r.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|p| p.as_object())
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+
+    if !radical_compat.is_empty() && !radical_overrides.is_empty() {
+        for platform in &radical_compat {
+            if !radical_overrides.contains(platform) {
+                result.warnings.push(ValidationIssue {
+                    code: WarningCode::CompatibilityPlatformMismatch.into(),
+                    message: "Radical compatibility platform missing override".into(),
+                    location: "manifest.json:_meta[\"company.superrad.mcpb\"].compatibility.platforms".into(),
+                    details: format!(
+                        "`{}` listed in Radical compatibility.platforms but not in platform_overrides",
+                        platform
+                    ),
+                    help: Some("add a platform_override for this platform or remove from compatibility.platforms".into()),
+                });
+            }
+        }
     }
 }
 
