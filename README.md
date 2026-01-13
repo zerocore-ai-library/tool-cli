@@ -79,11 +79,11 @@ Running tool init on an existing MCP project shows the detected configuration an
 
 Define scripts in your manifest:
 
-```json
+```jsonc
 {
   // ...
   "_meta": {
-    "company.superrad.mcpb": {
+    "store.tool.mcpb": {
       "scripts": {
         "build": "npm run build",
         "test": "npm test",
@@ -174,7 +174,7 @@ Authenticate once with tool.store, then publish. Your tool becomes discoverable 
 
 Everything about your tool lives in `manifest.json`. Minimal example:
 
-```json
+```jsonc
 {
   "manifest_version": "0.3",
   "name": "weather-tool",
@@ -212,7 +212,7 @@ Everything about your tool lives in `manifest.json`. Minimal example:
 | `stdio` | Runs as child process, communicates over stdin/stdout |
 | `http` | Runs as service, communicates over HTTP |
 
-The `http` transport is a Radical extension to MCPB. It enables remote MCP servers, tools that live on the network rather than the local machine.
+The `http` transport is a tool.store extension to MCPB. It enables remote MCP servers, tools that live on the network rather than the local machine.
 
 ### User Configuration
 
@@ -256,7 +256,7 @@ Variables become available in your server config:
 
 Not all tools need bundled code. Some point to existing commands or remote servers:
 
-```json
+```jsonc
 {
   // ...
   "server": {
