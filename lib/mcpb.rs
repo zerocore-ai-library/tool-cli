@@ -13,8 +13,8 @@ use std::str::FromStr;
 // Constants
 //--------------------------------------------------------------------------------------------------
 
-/// Radical's MCPB namespace identifier for vendor extensions.
-pub const RADICAL_NAMESPACE: &str = "company.superrad.mcpb";
+/// tool.store's MCPB namespace identifier for vendor extensions.
+pub const TOOL_STORE_NAMESPACE: &str = "store.tool.mcpb";
 
 //--------------------------------------------------------------------------------------------------
 // Types
@@ -282,7 +282,7 @@ impl McpbManifest {
     pub fn static_responses(&self) -> Option<StaticResponses> {
         self.meta
             .as_ref()?
-            .get("company.superrad.mcpb")?
+            .get("store.tool.mcpb")?
             .get("static_responses")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
@@ -291,7 +291,7 @@ impl McpbManifest {
     pub fn scripts(&self) -> Option<Scripts> {
         self.meta
             .as_ref()?
-            .get("company.superrad.mcpb")?
+            .get("store.tool.mcpb")?
             .get("scripts")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
@@ -427,7 +427,7 @@ impl McpbManifest {
                     None,
                     None,
                     Some(serde_json::json!({
-                        "company.superrad.mcpb": {
+                        "store.tool.mcpb": {
                             "scripts": {
                                 "build": build_cmd
                             }
@@ -456,7 +456,7 @@ impl McpbManifest {
                         None,
                         None,
                         Some(serde_json::json!({
-                            "company.superrad.mcpb": {
+                            "store.tool.mcpb": {
                                 "scripts": {
                                     "build": build_cmd
                                 }
@@ -509,7 +509,7 @@ impl McpbManifest {
                         None,
                         Some(sys_cfg),
                         Some(serde_json::json!({
-                            "company.superrad.mcpb": {
+                            "store.tool.mcpb": {
                                 "scripts": {
                                     "build": build_cmd
                                 }
@@ -568,7 +568,7 @@ impl McpbManifest {
                         None,
                         Some(sys_cfg),
                         Some(serde_json::json!({
-                            "company.superrad.mcpb": {
+                            "store.tool.mcpb": {
                                 "scripts": {
                                     "build": build_cmd
                                 }
@@ -842,7 +842,7 @@ impl McpbManifest {
             privacy_policies: None,
             localization: None,
             meta: Some(serde_json::json!({
-                "company.superrad.mcpb": {
+                "store.tool.mcpb": {
                     "scripts": {
                         "build": "cargo build --release"
                     }
@@ -932,7 +932,7 @@ pub fn get_current_arch() -> &'static str {
 /// Resolve platform-specific overrides for mcp_config.
 ///
 /// Resolution order:
-/// 1. `_meta.company.superrad.mcpb.mcp_config.platform_overrides["{os}-{arch}"]` (exact match)
+/// 1. `_meta.store.tool.mcpb.mcp_config.platform_overrides["{os}-{arch}"]` (exact match)
 /// 2. `server.mcp_config.platform_overrides["{os}"]` (os-only fallback)
 /// 3. Base `mcp_config` (no override)
 ///
@@ -944,9 +944,9 @@ pub fn resolve_platform_overrides(
     let os = get_current_os();
     let platform = get_current_platform();
 
-    // Try Radical namespace first (os-arch specific)
+    // Try tool.store namespace first (os-arch specific)
     if let Some(override_config) = meta
-        .and_then(|m| m.get(RADICAL_NAMESPACE))
+        .and_then(|m| m.get(TOOL_STORE_NAMESPACE))
         .and_then(|r| r.get("mcp_config"))
         .and_then(|c| c.get("platform_overrides"))
         .and_then(|p| p.get(&platform))

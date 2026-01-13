@@ -415,7 +415,7 @@ impl ProjectDetector for NodeDetector {
             privacy_policies: None,
             localization: None,
             meta: Some(serde_json::json!({
-                "company.superrad.mcpb": {
+                "store.tool.mcpb": {
                     "scripts": {
                         "build": build_cmd
                     }

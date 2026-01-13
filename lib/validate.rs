@@ -1,7 +1,7 @@
 //! Tool manifest validation for MCPB format.
 
 use crate::constants::MCPB_MANIFEST_FILE;
-use crate::mcpb::{McpbManifest, McpbPlatformOverride, McpbServerType, RADICAL_NAMESPACE};
+use crate::mcpb::{McpbManifest, McpbPlatformOverride, McpbServerType, TOOL_STORE_NAMESPACE};
 use crate::vars::extract_user_config_vars;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -152,7 +152,7 @@ pub enum WarningCode {
     #[serde(rename = "W013")]
     InvalidPlatformKey,
 
-    /// W014: Radical namespace platforms don't cover spec-level platforms.
+    /// W014: tool.store namespace platforms don't cover spec-level platforms.
     #[serde(rename = "W014")]
     PlatformAlignmentMismatch,
 
@@ -386,7 +386,7 @@ pub fn validate_manifest(dir: &Path) -> ValidationResult {
     // 12. Validate platform override keys
     validate_platform_override_keys(&manifest, &mut result);
 
-    // 13. Validate platform override alignment (Radical namespace covers spec-level)
+    // 13. Validate platform override alignment (tool.store namespace covers spec-level)
     validate_platform_alignment(&raw_json, &mut result);
 
     // 14. Validate binary paths in platform_overrides exist
@@ -825,24 +825,24 @@ const ALLOWED_AUTHOR_FIELDS: &[&str] = &["name", "email", "url"];
 /// Allowed fields in repository per MCPB spec.
 const ALLOWED_REPOSITORY_FIELDS: &[&str] = &["type", "url"];
 
-/// Allowed fields in server per MCPB spec + Radical extensions.
+/// Allowed fields in server per MCPB spec + tool.store extensions.
 const ALLOWED_SERVER_FIELDS: &[&str] = &[
     // MCPB standard
     "type",
     "entry_point",
     "mcp_config",
-    // Radical extension
+    // tool.store extension
     "transport",
 ];
 
-/// Allowed fields in mcp_config per MCPB spec + Radical extensions.
+/// Allowed fields in mcp_config per MCPB spec + tool.store extensions.
 const ALLOWED_MCP_CONFIG_FIELDS: &[&str] = &[
     // MCPB standard
     "command",
     "args",
     "env",
     "platform_overrides",
-    // Radical extensions
+    // tool.store extensions
     "url",
     "headers",
     "oauth_config",
@@ -1082,7 +1082,7 @@ fn validate_tools(
 
         for (i, tool) in tools_list.tools.iter().enumerate() {
             let location = format!(
-                "manifest.json:_meta[\"company.superrad.mcpb\"][\"static_responses\"][\"tools/list\"].tools[{}]",
+                "manifest.json:_meta[\"store.tool.mcpb\"][\"static_responses\"][\"tools/list\"].tools[{}]",
                 i
             );
 
@@ -1175,7 +1175,7 @@ fn validate_json_schema(
             code: ErrorCode::InvalidInputSchema.into(),
             message: format!("invalid {}", field_name),
             location: format!(
-                "manifest.json:_meta[\"company.superrad.mcpb\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}",
+                "manifest.json:_meta[\"store.tool.mcpb\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}",
                 tool_name, field_name
             ),
             details: format!(
@@ -1199,7 +1199,7 @@ fn validate_json_schema(
             code: ErrorCode::InvalidInputSchema.into(),
             message: format!("invalid {} properties", field_name),
             location: format!(
-                "manifest.json:_meta[\"company.superrad.mcpb\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}.properties",
+                "manifest.json:_meta[\"store.tool.mcpb\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}.properties",
                 tool_name, field_name
             ),
             details: "`properties` must be an object".into(),
@@ -1215,7 +1215,7 @@ fn validate_json_schema(
             code: ErrorCode::InvalidInputSchema.into(),
             message: format!("invalid {} required", field_name),
             location: format!(
-                "manifest.json:_meta[\"company.superrad.mcpb\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}.required",
+                "manifest.json:_meta[\"store.tool.mcpb\"][\"static_responses\"][\"tools/list\"].tools[name=\"{}\"].{}.required",
                 tool_name, field_name
             ),
             details: "`required` must be an array of property names".into(),
@@ -1242,7 +1242,7 @@ const VALID_OS_VALUES: &[&str] = &["darwin", "linux", "win32"];
 /// Valid architecture values for platform keys.
 const VALID_ARCH_VALUES: &[&str] = &["arm64", "x86_64"];
 
-/// Validate platform override keys in mcp_config and Radical namespace.
+/// Validate platform override keys in mcp_config and tool.store namespace.
 fn validate_platform_override_keys(manifest: &McpbManifest, result: &mut ValidationResult) {
     // Validate spec-level platform_overrides
     if let Some(mcp_config) = &manifest.server.mcp_config {
@@ -1251,11 +1251,11 @@ fn validate_platform_override_keys(manifest: &McpbManifest, result: &mut Validat
         }
     }
 
-    // Validate Radical namespace platform_overrides
+    // Validate tool.store namespace platform_overrides
     if let Some(overrides) = manifest
         .meta
         .as_ref()
-        .and_then(|m| m.get(RADICAL_NAMESPACE))
+        .and_then(|m| m.get(TOOL_STORE_NAMESPACE))
         .and_then(|r| r.get("mcp_config"))
         .and_then(|c| c.get("platform_overrides"))
         .and_then(|p| p.as_object())
@@ -1269,7 +1269,7 @@ fn validate_platform_override_keys(manifest: &McpbManifest, result: &mut Validat
                     key,
                     &format!(
                         "_meta[\"{}\"].mcp_config.platform_overrides",
-                        RADICAL_NAMESPACE
+                        TOOL_STORE_NAMESPACE
                     ),
                     result,
                 );
@@ -1285,7 +1285,7 @@ fn validate_platform_key(key: &str, location: &str, result: &mut ValidationResul
         return;
     }
 
-    // Check for OS-arch format (Radical extension)
+    // Check for OS-arch format (tool.store extension)
     if let Some((os, arch)) = key.split_once('-') {
         if !VALID_OS_VALUES.contains(&os) {
             result.warnings.push(ValidationIssue {
@@ -1330,10 +1330,10 @@ fn validate_platform_key(key: &str, location: &str, result: &mut ValidationResul
     }
 }
 
-/// Validate that Radical namespace platforms align with spec-level platforms.
+/// Validate that tool.store namespace platforms align with spec-level platforms.
 ///
 /// For each spec-level OS (e.g., "darwin"), there should be at least one
-/// corresponding Radical namespace platform (e.g., "darwin-arm64" or "darwin-x86_64").
+/// corresponding tool.store namespace platform (e.g., "darwin-arm64" or "darwin-x86_64").
 fn validate_platform_alignment(raw_json: &serde_json::Value, result: &mut ValidationResult) {
     // Get spec-level platform keys
     let spec_platforms: HashSet<String> = raw_json
@@ -1344,10 +1344,10 @@ fn validate_platform_alignment(raw_json: &serde_json::Value, result: &mut Valida
         .map(|o| o.keys().cloned().collect())
         .unwrap_or_default();
 
-    // Get Radical namespace platform keys
-    let radical_platforms: HashSet<String> = raw_json
+    // Get tool.store namespace platform keys
+    let tool_store_platforms: HashSet<String> = raw_json
         .get("_meta")
-        .and_then(|m| m.get("company.superrad.mcpb"))
+        .and_then(|m| m.get("store.tool.mcpb"))
         .and_then(|r| r.get("mcp_config"))
         .and_then(|c| c.get("platform_overrides"))
         .and_then(|p| p.as_object())
@@ -1355,33 +1355,32 @@ fn validate_platform_alignment(raw_json: &serde_json::Value, result: &mut Valida
         .unwrap_or_default();
 
     // Skip if either is empty
-    if spec_platforms.is_empty() || radical_platforms.is_empty() {
+    if spec_platforms.is_empty() || tool_store_platforms.is_empty() {
         return;
     }
 
-    // Check each spec-level OS has at least one Radical namespace platform
+    // Check each spec-level OS has at least one tool.store namespace platform
     for spec_os in &spec_platforms {
         if !VALID_OS_VALUES.contains(&spec_os.as_str()) {
             continue; // Skip invalid keys, they're warned about elsewhere
         }
 
-        let has_coverage = radical_platforms
+        let has_coverage = tool_store_platforms
             .iter()
             .any(|p| p.starts_with(&format!("{}-", spec_os)));
 
         if !has_coverage {
             result.warnings.push(ValidationIssue {
                 code: WarningCode::PlatformAlignmentMismatch.into(),
-                message: "missing Radical namespace coverage".into(),
-                location:
-                    "manifest.json:_meta[\"company.superrad.mcpb\"].mcp_config.platform_overrides"
-                        .to_string(),
+                message: "missing tool.store namespace coverage".into(),
+                location: "manifest.json:_meta[\"store.tool.mcpb\"].mcp_config.platform_overrides"
+                    .to_string(),
                 details: format!(
-                    "spec-level platform `{}` has no corresponding Radical namespace overrides",
+                    "spec-level platform `{}` has no corresponding tool.store namespace overrides",
                     spec_os
                 ),
                 help: Some(format!(
-                    "add `{}-arm64` and/or `{}-x86_64` to Radical namespace platform_overrides",
+                    "add `{}-arm64` and/or `{}-x86_64` to tool.store namespace platform_overrides",
                     spec_os, spec_os
                 )),
             });
@@ -1423,10 +1422,10 @@ fn validate_binary_override_paths(
         }
     }
 
-    // Check Radical namespace platform_overrides
+    // Check tool.store namespace platform_overrides
     if let Some(overrides) = raw_json
         .get("_meta")
-        .and_then(|m| m.get("company.superrad.mcpb"))
+        .and_then(|m| m.get("store.tool.mcpb"))
         .and_then(|r| r.get("mcp_config"))
         .and_then(|c| c.get("platform_overrides"))
         .and_then(|p| p.as_object())
@@ -1437,7 +1436,7 @@ fn validate_binary_override_paths(
                     dir,
                     command,
                     &format!(
-                        "manifest.json:_meta[\"company.superrad.mcpb\"].mcp_config.platform_overrides[\"{}\"].command",
+                        "manifest.json:_meta[\"store.tool.mcpb\"].mcp_config.platform_overrides[\"{}\"].command",
                         platform
                     ),
                     result,
@@ -1512,10 +1511,10 @@ fn validate_compatibility_platforms(raw_json: &serde_json::Value, result: &mut V
         }
     }
 
-    // Check Radical namespace compatibility.platforms vs platform_overrides
-    let radical_compat: HashSet<String> = raw_json
+    // Check tool.store namespace compatibility.platforms vs platform_overrides
+    let tool_store_compat: HashSet<String> = raw_json
         .get("_meta")
-        .and_then(|m| m.get("company.superrad.mcpb"))
+        .and_then(|m| m.get("store.tool.mcpb"))
         .and_then(|r| r.get("compatibility"))
         .and_then(|c| c.get("platforms"))
         .and_then(|p| p.as_array())
@@ -1526,24 +1525,24 @@ fn validate_compatibility_platforms(raw_json: &serde_json::Value, result: &mut V
         })
         .unwrap_or_default();
 
-    let radical_overrides: HashSet<String> = raw_json
+    let tool_store_overrides: HashSet<String> = raw_json
         .get("_meta")
-        .and_then(|m| m.get("company.superrad.mcpb"))
+        .and_then(|m| m.get("store.tool.mcpb"))
         .and_then(|r| r.get("mcp_config"))
         .and_then(|c| c.get("platform_overrides"))
         .and_then(|p| p.as_object())
         .map(|o| o.keys().cloned().collect())
         .unwrap_or_default();
 
-    if !radical_compat.is_empty() && !radical_overrides.is_empty() {
-        for platform in &radical_compat {
-            if !radical_overrides.contains(platform) {
+    if !tool_store_compat.is_empty() && !tool_store_overrides.is_empty() {
+        for platform in &tool_store_compat {
+            if !tool_store_overrides.contains(platform) {
                 result.warnings.push(ValidationIssue {
                     code: WarningCode::CompatibilityPlatformMismatch.into(),
-                    message: "Radical compatibility platform missing override".into(),
-                    location: "manifest.json:_meta[\"company.superrad.mcpb\"].compatibility.platforms".into(),
+                    message: "tool.store compatibility platform missing override".into(),
+                    location: "manifest.json:_meta[\"store.tool.mcpb\"].compatibility.platforms".into(),
                     details: format!(
-                        "`{}` listed in Radical compatibility.platforms but not in platform_overrides",
+                        "`{}` listed in tool.store compatibility.platforms but not in platform_overrides",
                         platform
                     ),
                     help: Some("add a platform_override for this platform or remove from compatibility.platforms".into()),

@@ -1024,7 +1024,7 @@ pub async fn pack_mcpb(
     Ok(())
 }
 
-/// Run a script from manifest.json `_meta.company.superrad.mcpb.scripts`
+/// Run a script from manifest.json `_meta.store.tool.mcpb.scripts`
 pub async fn run_script(
     script_name: &str,
     path: Option<String>,
@@ -1045,16 +1045,16 @@ pub async fn run_script(
     let manifest: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| ToolError::Generic(format!("Invalid JSON: {}", e)))?;
 
-    // Extract script from _meta.company.superrad.mcpb.scripts
+    // Extract script from _meta.store.tool.mcpb.scripts
     let script_cmd = manifest
         .get("_meta")
-        .and_then(|m| m.get("company.superrad.mcpb"))
+        .and_then(|m| m.get("store.tool.mcpb"))
         .and_then(|r| r.get("scripts"))
         .and_then(|s| s.get(script_name))
         .and_then(|v| v.as_str())
         .ok_or_else(|| {
             ToolError::Generic(format!(
-                "Script '{}' not found in manifest.json\nDefine it in _meta.company.superrad.mcpb.scripts\nUse `tool run --list` to see available scripts.",
+                "Script '{}' not found in manifest.json\nDefine it in _meta.store.tool.mcpb.scripts\nUse `tool run --list` to see available scripts.",
                 script_name
             ))
         })?;
@@ -1108,7 +1108,7 @@ pub async fn list_scripts(path: Option<String>) -> ToolResult<()> {
 
     let scripts = manifest
         .get("_meta")
-        .and_then(|m| m.get("company.superrad.mcpb"))
+        .and_then(|m| m.get("store.tool.mcpb"))
         .and_then(|r| r.get("scripts"))
         .and_then(|s| s.as_object());
 
@@ -1123,7 +1123,7 @@ pub async fn list_scripts(path: Option<String>) -> ToolResult<()> {
         }
         _ => {
             println!("  {}", "No scripts defined in manifest.json".yellow());
-            println!("  Add scripts to _meta.company.superrad.mcpb.scripts");
+            println!("  Add scripts to _meta.store.tool.mcpb.scripts");
         }
     }
 
@@ -1247,7 +1247,7 @@ pub async fn tool_info(
                     println!("    {}:", "If this tool requires building".dimmed());
                     println!("      Add a build script to manifest.json:\n");
                     println!("      {}", "\"_meta\": {".dimmed());
-                    println!("        {}", "\"company.superrad.mcpb\": {".dimmed());
+                    println!("        {}", "\"store.tool.mcpb\": {".dimmed());
                     println!(
                         "          {}",
                         "\"scripts\": { \"build\": \"...\" }".dimmed()
@@ -1720,7 +1720,7 @@ pub async fn tool_call(
                     println!("    {}:", "If this tool requires building".dimmed());
                     println!("      Add a build script to manifest.json:\n");
                     println!("      {}", "\"_meta\": {".dimmed());
-                    println!("        {}", "\"company.superrad.mcpb\": {".dimmed());
+                    println!("        {}", "\"store.tool.mcpb\": {".dimmed());
                     println!(
                         "          {}",
                         "\"scripts\": { \"build\": \"...\" }".dimmed()
