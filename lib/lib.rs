@@ -1,6 +1,7 @@
 //! `tool-cli` library.
 
 pub mod commands;
+pub mod concise;
 pub mod constants;
 pub mod detect;
 pub mod error;
@@ -26,6 +27,7 @@ pub mod vars;
 //--------------------------------------------------------------------------------------------------
 
 pub use commands::*;
+pub use concise::*;
 pub use constants::*;
 pub use detect::*;
 pub use error::*;

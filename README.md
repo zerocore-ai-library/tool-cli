@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/install.s
 
 ## QUICK START
 
-<h4>1&nbsp;&nbsp;—&nbsp;&nbsp;Create a New Tool</h4>
+<h4>1&nbsp;&nbsp;⏵&nbsp;&nbsp;Create a New Tool</h4>
 
 ```sh
 tool init
@@ -57,7 +57,7 @@ Interactive prompts walk you through creating an MCPB package. You get a working
 
 ##
 
-<h4>2&nbsp;&nbsp;—&nbsp;&nbsp;Or Detect an Existing MCP Server</h4>
+<h4>2&nbsp;&nbsp;⏵&nbsp;&nbsp;Or Detect an Existing MCP Server</h4>
 
 Most MCP servers already exist. They're sitting in repos, working fine, but not packaged for distribution.
 
@@ -65,22 +65,23 @@ Most MCP servers already exist. They're sitting in repos, working fine, but not 
 tool detect
 ```
 
-Run this in your project. It scans for patterns and shows what it found.
+Run this in your project. It scans for patterns and shows what kind of MCP server it detected (type, transport, entry point, package manager, and confidence score).
 
 ```sh
-tool detect --write
+tool init
 ```
 
-Add `--write` to generate `manifest.json` and `.mcpbignore`. Your MCP server is now an MCPB project.
+Running tool init on an existing MCP project shows the detected configuration and prompts you to confirm creating manifest.json and .mcpbignore. Your MCP server is now an MCPB project.
 
 ##
 
-<h4>3&nbsp;&nbsp;—&nbsp;&nbsp;Develop</h4>
+<h4>3&nbsp;&nbsp;⏵&nbsp;&nbsp;Develop</h4>
 
 Define scripts in your manifest:
 
 ```json
 {
+  // ...
   "_meta": {
     "company.superrad.mcpb": {
       "scripts": {
@@ -105,7 +106,7 @@ Same muscle memory as npm. Different manifest.
 
 ##
 
-<h4>4&nbsp;&nbsp;—&nbsp;&nbsp;Test</h4>
+<h4>4&nbsp;&nbsp;⏵&nbsp;&nbsp;Test</h4>
 
 Inspect what your server exposes:
 
@@ -133,7 +134,7 @@ Catches missing fields, type mismatches, invalid paths. Better to find these now
 
 ##
 
-<h4>5&nbsp;&nbsp;—&nbsp;&nbsp;Pack</h4>
+<h4>5&nbsp;&nbsp;⏵&nbsp;&nbsp;Pack</h4>
 
 ```sh
 tool pack
@@ -145,7 +146,7 @@ The packer validates your manifest first and respects `.mcpbignore` (same syntax
 
 ##
 
-<h4>6&nbsp;&nbsp;—&nbsp;&nbsp;Publish</h4>
+<h4>6&nbsp;&nbsp;⏵&nbsp;&nbsp;Publish</h4>
 
 ```sh
 tool login
@@ -217,8 +218,9 @@ The `http` transport is a Radical extension to MCPB. It enables remote MCP serve
 
 If your tool needs API keys or user-provided settings:
 
-```json
+```jsonc
 {
+  // ...
   "user_config": {
     "api_key": {
       "type": "string",
@@ -235,8 +237,9 @@ MCP hosts handle the UI. They prompt users during installation, validate inputs,
 
 Variables become available in your server config:
 
-```json
+```jsonc
 {
+  // ...
   "server": {
     "mcp_config": {
       "command": "node",
@@ -255,6 +258,7 @@ Not all tools need bundled code. Some point to existing commands or remote serve
 
 ```json
 {
+  // ...
   "server": {
     "transport": "http",
     "mcp_config": {

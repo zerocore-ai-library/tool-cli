@@ -199,8 +199,16 @@ pub async fn auth_logout() -> ToolResult<()> {
 }
 
 /// Show current authentication status.
-pub async fn auth_status() -> ToolResult<()> {
+pub async fn auth_status(concise: bool, no_header: bool) -> ToolResult<()> {
     let registry_url = get_registry_url();
+
+    // Helper to print concise output with optional header
+    let print_concise = |user: &str, registry: &str, status: &str| {
+        if !no_header {
+            println!("#user\tregistry\tstatus");
+        }
+        println!("{}\t{}\t{}", user, registry, status);
+    };
 
     // Check environment variable first
     if let Ok(token) = std::env::var(REGISTRY_TOKEN_ENV) {
@@ -211,6 +219,14 @@ pub async fn auth_status() -> ToolResult<()> {
 
         match client.validate_token().await {
             Ok(user_info) => {
+                if concise {
+                    print_concise(
+                        &format!("@{}", user_info.username),
+                        &registry_url,
+                        "authenticated",
+                    );
+                    return Ok(());
+                }
                 println!(
                     "  {} Authenticated via environment variable",
                     "✓".bright_green()
@@ -233,6 +249,10 @@ pub async fn auth_status() -> ToolResult<()> {
                 );
             }
             Err(_) => {
+                if concise {
+                    print_concise("-", &registry_url, "invalid");
+                    return Ok(());
+                }
                 println!("  {} Environment token is invalid", "✗".bright_red());
                 println!("    {}: {}", "Variable".dimmed(), REGISTRY_TOKEN_ENV);
             }
@@ -249,6 +269,14 @@ pub async fn auth_status() -> ToolResult<()> {
 
         match client.validate_token().await {
             Ok(_) => {
+                if concise {
+                    print_concise(
+                        &format!("@{}", creds.username),
+                        &creds.registry_url,
+                        "authenticated",
+                    );
+                    return Ok(());
+                }
                 println!("  {} Authenticated", "✓".bright_green());
                 println!("    {}: @{}", "User".dimmed(), creds.username.bright_cyan());
                 println!(
@@ -265,6 +293,14 @@ pub async fn auth_status() -> ToolResult<()> {
                 );
             }
             Err(_) => {
+                if concise {
+                    print_concise(
+                        &format!("@{}", creds.username),
+                        &creds.registry_url,
+                        "expired",
+                    );
+                    return Ok(());
+                }
                 println!(
                     "  {} Stored token is invalid or expired",
                     "✗".bright_yellow()
@@ -273,6 +309,10 @@ pub async fn auth_status() -> ToolResult<()> {
             }
         }
     } else {
+        if concise {
+            print_concise("-", &registry_url, "unauthenticated");
+            return Ok(());
+        }
         println!("  {} Not authenticated", "✗".bright_yellow());
         println!();
         println!(

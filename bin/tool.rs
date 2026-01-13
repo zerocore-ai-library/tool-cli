@@ -163,6 +163,8 @@ async fn run() -> ToolResult<()> {
                 config,
                 config_file,
                 verbose,
+                cli.concise,
+                cli.no_header,
             )
             .await
         }
@@ -174,19 +176,34 @@ async fn run() -> ToolResult<()> {
             config,
             config_file,
             verbose,
-        } => handlers::tool_call(tool, method, param, config, config_file, verbose).await,
+        } => {
+            handlers::tool_call(
+                tool,
+                method,
+                param,
+                config,
+                config_file,
+                verbose,
+                cli.concise,
+            )
+            .await
+        }
 
-        Command::List { filter, json } => handlers::list_tools(filter.as_deref(), json).await,
+        Command::List { filter, json } => {
+            handlers::list_tools(filter.as_deref(), json, cli.concise, cli.no_header).await
+        }
 
         Command::Download { name, output } => {
             handlers::download_tool(&name, output.as_deref()).await
         }
 
-        Command::Add { name } => handlers::add_tool(&name).await,
+        Command::Install { name } => handlers::add_tool(&name).await,
 
-        Command::Remove { name } => handlers::remove_tool(&name).await,
+        Command::Uninstall { name } => handlers::remove_tool(&name).await,
 
-        Command::Search { query } => handlers::search_tools(&query).await,
+        Command::Search { query } => {
+            handlers::search_tools(&query, cli.concise, cli.no_header).await
+        }
 
         Command::Publish { path, dry_run } => {
             handlers::publish_mcpb(path.as_deref().unwrap_or("."), dry_run).await
@@ -196,6 +213,31 @@ async fn run() -> ToolResult<()> {
 
         Command::Logout => handlers::auth_logout().await,
 
-        Command::Whoami => handlers::auth_status().await,
+        Command::Whoami => handlers::auth_status(cli.concise, cli.no_header).await,
+
+        Command::Grep {
+            pattern,
+            tool,
+            name_only,
+            description_only,
+            params_only,
+            ignore_case,
+            list_only,
+            json,
+        } => {
+            handlers::grep_tool(
+                &pattern,
+                tool,
+                name_only,
+                description_only,
+                params_only,
+                ignore_case,
+                list_only,
+                json,
+                cli.concise,
+                cli.no_header,
+            )
+            .await
+        }
     }
 }
