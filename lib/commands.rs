@@ -13,6 +13,14 @@ use std::ffi::OsString;
 #[command(name = "tool", author, styles=styles())]
 #[command(about = "Manage MCP tools and packages")]
 pub struct Cli {
+    /// Concise output for AI agents (minimal formatting, machine-parseable).
+    #[arg(short, long, global = true)]
+    pub concise: bool,
+
+    /// Suppress header line in concise mode (requires -c).
+    #[arg(short = 'H', long, global = true)]
+    pub no_header: bool,
+
     /// Subcommand to run.
     #[command(subcommand)]
     pub command: Command,
@@ -21,26 +29,7 @@ pub struct Cli {
 /// Available commands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Detect an existing MCP server project (dry-run preview).
-    Detect {
-        /// Path to project directory (defaults to current directory).
-        #[arg(default_value = ".")]
-        path: String,
-
-        /// Override detected entry point.
-        #[arg(short, long)]
-        entry: Option<String>,
-
-        /// Override detected transport (stdio or http).
-        #[arg(long)]
-        transport: Option<String>,
-
-        /// Override package name.
-        #[arg(short, long)]
-        name: Option<String>,
-    },
-
-    /// Initialize a new tool package.
+    /// Initialize a new MCPB package.
     Init {
         /// Directory path to initialize (defaults to current directory).
         path: Option<String>,
@@ -94,7 +83,163 @@ pub enum Command {
         force: bool,
     },
 
-    /// Validate a tool manifest.
+    /// Determine if an existing MCP server can be converted to a MCPB package.
+    Detect {
+        /// Path to project directory (defaults to current directory).
+        #[arg(default_value = ".")]
+        path: String,
+
+        /// Override detected entry point.
+        #[arg(short, long)]
+        entry: Option<String>,
+
+        /// Override detected transport (stdio or http).
+        #[arg(long)]
+        transport: Option<String>,
+
+        /// Override package name.
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
+    /// Search for tools in the registry.
+    Search {
+        /// Search query.
+        query: String,
+    },
+
+    /// Install a tool from the registry.
+    Install {
+        /// Tool reference (`namespace/name[@version]`).
+        name: String,
+    },
+
+    /// Uninstall an installed tool.
+    Uninstall {
+        /// Tool reference.
+        name: String,
+    },
+
+    /// List installed tools.
+    List {
+        /// Filter by name pattern.
+        filter: Option<String>,
+
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Search tool schemas by pattern.
+    Grep {
+        /// Regex pattern to search for.
+        pattern: String,
+
+        /// Tool reference or path (default: search all installed tools).
+        tool: Option<String>,
+
+        /// Search tool names only.
+        #[arg(short = 'n', long = "name")]
+        name_only: bool,
+
+        /// Search descriptions only.
+        #[arg(short = 'd', long = "description")]
+        description_only: bool,
+
+        /// Search parameter names only.
+        #[arg(short = 'p', long = "params")]
+        params_only: bool,
+
+        /// Case-insensitive search.
+        #[arg(short = 'i', long = "ignore-case")]
+        ignore_case: bool,
+
+        /// List matching tool names only (no details).
+        #[arg(short = 'l', long = "list")]
+        list_only: bool,
+
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Inspect a tool's capabilities.
+    Info {
+        /// Tool reference or path (default: current directory).
+        #[arg(default_value = ".")]
+        tool: String,
+
+        /// Show only tools.
+        #[arg(long)]
+        tools: bool,
+
+        /// Show only prompts.
+        #[arg(long)]
+        prompts: bool,
+
+        /// Show only resources.
+        #[arg(long)]
+        resources: bool,
+
+        /// Show all capabilities.
+        #[arg(short, long)]
+        all: bool,
+
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+
+        /// Configuration values (KEY=VALUE).
+        #[arg(short = 'C', long)]
+        config: Vec<String>,
+
+        /// Path to config file (JSON).
+        #[arg(long)]
+        config_file: Option<String>,
+
+        /// Show verbose output.
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Call a tool.
+    Call {
+        /// Tool reference or path (default: current directory).
+        #[arg(default_value = ".")]
+        tool: String,
+
+        /// Method name to call.
+        #[arg(short, long)]
+        method: String,
+
+        /// Method parameters (KEY=VALUE or KEY=JSON).
+        #[arg(short, long)]
+        param: Vec<String>,
+
+        /// Configuration values (KEY=VALUE).
+        #[arg(short = 'C', long)]
+        config: Vec<String>,
+
+        /// Path to config file (JSON).
+        #[arg(long)]
+        config_file: Option<String>,
+
+        /// Show verbose output.
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Download a tool from the registry.
+    Download {
+        /// Tool reference (`namespace/name[@version]`).
+        name: String,
+
+        /// Download to this directory (defaults to current directory).
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+
+    /// Validate an MCPB package.
     Validate {
         /// Path to tool directory (defaults to current directory).
         path: Option<String>,
@@ -151,114 +296,6 @@ pub enum Command {
         args: Vec<String>,
     },
 
-    /// Catch-all for dynamic script names (e.g., `tool build`, `tool test`).
-    #[command(external_subcommand)]
-    External(Vec<OsString>),
-
-    /// Inspect a tool's capabilities.
-    Info {
-        /// Tool reference or path (default: current directory).
-        #[arg(default_value = ".")]
-        tool: String,
-
-        /// Show only tools.
-        #[arg(long)]
-        tools: bool,
-
-        /// Show only prompts.
-        #[arg(long)]
-        prompts: bool,
-
-        /// Show only resources.
-        #[arg(long)]
-        resources: bool,
-
-        /// Show all capabilities.
-        #[arg(short, long)]
-        all: bool,
-
-        /// Output as JSON.
-        #[arg(long)]
-        json: bool,
-
-        /// Configuration values (KEY=VALUE).
-        #[arg(short, long)]
-        config: Vec<String>,
-
-        /// Path to config file (JSON).
-        #[arg(long)]
-        config_file: Option<String>,
-
-        /// Show verbose output.
-        #[arg(short, long)]
-        verbose: bool,
-    },
-
-    /// Call a tool method.
-    Call {
-        /// Tool reference or path (default: current directory).
-        #[arg(default_value = ".")]
-        tool: String,
-
-        /// Method name to call.
-        #[arg(short, long)]
-        method: String,
-
-        /// Method parameters (KEY=VALUE or KEY=JSON).
-        #[arg(short, long)]
-        param: Vec<String>,
-
-        /// Configuration values (KEY=VALUE).
-        #[arg(short, long)]
-        config: Vec<String>,
-
-        /// Path to config file (JSON).
-        #[arg(long)]
-        config_file: Option<String>,
-
-        /// Show verbose output.
-        #[arg(short, long)]
-        verbose: bool,
-    },
-
-    /// List installed tools.
-    List {
-        /// Filter by name pattern.
-        filter: Option<String>,
-
-        /// Output as JSON.
-        #[arg(long)]
-        json: bool,
-    },
-
-    /// Download a tool from the registry.
-    Download {
-        /// Tool reference (`namespace/name[@version]`).
-        name: String,
-
-        /// Download to this directory (defaults to current directory).
-        #[arg(short, long)]
-        output: Option<String>,
-    },
-
-    /// Add a tool from the registry.
-    Add {
-        /// Tool reference (`namespace/name[@version]`).
-        name: String,
-    },
-
-    /// Remove an installed tool.
-    Remove {
-        /// Tool reference.
-        name: String,
-    },
-
-    /// Search for tools in the registry.
-    Search {
-        /// Search query.
-        query: String,
-    },
-
     /// Publish a tool to the registry.
     Publish {
         /// Path to tool directory.
@@ -281,4 +318,8 @@ pub enum Command {
 
     /// Show authentication status.
     Whoami,
+
+    /// Catch-all for dynamic script names (e.g., `tool build`, `tool test`).
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
 }

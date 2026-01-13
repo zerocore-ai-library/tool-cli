@@ -1206,6 +1206,8 @@ pub async fn tool_info(
     config: Vec<String>,
     config_file: Option<String>,
     verbose: bool,
+    concise: bool,
+    no_header: bool,
 ) -> ToolResult<()> {
     // Parse user config from -c flags and config file
     let mut user_config = parse_user_config(&config, config_file.as_deref())?;
@@ -1281,7 +1283,95 @@ pub async fn tool_info(
         };
 
     if json_output {
-        output_tool_info_json(&capabilities, tool_type, &manifest_path)?;
+        output_tool_info_json(&capabilities, tool_type, &manifest_path, concise)?;
+        return Ok(());
+    }
+
+    // Extract toolset name from the tool reference
+    let toolset = tool.split('@').next().unwrap_or(&tool);
+
+    // Concise output (Header + TSV format)
+    if concise {
+        use crate::concise::quote;
+        // Determine what to show
+        let show_all_concise = show_all || (!show_tools && !show_prompts && !show_resources);
+
+        // Metadata header + data
+        if !no_header {
+            println!("#type\tlocation");
+        }
+        println!(
+            "{}\t{}",
+            tool_type,
+            quote(&manifest_path.display().to_string())
+        );
+
+        // Tools section
+        if (show_all_concise || show_tools) && !capabilities.tools.is_empty() {
+            if !no_header {
+                println!("#tool");
+            }
+            for tool_item in &capabilities.tools {
+                let params = format_schema_params_concise(&tool_item.input_schema, true);
+                let outputs = tool_item
+                    .output_schema
+                    .as_ref()
+                    .map(|s| format_schema_params_concise(s, false))
+                    .unwrap_or_default();
+
+                if outputs.is_empty() {
+                    println!("{}:{}({})", toolset, tool_item.name, params);
+                } else {
+                    println!(
+                        "{}:{}({}) -> {{{}}}",
+                        toolset, tool_item.name, params, outputs
+                    );
+                }
+            }
+        }
+
+        // Prompts section
+        if (show_all_concise || show_prompts) && !capabilities.prompts.is_empty() {
+            if !no_header {
+                println!("#prompt\targs");
+            }
+            for prompt in &capabilities.prompts {
+                let args = prompt
+                    .arguments
+                    .as_ref()
+                    .map(|args| {
+                        args.iter()
+                            .map(|a| {
+                                let marker = if a.required.unwrap_or(false) {
+                                    "*"
+                                } else {
+                                    "?"
+                                };
+                                format!("{}{}: string", a.name, marker)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                println!("{}:{}\t{}", toolset, prompt.name, quote(&args));
+            }
+        }
+
+        // Resources section
+        if (show_all_concise || show_resources) && !capabilities.resources.is_empty() {
+            if !no_header {
+                println!("#uri\tname\tmime");
+            }
+            for resource in &capabilities.resources {
+                println!(
+                    "{}\t{}\t{}",
+                    resource.uri,
+                    quote(&resource.name),
+                    resource.mime_type.as_deref().unwrap_or("-")
+                );
+            }
+        }
+
         return Ok(());
     }
 
@@ -1494,11 +1584,48 @@ pub async fn tool_info(
     Ok(())
 }
 
+/// Format schema properties as param list for concise output.
+fn format_schema_params_concise(
+    schema: &std::sync::Arc<serde_json::Map<String, serde_json::Value>>,
+    is_input: bool,
+) -> String {
+    let props = match schema.get("properties").and_then(|p| p.as_object()) {
+        Some(p) => p,
+        None => return String::new(),
+    };
+
+    let required: Vec<&str> = schema
+        .get("required")
+        .and_then(|r| r.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    let params: Vec<String> = props
+        .iter()
+        .map(|(name, prop)| {
+            let type_str = prop.get("type").and_then(|t| t.as_str()).unwrap_or("any");
+            let marker = if required.contains(&name.as_str()) {
+                "*"
+            } else {
+                "?"
+            };
+            if is_input {
+                format!("{}{}: {}", name, marker, type_str)
+            } else {
+                format!("{}: {}", name, type_str)
+            }
+        })
+        .collect();
+
+    params.join(", ")
+}
+
 /// Output tool info as JSON.
 fn output_tool_info_json(
     capabilities: &crate::mcp::ToolCapabilities,
     tool_type: ToolType,
     manifest_path: &Path,
+    concise: bool,
 ) -> ToolResult<()> {
     let output = serde_json::json!({
         "server": {
@@ -1528,7 +1655,11 @@ fn output_tool_info_json(
             })
         }).collect::<Vec<_>>(),
     });
-    println!("{}", serde_json::to_string_pretty(&output)?);
+    if concise {
+        println!("{}", serde_json::to_string(&output)?);
+    } else {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
     Ok(())
 }
 
@@ -1540,6 +1671,7 @@ pub async fn tool_call(
     config: Vec<String>,
     config_file: Option<String>,
     verbose: bool,
+    concise: bool,
 ) -> ToolResult<()> {
     // Parse user config from -c flags and config file
     let mut user_config = parse_user_config(&config, config_file.as_deref())?;
@@ -1624,6 +1756,41 @@ pub async fn tool_call(
         };
 
     let is_error = result.result.is_error.unwrap_or(false);
+
+    // Concise output: just raw JSON
+    if concise {
+        for content in &result.result.content {
+            match &**content {
+                rmcp::model::RawContent::Text(text) => {
+                    // Try to parse and re-serialize as minified JSON
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text.text) {
+                        println!(
+                            "{}",
+                            serde_json::to_string(&json).unwrap_or(text.text.clone())
+                        );
+                    } else {
+                        println!("{}", text.text);
+                    }
+                }
+                rmcp::model::RawContent::Image(img) => {
+                    println!("{{\"type\":\"image\",\"bytes\":{}}}", img.data.len());
+                }
+                rmcp::model::RawContent::Audio(audio) => {
+                    println!("{{\"type\":\"audio\",\"bytes\":{}}}", audio.data.len());
+                }
+                rmcp::model::RawContent::Resource(res) => {
+                    println!("{{\"type\":\"resource\",\"resource\":{:?}}}", res.resource);
+                }
+                rmcp::model::RawContent::ResourceLink(link) => {
+                    println!("{{\"type\":\"resource_link\",\"uri\":\"{}\"}}", link.uri);
+                }
+            }
+        }
+        if is_error {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
 
     // Print header matching rad tool format
     if is_error {
@@ -1920,7 +2087,12 @@ async fn resolve_tool_path(tool: &str) -> ToolResult<PathBuf> {
 }
 
 /// List all installed tools.
-pub async fn list_tools(filter: Option<&str>, json_output: bool) -> ToolResult<()> {
+pub async fn list_tools(
+    filter: Option<&str>,
+    json_output: bool,
+    concise: bool,
+    no_header: bool,
+) -> ToolResult<()> {
     let resolver = FilePluginResolver::default();
     let tools = resolver.list_tools().await?;
 
@@ -1936,23 +2108,25 @@ pub async fn list_tools(filter: Option<&str>, json_output: bool) -> ToolResult<(
     };
 
     if filtered.is_empty() {
-        if let Some(pattern) = filter {
-            println!(
-                "  {} No tools found matching: {}",
-                "✗".bright_red(),
-                pattern.bright_white().bold()
-            );
-        } else {
-            println!("  {} No tools installed", "✗".bright_red());
-            println!("\n    {}", "Searched:".dimmed());
-            if let Ok(cwd) = std::env::current_dir() {
-                println!("      {}", cwd.join("tools").display().to_string().dimmed());
-            }
-            if let Some(home) = dirs::home_dir() {
+        if !concise {
+            if let Some(pattern) = filter {
                 println!(
-                    "      {}",
-                    home.join(".tool/tools").display().to_string().dimmed()
+                    "  {} No tools found matching: {}",
+                    "✗".bright_red(),
+                    pattern.bright_white().bold()
                 );
+            } else {
+                println!("  {} No tools installed", "✗".bright_red());
+                println!("\n    {}", "Searched:".dimmed());
+                if let Ok(cwd) = std::env::current_dir() {
+                    println!("      {}", cwd.join("tools").display().to_string().dimmed());
+                }
+                if let Some(home) = dirs::home_dir() {
+                    println!(
+                        "      {}",
+                        home.join(".tool/tools").display().to_string().dimmed()
+                    );
+                }
             }
         }
         return Ok(());
@@ -2005,10 +2179,34 @@ pub async fn list_tools(filter: Option<&str>, json_output: bool) -> ToolResult<(
                 })
             })
             .collect();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&output).expect("Failed to serialize JSON output")
-        );
+        if concise {
+            println!(
+                "{}",
+                serde_json::to_string(&output).expect("Failed to serialize JSON output")
+            );
+        } else {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output).expect("Failed to serialize JSON output")
+            );
+        }
+        return Ok(());
+    }
+
+    // Concise output: Header + TSV format
+    if concise {
+        use crate::concise::quote;
+        if !no_header {
+            println!("#name\ttype\tpath");
+        }
+        for entry in &tool_entries {
+            println!(
+                "{}\t{}\t{}",
+                entry.name,
+                entry.tool_type,
+                quote(&entry.path.display().to_string())
+            );
+        }
         return Ok(());
     }
 
@@ -2230,25 +2428,54 @@ pub async fn remove_tool(name: &str) -> ToolResult<()> {
 }
 
 /// Search for tools in the registry.
-pub async fn search_tools(query: &str) -> ToolResult<()> {
+pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolResult<()> {
     use crate::registry::RegistryClient;
 
     let client = RegistryClient::new();
 
-    println!(
-        "  {} Searching registry for tools matching: {}",
-        "→".bright_blue(),
-        query.bright_cyan()
-    );
+    if !concise {
+        println!(
+            "  {} Searching registry for tools matching: {}",
+            "→".bright_blue(),
+            query.bright_cyan()
+        );
+    }
 
     let results = client.search(query, Some(20)).await?;
 
     if results.is_empty() {
-        println!(
-            "  {} No tools found matching: {}",
-            "✗".bright_red(),
-            query.bright_white().bold()
-        );
+        if !concise {
+            println!(
+                "  {} No tools found matching: {}",
+                "✗".bright_red(),
+                query.bright_white().bold()
+            );
+        }
+        return Ok(());
+    }
+
+    // Concise output: Header + TSV format
+    if concise {
+        use crate::concise::quote;
+        if !no_header {
+            println!("#ref\tdescription\tdownloads");
+        }
+        for result in &results {
+            let version_str = result
+                .latest_version
+                .as_ref()
+                .map(|v| format!("@{}", v))
+                .unwrap_or_default();
+            let desc = result.description.as_deref().unwrap_or("");
+            println!(
+                "{}/{}{}\t{}\t{}",
+                result.namespace,
+                result.name,
+                version_str,
+                quote(desc),
+                result.total_downloads
+            );
+        }
         return Ok(());
     }
 
@@ -2483,6 +2710,403 @@ pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
     );
 
     Ok(())
+}
+
+/// Search tool schemas by pattern.
+#[allow(clippy::too_many_arguments)]
+pub async fn grep_tool(
+    pattern: &str,
+    tool: Option<String>,
+    name_only: bool,
+    description_only: bool,
+    params_only: bool,
+    ignore_case: bool,
+    list_only: bool,
+    json_output: bool,
+    concise: bool,
+    no_header: bool,
+) -> ToolResult<()> {
+    use regex::RegexBuilder;
+
+    // Build regex
+    let regex = RegexBuilder::new(pattern)
+        .case_insensitive(ignore_case)
+        .build()
+        .map_err(|e| ToolError::Generic(format!("Invalid regex pattern: {}", e)))?;
+
+    // Determine search scope - all search types if none specified
+    let search_all = !name_only && !description_only && !params_only;
+
+    // Collect matches and tool signatures (for -l mode)
+    let mut all_matches: Vec<GrepMatch> = Vec::new();
+    let mut tool_signatures: Vec<ToolSignatureInfo> = Vec::new();
+
+    // Get list of tools to search
+    let tools_to_search = match &tool {
+        Some(t) => {
+            // Single tool specified
+            let tool_path = resolve_tool_path(t).await?;
+            vec![(t.clone(), tool_path)]
+        }
+        None => {
+            // Search all installed tools
+            let resolver = FilePluginResolver::default();
+            let tool_refs = resolver.list_tools().await?;
+            let mut tools = Vec::new();
+            for plugin_ref in tool_refs {
+                let name = plugin_ref.to_string();
+                if let Ok(Some(resolved)) = resolver.resolve_tool(&name).await {
+                    let dir = resolved
+                        .path
+                        .parent()
+                        .unwrap_or(&resolved.path)
+                        .to_path_buf();
+                    tools.push((name, dir));
+                }
+            }
+            tools
+        }
+    };
+
+    if tools_to_search.is_empty() {
+        if !concise {
+            println!("  {} No tools installed", "✗".bright_red());
+        }
+        return Ok(());
+    }
+
+    // Search each tool
+    for (tool_ref, tool_path) in &tools_to_search {
+        // Get tool info
+        let user_config = BTreeMap::new();
+        let (capabilities, _tool_type, _manifest_path) =
+            match get_tool_info_from_path(tool_path, &user_config, false).await {
+                Ok(result) => result,
+                Err(_) => continue, // Skip tools that can't be connected
+            };
+
+        // Extract toolset name from tool_ref (e.g., "appcypher/filesystem" -> "appcypher/filesystem")
+        let toolset = tool_ref.split('@').next().unwrap_or(tool_ref);
+
+        // Search each tool in this toolset
+        for tool_info in &capabilities.tools {
+            let tool_name = &tool_info.name;
+
+            // Search tool name
+            if (search_all || name_only) && regex.is_match(tool_name) {
+                all_matches.push(GrepMatch {
+                    toolset: toolset.to_string(),
+                    tool_name: tool_name.to_string(),
+                    field_type: "name".to_string(),
+                    field_name: tool_name.to_string(),
+                    matched_text: tool_name.to_string(),
+                });
+            }
+
+            // Search description
+            if (search_all || description_only)
+                && let Some(desc) = &tool_info.description
+                && regex.is_match(desc)
+            {
+                all_matches.push(GrepMatch {
+                    toolset: toolset.to_string(),
+                    tool_name: tool_name.to_string(),
+                    field_type: "desc".to_string(),
+                    field_name: String::new(),
+                    matched_text: desc.to_string(),
+                });
+            }
+
+            // Search input parameters
+            if (search_all || params_only)
+                && let Some(props) = tool_info
+                    .input_schema
+                    .get("properties")
+                    .and_then(|p| p.as_object())
+            {
+                for (param_name, param_schema) in props {
+                    // Search param name
+                    if regex.is_match(param_name) {
+                        let desc = param_schema
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("");
+                        all_matches.push(GrepMatch {
+                            toolset: toolset.to_string(),
+                            tool_name: tool_name.to_string(),
+                            field_type: "in".to_string(),
+                            field_name: param_name.clone(),
+                            matched_text: desc.to_string(),
+                        });
+                    }
+                    // Also search param description
+                    if let Some(desc) = param_schema.get("description").and_then(|d| d.as_str())
+                        && regex.is_match(desc)
+                    {
+                        // Avoid duplicate if param name already matched
+                        let tool_name_str = tool_name.to_string();
+                        let already_matched = all_matches.iter().any(|m| {
+                            m.toolset == toolset
+                                && m.tool_name == tool_name_str
+                                && m.field_type == "in"
+                                && m.field_name == *param_name
+                        });
+                        if !already_matched {
+                            all_matches.push(GrepMatch {
+                                toolset: toolset.to_string(),
+                                tool_name: tool_name.to_string(),
+                                field_type: "in".to_string(),
+                                field_name: param_name.clone(),
+                                matched_text: desc.to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Search output schema parameters
+            if (search_all || params_only)
+                && let Some(output_schema) = &tool_info.output_schema
+                && let Some(props) = output_schema.get("properties").and_then(|p| p.as_object())
+            {
+                for (param_name, param_schema) in props {
+                    if regex.is_match(param_name) {
+                        let desc = param_schema
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("");
+                        all_matches.push(GrepMatch {
+                            toolset: toolset.to_string(),
+                            tool_name: tool_name.to_string(),
+                            field_type: "out".to_string(),
+                            field_name: param_name.clone(),
+                            matched_text: desc.to_string(),
+                        });
+                    }
+                }
+            }
+
+            // Store tool signature info for -l mode (if this tool has any matches)
+            let tool_key = format!("{}:{}", toolset, tool_name);
+            let has_match = all_matches
+                .iter()
+                .any(|m| m.toolset == toolset && m.tool_name == *tool_name);
+            if has_match
+                && !tool_signatures
+                    .iter()
+                    .any(|s| format!("{}:{}", s.toolset, s.tool_name) == tool_key)
+            {
+                tool_signatures.push(ToolSignatureInfo {
+                    toolset: toolset.to_string(),
+                    tool_name: tool_name.to_string(),
+                    input_schema: tool_info.input_schema.clone(),
+                    output_schema: tool_info.output_schema.clone(),
+                });
+            }
+        }
+    }
+
+    if all_matches.is_empty() {
+        if !concise {
+            println!(
+                "  {} No matches found for pattern: {}",
+                "✗".bright_red(),
+                pattern.bright_white().bold()
+            );
+        }
+        return Ok(());
+    }
+
+    // Output results
+    if json_output {
+        let output: Vec<_> = all_matches
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "toolset": m.toolset,
+                    "tool": m.tool_name,
+                    "type": m.field_type,
+                    "field": if m.field_name.is_empty() { None } else { Some(&m.field_name) },
+                    "text": m.matched_text,
+                })
+            })
+            .collect();
+        if concise {
+            println!(
+                "{}",
+                serde_json::to_string(&output).expect("Failed to serialize JSON")
+            );
+        } else {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output).expect("Failed to serialize JSON")
+            );
+        }
+        return Ok(());
+    }
+
+    // -l mode: show function signatures
+    if list_only {
+        if concise && !no_header {
+            println!("#tool");
+        }
+        for sig in &tool_signatures {
+            let params = format_schema_params_concise(&sig.input_schema, true);
+            let outputs = sig
+                .output_schema
+                .as_ref()
+                .map(|s| format_schema_params_concise(s, false))
+                .unwrap_or_default();
+
+            let signature = if outputs.is_empty() {
+                format!("{}:{}({})", sig.toolset, sig.tool_name, params)
+            } else {
+                format!(
+                    "{}:{}({}) -> {{{}}}",
+                    sig.toolset, sig.tool_name, params, outputs
+                )
+            };
+
+            if concise {
+                println!("{}", signature);
+            } else {
+                println!("{}", signature.bright_cyan());
+            }
+        }
+        return Ok(());
+    }
+
+    // Concise mode: grouped by toolset with TSV format
+    if concise {
+        use crate::concise::quote;
+        use std::collections::BTreeMap;
+
+        // Group matches by toolset
+        let mut by_toolset: BTreeMap<String, Vec<&GrepMatch>> = BTreeMap::new();
+        for m in &all_matches {
+            // Skip name matches - tool name is already visible, redundant
+            if m.field_type == "name" {
+                continue;
+            }
+            by_toolset.entry(m.toolset.clone()).or_default().push(m);
+        }
+
+        // Output each toolset group
+        for (toolset, matches) in &by_toolset {
+            if !no_header {
+                println!("#toolset\t{}", toolset);
+                println!("#tool\ttype\tfield\ttext");
+            }
+            for m in matches {
+                let field = if m.field_name.is_empty() {
+                    "-"
+                } else {
+                    &m.field_name
+                };
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    m.tool_name,
+                    m.field_type,
+                    field,
+                    quote(&m.matched_text)
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    // Normal output: Design B - grouped by tool with symbols
+    // Group matches by toolset, then by tool_name
+    let mut by_toolset: BTreeMap<String, BTreeMap<String, Vec<&GrepMatch>>> = BTreeMap::new();
+    for m in &all_matches {
+        by_toolset
+            .entry(m.toolset.clone())
+            .or_default()
+            .entry(m.tool_name.clone())
+            .or_default()
+            .push(m);
+    }
+
+    let match_count = all_matches.len();
+    let label = if match_count == 1 { "match" } else { "matches" };
+
+    // Print header with count per toolset
+    for (toolset, tools) in &by_toolset {
+        let toolset_matches: usize = tools.values().map(|v| v.len()).sum();
+        println!(
+            "{} {} in {}:\n",
+            toolset_matches.to_string().bold(),
+            label,
+            toolset.bright_blue()
+        );
+
+        for (tool_name, matches) in tools {
+            println!("  {}", tool_name.bright_white().bold());
+
+            for m in matches {
+                let (symbol, field_display) = match m.field_type.as_str() {
+                    "name" => continue, // Don't show name matches as separate lines
+                    "desc" => ("◆".bright_magenta(), None),
+                    "in" => ("→".bright_yellow(), Some(m.field_name.clone())),
+                    "out" => ("←".bright_green(), Some(m.field_name.clone())),
+                    _ => ("•".normal(), Some(m.field_name.clone())),
+                };
+
+                // Truncate long text
+                let display_text = if m.matched_text.len() > 60 {
+                    format!("{}...", &m.matched_text[..57])
+                } else {
+                    m.matched_text.clone()
+                };
+
+                if let Some(field) = field_display {
+                    println!(
+                        "    {} {}: {}",
+                        symbol,
+                        field.bright_white(),
+                        format!("\"{}\"", display_text).dimmed()
+                    );
+                } else {
+                    println!(
+                        "    {} {}",
+                        symbol,
+                        format!("\"{}\"", display_text).dimmed()
+                    );
+                }
+            }
+            println!();
+        }
+    }
+
+    // Print legend
+    println!(
+        "{} {}  {} {}  {} {}",
+        "◆".bright_magenta(),
+        "desc".dimmed(),
+        "→".bright_yellow(),
+        "input field".dimmed(),
+        "←".bright_green(),
+        "output field".dimmed()
+    );
+
+    Ok(())
+}
+
+/// A grep match result.
+struct GrepMatch {
+    toolset: String,
+    tool_name: String,
+    field_type: String, // "name", "desc", "in", "out"
+    field_name: String, // field name or empty for desc
+    matched_text: String,
+}
+
+/// Tool info for signature generation in -l mode.
+struct ToolSignatureInfo {
+    toolset: String,
+    tool_name: String,
+    input_schema: std::sync::Arc<serde_json::Map<String, serde_json::Value>>,
+    output_schema: Option<std::sync::Arc<serde_json::Map<String, serde_json::Value>>>,
 }
 
 /// Detect an existing MCP server project and generate MCPB scaffolding.
