@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 pub use node::NodeDetector;
 pub use python::PythonDetector;
 pub use rust::RustDetector;
-pub use utils::{GrepMatch, GrepOptions, grep_dir, has_any_pattern, has_pattern};
+pub use utils::{
+    GrepMatch, GrepOptions, grep_dir, has_any_pattern, has_pattern, parse_env_example,
+};
 
 //--------------------------------------------------------------------------------------------------
 // Types
@@ -24,12 +26,116 @@ pub use utils::{GrepMatch, GrepOptions, grep_dir, has_any_pattern, has_pattern};
 /// Result of project detection.
 #[derive(Debug, Clone)]
 pub struct DetectionResult {
-    /// Confidence score (0.0 - 1.0).
+    /// Confidence score (0.0 - 1.0), calculated from signals.
     pub confidence: f32,
     /// Detected project type.
     pub server_type: McpbServerType,
     /// Detection details.
     pub details: DetectionDetails,
+    /// Detection signals used to calculate confidence.
+    pub signals: DetectionSignals,
+}
+
+/// Signals used for deduction-based confidence calculation.
+/// Starts at 1.0 and deducts for each missing/uncertain piece.
+#[derive(Debug, Clone, Default)]
+pub struct DetectionSignals {
+    /// Entry point found in config (package.json bin/main, pyproject scripts, Cargo [[bin]]).
+    pub entry_point_from_config: bool,
+    /// Entry point file exists on disk.
+    pub entry_point_exists: bool,
+    /// MCP SDK detected in dependencies.
+    pub has_mcp_sdk: bool,
+    /// Package manager is certain (lock file exists).
+    pub package_manager_certain: bool,
+    /// Name found in config (vs inferred from directory).
+    pub name_from_config: bool,
+}
+
+impl DetectionSignals {
+    /// Calculate confidence score using deduction method.
+    /// Starts at 1.0 and deducts for each missing signal.
+    pub fn confidence(&self) -> f32 {
+        let mut score: f32 = 1.0;
+
+        // Critical: Entry point detection
+        if !self.entry_point_from_config {
+            score -= 0.30;
+        }
+        if !self.entry_point_exists {
+            score -= 0.20;
+        }
+
+        // Important: SDK and package manager
+        if !self.has_mcp_sdk {
+            score -= 0.10;
+        }
+        if !self.package_manager_certain {
+            score -= 0.10;
+        }
+
+        // Minor: Metadata quality
+        if !self.name_from_config {
+            score -= 0.05;
+        }
+
+        score.max(0.0)
+    }
+
+    /// Get warnings based on signals.
+    pub fn warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        if !self.has_mcp_sdk {
+            warnings.push("No MCP SDK detected. This may be a custom implementation.".into());
+        }
+        if !self.entry_point_exists {
+            warnings.push("Entry point file not found. Project may need to be built first.".into());
+        }
+
+        warnings
+    }
+}
+
+/// Environment variable configuration type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EnvConfigType {
+    /// User-provided config (API keys, credentials, etc.)
+    User,
+    /// System-managed config (PORT, HOST)
+    System,
+}
+
+/// Environment variable parsed from .env.example.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvVar {
+    /// Variable name (e.g., "API_KEY").
+    pub name: String,
+    /// Default value from .env.example (if any).
+    pub default: Option<String>,
+    /// Whether this is a sensitive value (KEY, SECRET, TOKEN, PASSWORD, etc.)
+    pub sensitive: bool,
+    /// Config type (user_config or system_config).
+    pub config_type: EnvConfigType,
+    /// Inferred MCPB config type (string, number, boolean, port, hostname).
+    pub value_type: EnvValueType,
+}
+
+/// Inferred value type for env var.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EnvValueType {
+    String,
+    Number,
+    Boolean,
+    Port,
+    Hostname,
+}
+
+impl EnvVar {
+    /// Convert env var name to manifest config key (lowercase, underscores).
+    pub fn config_key(&self) -> String {
+        self.name.to_lowercase()
+    }
 }
 
 /// Detailed detection information.
@@ -274,4 +380,127 @@ pub fn detect_and_generate(
     let scaffold = registry.generate(detection.detector_name, dir, &detection.result, options)?;
 
     Ok((detection, scaffold))
+}
+
+//--------------------------------------------------------------------------------------------------
+// Tests
+//--------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detection_signals_perfect_confidence() {
+        let signals = DetectionSignals {
+            entry_point_from_config: true,
+            entry_point_exists: true,
+            has_mcp_sdk: true,
+            package_manager_certain: true,
+            name_from_config: true,
+        };
+        assert_eq!(signals.confidence(), 1.0);
+    }
+
+    #[test]
+    fn test_detection_signals_no_entry_point_config() {
+        let signals = DetectionSignals {
+            entry_point_from_config: false,
+            entry_point_exists: true,
+            has_mcp_sdk: true,
+            package_manager_certain: true,
+            name_from_config: true,
+        };
+        // 1.0 - 0.30 = 0.70
+        assert!((signals.confidence() - 0.70).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_detection_signals_entry_point_not_exists() {
+        let signals = DetectionSignals {
+            entry_point_from_config: true,
+            entry_point_exists: false,
+            has_mcp_sdk: true,
+            package_manager_certain: true,
+            name_from_config: true,
+        };
+        // 1.0 - 0.20 = 0.80
+        assert!((signals.confidence() - 0.80).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_detection_signals_no_mcp_sdk() {
+        let signals = DetectionSignals {
+            entry_point_from_config: true,
+            entry_point_exists: true,
+            has_mcp_sdk: false,
+            package_manager_certain: true,
+            name_from_config: true,
+        };
+        // 1.0 - 0.10 = 0.90
+        assert!((signals.confidence() - 0.90).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_detection_signals_multiple_deductions() {
+        let signals = DetectionSignals {
+            entry_point_from_config: false, // -0.30
+            entry_point_exists: false,      // -0.20
+            has_mcp_sdk: false,             // -0.10
+            package_manager_certain: false, // -0.10
+            name_from_config: false,        // -0.05
+        };
+        // 1.0 - 0.30 - 0.20 - 0.10 - 0.10 - 0.05 = 0.25
+        assert!((signals.confidence() - 0.25).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_detection_signals_warnings() {
+        let signals = DetectionSignals {
+            entry_point_from_config: true,
+            entry_point_exists: false,
+            has_mcp_sdk: false,
+            package_manager_certain: true,
+            name_from_config: true,
+        };
+
+        let warnings = signals.warnings();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().any(|w| w.contains("MCP SDK")));
+        assert!(warnings.iter().any(|w| w.contains("Entry point")));
+    }
+
+    #[test]
+    fn test_detection_signals_no_warnings_when_all_good() {
+        let signals = DetectionSignals {
+            entry_point_from_config: true,
+            entry_point_exists: true,
+            has_mcp_sdk: true,
+            package_manager_certain: true,
+            name_from_config: true,
+        };
+
+        assert!(signals.warnings().is_empty());
+    }
+
+    #[test]
+    fn test_env_var_config_key() {
+        let var = EnvVar {
+            name: "API_KEY".to_string(),
+            default: None,
+            sensitive: true,
+            config_type: EnvConfigType::User,
+            value_type: EnvValueType::String,
+        };
+        assert_eq!(var.config_key(), "api_key");
+
+        let var2 = EnvVar {
+            name: "DATABASE_URL".to_string(),
+            default: Some("postgres://localhost/db".to_string()),
+            sensitive: true,
+            config_type: EnvConfigType::User,
+            value_type: EnvValueType::String,
+        };
+        assert_eq!(var2.config_key(), "database_url");
+    }
 }

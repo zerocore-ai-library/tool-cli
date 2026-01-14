@@ -2,8 +2,8 @@
 
 use super::utils::{GrepOptions, find_first_relative, grep_dir, has_any_pattern, read_toml};
 use super::{
-    DetectError, DetectOptions, DetectionDetails, DetectionResult, GeneratedScaffold,
-    ProjectDetector,
+    DetectError, DetectOptions, DetectionDetails, DetectionResult, DetectionSignals,
+    GeneratedScaffold, ProjectDetector,
 };
 use crate::mcpb::{
     McpbManifest, McpbMcpConfig, McpbServer, McpbServerType, McpbTransport, PackageManager,
@@ -58,13 +58,19 @@ impl PythonDetector {
     }
 
     /// Detect package manager from project files.
-    fn detect_package_manager(&self, dir: &Path) -> PythonPackageManager {
-        // Check for uv
+    /// Returns (package_manager, has_lock_file).
+    fn detect_package_manager(&self, dir: &Path) -> (PythonPackageManager, bool) {
+        // Check for uv.lock
         if dir.join("uv.lock").exists() {
-            return PythonPackageManager::Uv;
+            return (PythonPackageManager::Uv, true);
         }
 
-        // Check pyproject.toml for tool sections
+        // Check for poetry.lock
+        if dir.join("poetry.lock").exists() {
+            return (PythonPackageManager::Poetry, true);
+        }
+
+        // Check pyproject.toml for tool sections (no lock file = not certain)
         if let Some(pyproject) = read_toml::<PyProject>(&dir.join("pyproject.toml")) {
             if pyproject
                 .tool
@@ -72,7 +78,7 @@ impl PythonDetector {
                 .and_then(|t| t.uv.as_ref())
                 .is_some()
             {
-                return PythonPackageManager::Uv;
+                return (PythonPackageManager::Uv, false);
             }
             if pyproject
                 .tool
@@ -80,26 +86,21 @@ impl PythonDetector {
                 .and_then(|t| t.poetry.as_ref())
                 .is_some()
             {
-                return PythonPackageManager::Poetry;
+                return (PythonPackageManager::Poetry, false);
             }
-        }
-
-        // Check for poetry.lock
-        if dir.join("poetry.lock").exists() {
-            return PythonPackageManager::Poetry;
         }
 
         // Check if only requirements.txt exists
         if dir.join("requirements.txt").exists() && !dir.join("pyproject.toml").exists() {
-            return PythonPackageManager::Pip;
+            return (PythonPackageManager::Pip, false);
         }
 
         // Default to uv for modern projects with pyproject.toml
         if dir.join("pyproject.toml").exists() {
-            return PythonPackageManager::Uv;
+            return (PythonPackageManager::Uv, false);
         }
 
-        PythonPackageManager::Pip
+        (PythonPackageManager::Pip, false)
     }
 
     /// Find the file path for a Python module.
@@ -130,9 +131,13 @@ impl PythonDetector {
     }
 
     /// Detect entry point from project configuration and file structure.
-    /// Returns (entry_point_file, script_name) - script_name is the CLI command if available.
-    fn detect_entry_point(&self, dir: &Path) -> (Option<String>, Option<String>) {
-        // 1. Check pyproject.toml for scripts
+    /// Returns (entry_point_file, script_name, exists, from_config):
+    /// - entry_point_file: path to entry point
+    /// - script_name: CLI command if available
+    /// - exists: file exists on disk
+    /// - from_config: found in pyproject.toml scripts vs inferred
+    fn detect_entry_point(&self, dir: &Path) -> (Option<String>, Option<String>, bool, bool) {
+        // 1. Check pyproject.toml for scripts (from config)
         if let Some(pyproject) = read_toml::<PyProject>(&dir.join("pyproject.toml")) {
             // Check [project.scripts]
             if let Some(scripts) = pyproject.project.as_ref().and_then(|p| p.scripts.as_ref())
@@ -142,10 +147,10 @@ impl PythonDetector {
             {
                 // Try to find the source file
                 if let Some(path) = self.find_module_path(dir, module) {
-                    return (Some(path), Some(script_name.clone()));
+                    return (Some(path), Some(script_name.clone()), true, true);
                 }
                 // Even if file not found, return script name for running
-                return (None, Some(script_name.clone()));
+                return (None, Some(script_name.clone()), false, true);
             }
 
             // Check [tool.poetry.scripts]
@@ -159,13 +164,13 @@ impl PythonDetector {
                 && let Some(module) = entry.split(':').next()
             {
                 if let Some(path) = self.find_module_path(dir, module) {
-                    return (Some(path), Some(script_name.clone()));
+                    return (Some(path), Some(script_name.clone()), true, true);
                 }
-                return (None, Some(script_name.clone()));
+                return (None, Some(script_name.clone()), false, true);
             }
         }
 
-        // 2. Look for files with FastMCP or mcp.server imports
+        // 2. Look for files with FastMCP or mcp.server imports (not from config)
         let options = GrepOptions {
             extensions: vec!["py".into()],
             respect_gitignore: true,
@@ -180,11 +185,11 @@ impl PythonDetector {
             if let Some(m) = matches.first()
                 && let Ok(rel) = m.path.strip_prefix(dir)
             {
-                return (Some(rel.to_string_lossy().to_string()), None);
+                return (Some(rel.to_string_lossy().to_string()), None, true, false);
             }
         }
 
-        // 3. Common patterns
+        // 3. Common patterns (not from config)
         let patterns = [
             "main.py",
             "server.py",
@@ -195,7 +200,11 @@ impl PythonDetector {
             "server/__main__.py",
         ];
 
-        (find_first_relative(dir, &patterns), None)
+        if let Some(found) = find_first_relative(dir, &patterns) {
+            return (Some(found), None, true, false);
+        }
+
+        (None, None, false, false)
     }
 
     /// Detect transport by grepping source files.
@@ -310,25 +319,45 @@ impl ProjectDetector for PythonDetector {
             return None;
         }
 
-        // Check for MCP dependency
-        if !self.has_mcp_dependency(dir) {
-            return None;
-        }
-
-        let package_manager = self.detect_package_manager(dir);
-        let (entry_point, script_name) = self.detect_entry_point(dir);
+        // Gather detection signals
+        let has_mcp_sdk = self.has_mcp_dependency(dir);
+        let (package_manager, has_lock_file) = self.detect_package_manager(dir);
+        let (entry_point, script_name, entry_exists, entry_from_config) =
+            self.detect_entry_point(dir);
         let transport = self.detect_transport(dir);
 
-        // Calculate confidence
-        let mut confidence = 0.7; // Base confidence for having MCP dependency
-        if entry_point.is_some() || script_name.is_some() {
-            confidence += 0.2;
-        }
-        if has_pyproject {
-            confidence += 0.05; // Slight boost for modern project structure
-        }
+        // Check if name comes from config
+        let name_from_config =
+            if let Some(pyproject) = read_toml::<PyProject>(&dir.join("pyproject.toml")) {
+                pyproject
+                    .project
+                    .as_ref()
+                    .and_then(|p| p.name.as_ref())
+                    .is_some()
+                    || pyproject
+                        .tool
+                        .as_ref()
+                        .and_then(|t| t.poetry.as_ref())
+                        .and_then(|p| p.name.as_ref())
+                        .is_some()
+            } else {
+                false
+            };
 
-        let mut notes = Vec::new();
+        // Build detection signals
+        let signals = DetectionSignals {
+            entry_point_from_config: entry_from_config,
+            entry_point_exists: entry_exists,
+            has_mcp_sdk,
+            package_manager_certain: has_lock_file,
+            name_from_config,
+        };
+
+        // Calculate confidence from signals
+        let confidence = signals.confidence();
+
+        // Build notes from signals
+        let mut notes = signals.warnings();
 
         if entry_point.is_none() && script_name.is_none() {
             notes.push(
@@ -390,6 +419,7 @@ impl ProjectDetector for PythonDetector {
                 run_args,
                 notes,
             },
+            signals,
         })
     }
 
@@ -623,6 +653,7 @@ name = "test-mcp-server"
 dependencies = ["mcp>=1.0.0"]
 "#;
         fs::write(tmp.path().join("pyproject.toml"), pyproject).unwrap();
+        fs::write(tmp.path().join("uv.lock"), "").unwrap(); // Add lock file
         fs::write(
             tmp.path().join("main.py"),
             "from mcp.server.fastmcp import FastMCP",
@@ -634,7 +665,9 @@ dependencies = ["mcp>=1.0.0"]
 
         assert!(result.is_some());
         let result = result.unwrap();
-        assert!(result.confidence >= 0.7);
+        assert!(result.signals.has_mcp_sdk);
+        assert!(result.signals.entry_point_exists);
+        assert!(result.signals.name_from_config);
         assert_eq!(result.server_type, McpbServerType::Python);
     }
 
@@ -648,11 +681,16 @@ name = "test-project"
 dependencies = ["requests"]
 "#;
         fs::write(tmp.path().join("pyproject.toml"), pyproject).unwrap();
+        fs::write(tmp.path().join("main.py"), "print('hello')").unwrap();
 
         let detector = PythonDetector::new();
         let result = detector.detect(tmp.path());
 
-        assert!(result.is_none());
+        // Now detected but with lower confidence (no SDK = -0.10)
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(!result.signals.has_mcp_sdk);
+        assert!(result.confidence < 1.0);
     }
 
     #[test]
@@ -661,10 +699,9 @@ dependencies = ["requests"]
         fs::write(tmp.path().join("uv.lock"), "").unwrap();
 
         let detector = PythonDetector::new();
-        assert_eq!(
-            detector.detect_package_manager(tmp.path()),
-            PythonPackageManager::Uv
-        );
+        let (pm, certain) = detector.detect_package_manager(tmp.path());
+        assert_eq!(pm, PythonPackageManager::Uv);
+        assert!(certain);
     }
 
     #[test]
@@ -673,10 +710,9 @@ dependencies = ["requests"]
         fs::write(tmp.path().join("poetry.lock"), "").unwrap();
 
         let detector = PythonDetector::new();
-        assert_eq!(
-            detector.detect_package_manager(tmp.path()),
-            PythonPackageManager::Poetry
-        );
+        let (pm, certain) = detector.detect_package_manager(tmp.path());
+        assert_eq!(pm, PythonPackageManager::Poetry);
+        assert!(certain);
     }
 
     #[test]
@@ -685,10 +721,9 @@ dependencies = ["requests"]
         fs::write(tmp.path().join("requirements.txt"), "mcp>=1.0.0").unwrap();
 
         let detector = PythonDetector::new();
-        assert_eq!(
-            detector.detect_package_manager(tmp.path()),
-            PythonPackageManager::Pip
-        );
+        let (pm, certain) = detector.detect_package_manager(tmp.path());
+        assert_eq!(pm, PythonPackageManager::Pip);
+        assert!(!certain); // No lock file for pip
     }
 
     #[test]

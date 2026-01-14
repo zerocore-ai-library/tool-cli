@@ -110,7 +110,7 @@ pub async fn detect_mcpb(
                 "    {:<12} {} {}",
                 "Entry".dimmed(),
                 ep,
-                "(not found)".bright_yellow()
+                "(inferred)".bright_yellow()
             );
         }
     } else {

@@ -2,8 +2,8 @@
 
 use super::utils::{has_any_pattern, read_toml};
 use super::{
-    DetectError, DetectOptions, DetectionDetails, DetectionResult, GeneratedScaffold,
-    ProjectDetector,
+    DetectError, DetectOptions, DetectionDetails, DetectionResult, DetectionSignals,
+    GeneratedScaffold, ProjectDetector,
 };
 use crate::mcpb::{
     McpbCompatibility, McpbManifest, McpbMcpConfig, McpbPlatform, McpbServer, McpbServerType,
@@ -140,31 +140,41 @@ impl ProjectDetector for RustDetector {
 
         let cargo: CargoToml = read_toml(&cargo_path)?;
 
-        // Check for rmcp dependency
-        if !self.has_rmcp(&cargo) {
-            return None;
-        }
-
+        // Gather detection signals
+        let has_mcp_sdk = self.has_rmcp(&cargo);
         let binary_name = self.get_binary_name(&cargo)?;
         let platform = detect_platform();
         let transport = self.detect_transport(dir);
         let entry_point = self.get_entry_point(&binary_name, &platform);
         let is_built = self.is_built(dir, &binary_name);
 
-        // Calculate confidence
-        let mut confidence = 0.8; // High confidence for rmcp dependency
-        if is_built {
-            confidence += 0.15;
-        }
+        // Check if entry point is from [[bin]] config
+        let entry_from_config = cargo.bin.is_some() || cargo.package.as_ref().is_some();
 
-        let mut notes = Vec::new();
+        // Check if name comes from config
+        let name_from_config = cargo
+            .package
+            .as_ref()
+            .and_then(|p| p.name.as_ref())
+            .is_some();
 
-        if !is_built {
-            notes.push(format!(
-                "Binary not found. Run `cargo build --release` to build '{}'.",
-                binary_name
-            ));
-        }
+        // Check for lock file
+        let has_lock_file = dir.join("Cargo.lock").exists();
+
+        // Build detection signals
+        let signals = DetectionSignals {
+            entry_point_from_config: entry_from_config,
+            entry_point_exists: is_built,
+            has_mcp_sdk,
+            package_manager_certain: has_lock_file,
+            name_from_config,
+        };
+
+        // Calculate confidence from signals
+        let confidence = signals.confidence();
+
+        // Build notes from signals (includes "Entry point file not found" if !is_built)
+        let notes = signals.warnings();
 
         // Run args for mcp_config
         let command = self.get_command_path(&binary_name, &platform);
@@ -182,6 +192,7 @@ impl ProjectDetector for RustDetector {
                 run_args: vec![],
                 notes,
             },
+            signals,
         })
     }
 
@@ -354,13 +365,18 @@ edition = "2021"
     fn test_detect_rust_project_with_rmcp() {
         let tmp = TempDir::new().unwrap();
         create_rust_project(&tmp, true);
+        fs::write(tmp.path().join("Cargo.lock"), "").unwrap(); // Add lock file
 
         let detector = RustDetector::new();
         let result = detector.detect(tmp.path());
 
         assert!(result.is_some());
         let result = result.unwrap();
-        assert!(result.confidence >= 0.8);
+        // With deduction: entry_from_config=true, entry_exists=false (-0.20), has_sdk=true, lock=true, name=true
+        // 1.0 - 0.20 = 0.80
+        assert!(result.signals.has_mcp_sdk);
+        assert!(result.signals.entry_point_from_config);
+        assert!(!result.signals.entry_point_exists); // Not built
         assert_eq!(result.server_type, McpbServerType::Binary);
         assert!(
             result
@@ -380,7 +396,11 @@ edition = "2021"
         let detector = RustDetector::new();
         let result = detector.detect(tmp.path());
 
-        assert!(result.is_none());
+        // Now detected but with lower confidence (no SDK = -0.10)
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(!result.signals.has_mcp_sdk);
+        assert!(result.confidence < 1.0);
     }
 
     #[test]
