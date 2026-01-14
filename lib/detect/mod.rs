@@ -40,7 +40,7 @@ pub struct DetectionResult {
 /// Starts at 1.0 and deducts for each missing/uncertain piece.
 #[derive(Debug, Clone, Default)]
 pub struct DetectionSignals {
-    /// Entry point found in config (package.json bin/main, pyproject scripts, Cargo [[bin]]).
+    /// Entry point found in config (package.json bin/main, pyproject scripts, Cargo \[\[bin\]\]).
     pub entry_point_from_config: bool,
     /// Entry point file exists on disk.
     pub entry_point_exists: bool,
