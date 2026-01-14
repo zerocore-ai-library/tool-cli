@@ -445,14 +445,18 @@ async fn init_migrate(
 
     // Confirmation prompt (unless --yes)
     if !yes && std::io::stdin().is_terminal() {
+        crate::prompt::init_theme();
+        println!();
         let confirmed: bool = cliclack::confirm("Proceed with migration?")
             .initial_value(true)
             .interact()?;
 
         if !confirmed {
-            println!("\n  {} Migration cancelled.", "✗".bright_red());
+            cliclack::outro_cancel("Migration cancelled.")?;
             return Ok(());
         }
+
+        cliclack::outro("Migrating...")?;
     }
 
     // Generate scaffolding (manifest + mcpbignore only)
