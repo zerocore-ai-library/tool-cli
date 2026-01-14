@@ -2,8 +2,8 @@
 
 use super::utils::{find_first_relative, has_any_pattern, read_json};
 use super::{
-    DetectError, DetectOptions, DetectionDetails, DetectionResult, GeneratedScaffold,
-    ProjectDetector,
+    DetectError, DetectOptions, DetectionDetails, DetectionResult, DetectionSignals,
+    GeneratedScaffold, ProjectDetector,
 };
 use crate::mcpb::{
     McpbManifest, McpbMcpConfig, McpbServer, McpbServerType, McpbTransport, NodePackageManager,
@@ -31,26 +31,36 @@ impl NodeDetector {
     }
 
     /// Detect package manager from lock files.
-    fn detect_package_manager(&self, dir: &Path) -> NodePackageManager {
+    /// Returns (package_manager, has_lock_file).
+    fn detect_package_manager(&self, dir: &Path) -> (NodePackageManager, bool) {
         if dir.join("bun.lockb").exists() {
-            NodePackageManager::Bun
+            (NodePackageManager::Bun, true)
         } else if dir.join("pnpm-lock.yaml").exists() {
-            NodePackageManager::Pnpm
+            (NodePackageManager::Pnpm, true)
         } else if dir.join("yarn.lock").exists() {
-            NodePackageManager::Yarn
+            (NodePackageManager::Yarn, true)
+        } else if dir.join("package-lock.json").exists() {
+            (NodePackageManager::Npm, true)
         } else {
-            NodePackageManager::Npm
+            (NodePackageManager::Npm, false)
         }
     }
 
     /// Detect entry point from package.json and file structure.
-    /// Returns (entry_point, exists) - exists indicates if the file is present on disk.
-    fn detect_entry_point(&self, dir: &Path, pkg: &serde_json::Value) -> (Option<String>, bool) {
+    /// Returns (entry_point, exists, from_config):
+    /// - entry_point: detected path
+    /// - exists: file is present on disk
+    /// - from_config: found in package.json (bin/main/exports) vs inferred from patterns
+    fn detect_entry_point(
+        &self,
+        dir: &Path,
+        pkg: &serde_json::Value,
+    ) -> (Option<String>, bool, bool) {
         // 1. Check package.json.main
         if let Some(main) = pkg.get("main").and_then(|v| v.as_str())
             && dir.join(main).exists()
         {
-            return (Some(main.to_string()), true);
+            return (Some(main.to_string()), true, true);
         }
 
         // 2. Check package.json.bin (first, then check existence)
@@ -71,7 +81,7 @@ impl NodeDetector {
         if let Some(ref entry) = bin_entry
             && dir.join(entry).exists()
         {
-            return (Some(entry.clone()), true);
+            return (Some(entry.clone()), true, true);
         }
 
         // 3. Check package.json.exports["."]
@@ -91,11 +101,11 @@ impl NodeDetector {
             if let Some(e) = entry
                 && dir.join(&e).exists()
             {
-                return (Some(e), true);
+                return (Some(e), true, true);
             }
         }
 
-        // 4. Check TypeScript config for outDir
+        // 4. Check TypeScript config for outDir (not from package.json config)
         if let Some(tsconfig) = read_json::<serde_json::Value>(&dir.join("tsconfig.json"))
             && let Some(out_dir) = tsconfig
                 .get("compilerOptions")
@@ -110,12 +120,12 @@ impl NodeDetector {
             ];
             for candidate in candidates {
                 if dir.join(&candidate).exists() {
-                    return (Some(candidate), true);
+                    return (Some(candidate), true, false);
                 }
             }
         }
 
-        // 5. Common patterns (existing files)
+        // 5. Common patterns (not from config)
         let patterns = [
             "dist/index.js",
             "dist/main.js",
@@ -131,20 +141,20 @@ impl NodeDetector {
         ];
 
         if let Some(found) = find_first_relative(dir, &patterns) {
-            return (Some(found), true);
+            return (Some(found), true, false);
         }
 
-        // 6. Fallback: use bin entry even if file doesn't exist (for unbuilt TypeScript)
+        // 6. Fallback: use bin entry even if file doesn't exist (from config)
         if let Some(entry) = bin_entry {
-            return (Some(entry), false);
+            return (Some(entry), false, true);
         }
 
-        // 7. Fallback: use main entry even if file doesn't exist
+        // 7. Fallback: use main entry even if file doesn't exist (from config)
         if let Some(main) = pkg.get("main").and_then(|v| v.as_str()) {
-            return (Some(main.to_string()), false);
+            return (Some(main.to_string()), false, true);
         }
 
-        (None, false)
+        (None, false, false)
     }
 
     /// Detect transport by grepping source files.
@@ -183,11 +193,6 @@ impl NodeDetector {
             .is_some();
 
         has_dep || has_dev_dep
-    }
-
-    /// Check if this is a TypeScript project.
-    fn is_typescript(&self, dir: &Path) -> bool {
-        dir.join("tsconfig.json").exists()
     }
 
     /// Detect build command from package.json scripts.
@@ -253,38 +258,34 @@ impl ProjectDetector for NodeDetector {
 
         let pkg: serde_json::Value = read_json(&pkg_path)?;
 
-        // Check for MCP SDK dependency
-        if !self.has_mcp_sdk(&pkg) {
-            return None;
-        }
-
-        let package_manager = self.detect_package_manager(dir);
-        let (entry_point, entry_exists) = self.detect_entry_point(dir, &pkg);
+        // Gather detection signals
+        let has_mcp_sdk = self.has_mcp_sdk(&pkg);
+        let (package_manager, has_lock_file) = self.detect_package_manager(dir);
+        let (entry_point, entry_exists, entry_from_config) = self.detect_entry_point(dir, &pkg);
         let transport = self.detect_transport(dir);
-        let is_typescript = self.is_typescript(dir);
         let build_command = self.detect_build_command(dir, package_manager);
 
-        // Calculate confidence
-        let mut confidence = 0.7; // Base confidence for having MCP SDK
-        if entry_point.is_some() && entry_exists {
-            confidence += 0.2;
-        } else if entry_point.is_some() {
-            confidence += 0.1; // Partial boost for inferred entry point
-        }
-        if is_typescript {
-            confidence += 0.05; // Slight boost for TypeScript (more likely to be intentional)
-        }
+        // Check if name comes from config
+        let name_from_config = pkg.get("name").and_then(|v| v.as_str()).is_some();
 
-        let mut notes = Vec::new();
+        // Build detection signals
+        let signals = DetectionSignals {
+            entry_point_from_config: entry_from_config,
+            entry_point_exists: entry_exists,
+            has_mcp_sdk,
+            package_manager_certain: has_lock_file,
+            name_from_config,
+        };
+
+        // Calculate confidence from signals
+        let confidence = signals.confidence();
+
+        // Build notes from signals (includes "Entry point file not found" if !entry_exists)
+        let mut notes = signals.warnings();
 
         if entry_point.is_none() {
             notes.push(
                 "Could not auto-detect entry point. Specify --entry to set it manually.".into(),
-            );
-        } else if !entry_exists && is_typescript {
-            notes.push(
-                "Entry point inferred from package.json but not yet built. Run `tool build` first."
-                    .into(),
             );
         }
 
@@ -308,6 +309,7 @@ impl ProjectDetector for NodeDetector {
                 run_args,
                 notes,
             },
+            signals,
         })
     }
 
@@ -493,13 +495,20 @@ mod tests {
         create_node_project(&tmp, true);
         fs::create_dir_all(tmp.path().join("dist")).unwrap();
         fs::write(tmp.path().join("dist/index.js"), "// server code").unwrap();
+        fs::write(tmp.path().join("package-lock.json"), "{}").unwrap(); // Add lock file
 
         let detector = NodeDetector::new();
         let result = detector.detect(tmp.path());
 
         assert!(result.is_some());
         let result = result.unwrap();
-        assert!(result.confidence >= 0.9); // Should be high confidence with existing entry point
+        // With deduction method: 1.0 - all signals positive = 1.0
+        assert_eq!(result.confidence, 1.0);
+        assert!(result.signals.has_mcp_sdk);
+        assert!(result.signals.entry_point_exists);
+        assert!(result.signals.entry_point_from_config);
+        assert!(result.signals.package_manager_certain);
+        assert!(result.signals.name_from_config);
         assert_eq!(result.server_type, McpbServerType::Node);
         assert_eq!(
             result.details.entry_point,
@@ -549,11 +558,17 @@ mod tests {
     fn test_detect_node_project_without_sdk() {
         let tmp = TempDir::new().unwrap();
         create_node_project(&tmp, false);
+        fs::create_dir_all(tmp.path().join("dist")).unwrap();
+        fs::write(tmp.path().join("dist/index.js"), "// server code").unwrap();
 
         let detector = NodeDetector::new();
         let result = detector.detect(tmp.path());
 
-        assert!(result.is_none());
+        // Now detected but with lower confidence (no SDK = -0.10)
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(!result.signals.has_mcp_sdk);
+        assert!(result.confidence < 1.0); // Deducted for missing SDK
     }
 
     #[test]
@@ -562,10 +577,9 @@ mod tests {
         fs::write(tmp.path().join("package-lock.json"), "{}").unwrap();
 
         let detector = NodeDetector::new();
-        assert_eq!(
-            detector.detect_package_manager(tmp.path()),
-            NodePackageManager::Npm
-        );
+        let (pm, certain) = detector.detect_package_manager(tmp.path());
+        assert_eq!(pm, NodePackageManager::Npm);
+        assert!(certain);
     }
 
     #[test]
@@ -574,10 +588,9 @@ mod tests {
         fs::write(tmp.path().join("pnpm-lock.yaml"), "").unwrap();
 
         let detector = NodeDetector::new();
-        assert_eq!(
-            detector.detect_package_manager(tmp.path()),
-            NodePackageManager::Pnpm
-        );
+        let (pm, certain) = detector.detect_package_manager(tmp.path());
+        assert_eq!(pm, NodePackageManager::Pnpm);
+        assert!(certain);
     }
 
     #[test]
@@ -586,10 +599,9 @@ mod tests {
         fs::write(tmp.path().join("bun.lockb"), "").unwrap();
 
         let detector = NodeDetector::new();
-        assert_eq!(
-            detector.detect_package_manager(tmp.path()),
-            NodePackageManager::Bun
-        );
+        let (pm, certain) = detector.detect_package_manager(tmp.path());
+        assert_eq!(pm, NodePackageManager::Bun);
+        assert!(certain);
     }
 
     #[test]
@@ -598,9 +610,19 @@ mod tests {
         fs::write(tmp.path().join("yarn.lock"), "").unwrap();
 
         let detector = NodeDetector::new();
-        assert_eq!(
-            detector.detect_package_manager(tmp.path()),
-            NodePackageManager::Yarn
-        );
+        let (pm, certain) = detector.detect_package_manager(tmp.path());
+        assert_eq!(pm, NodePackageManager::Yarn);
+        assert!(certain);
+    }
+
+    #[test]
+    fn test_detect_package_manager_no_lock() {
+        let tmp = TempDir::new().unwrap();
+        // No lock file
+
+        let detector = NodeDetector::new();
+        let (pm, certain) = detector.detect_package_manager(tmp.path());
+        assert_eq!(pm, NodePackageManager::Npm); // Default
+        assert!(!certain);
     }
 }

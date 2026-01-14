@@ -333,8 +333,14 @@ async fn init_migrate(
     _force: bool,
     display_path: Option<&str>,
 ) -> ToolResult<()> {
-    use crate::detect::{DetectOptions, DetectorRegistry};
-    use crate::mcpb::McpbTransport;
+    use crate::detect::{
+        DetectOptions, DetectorRegistry, EnvConfigType, EnvVar, parse_env_example,
+    };
+    use crate::mcpb::{
+        McpbSystemConfigField, McpbSystemConfigType, McpbTransport, McpbUserConfigField,
+        McpbUserConfigType,
+    };
+    use std::collections::BTreeMap;
     use std::io::IsTerminal;
 
     let manifest_path = target_dir.join(MCPB_MANIFEST_FILE);
@@ -407,7 +413,7 @@ async fn init_migrate(
                 "    {:<12} {} {}",
                 "Entry".dimmed(),
                 ep,
-                "(not found)".bright_yellow()
+                "(inferred)".bright_yellow()
             );
         }
     } else {
@@ -438,6 +444,59 @@ async fn init_migrate(
         println!("\n    {} {}", "⚠".bright_yellow(), note.bright_yellow());
     }
 
+    // Parse .env.example for env vars
+    let env_vars = parse_env_example(&target_dir);
+    let selected_env_vars: Vec<EnvVar> = if !env_vars.is_empty() {
+        if yes {
+            // With --yes, include all env vars
+            env_vars
+        } else if std::io::stdin().is_terminal() {
+            // Interactive: let user select which env vars to include
+            println!();
+            crate::prompt::init_theme();
+
+            let options: Vec<(EnvVar, String, String)> = env_vars
+                .into_iter()
+                .map(|var| {
+                    let label = format!(
+                        "{} → {}.{}{}",
+                        var.name,
+                        match var.config_type {
+                            EnvConfigType::System => "system_config",
+                            EnvConfigType::User => "user_config",
+                        },
+                        var.config_key(),
+                        if var.sensitive { " (sensitive)" } else { "" }
+                    );
+                    let hint = var
+                        .default
+                        .as_ref()
+                        .map(|d| format!("default: {}", d))
+                        .unwrap_or_default();
+                    (var, label, hint)
+                })
+                .collect();
+
+            let selected: Vec<EnvVar> =
+                cliclack::multiselect("Select env vars to include in manifest (from .env.example)")
+                    .items(
+                        &options
+                            .iter()
+                            .map(|(var, label, hint)| (var.clone(), label.as_str(), hint.as_str()))
+                            .collect::<Vec<_>>(),
+                    )
+                    .required(false)
+                    .interact()?;
+
+            selected
+        } else {
+            // Non-interactive without --yes: skip env vars
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
     // Show preview of files to create
     println!("\n  {}:", "Files to create".dimmed());
     println!("    manifest.json");
@@ -460,12 +519,92 @@ async fn init_migrate(
     }
 
     // Generate scaffolding (manifest + mcpbignore only)
-    let scaffold = registry.generate(
+    let mut scaffold = registry.generate(
         detection.detector_name,
         &target_dir,
         &detection.result,
         &options,
     )?;
+
+    // Convert selected env vars to config fields and merge into manifest
+    if !selected_env_vars.is_empty() {
+        let mut user_config: BTreeMap<String, McpbUserConfigField> =
+            scaffold.manifest.user_config.take().unwrap_or_default();
+        let mut system_config: BTreeMap<String, McpbSystemConfigField> =
+            scaffold.manifest.system_config.take().unwrap_or_default();
+
+        for var in selected_env_vars {
+            match var.config_type {
+                EnvConfigType::System => {
+                    let field_type = match var.value_type {
+                        crate::detect::EnvValueType::Port => McpbSystemConfigType::Port,
+                        crate::detect::EnvValueType::Hostname => McpbSystemConfigType::Hostname,
+                        _ => McpbSystemConfigType::Hostname, // fallback
+                    };
+                    let default: Option<serde_json::Value> = var.default.as_ref().map(|d| {
+                        if let Ok(n) = d.parse::<i64>() {
+                            serde_json::Value::Number(serde_json::Number::from(n))
+                        } else {
+                            serde_json::Value::String(d.clone())
+                        }
+                    });
+                    system_config.insert(
+                        var.config_key(),
+                        McpbSystemConfigField {
+                            field_type,
+                            title: var.name.clone(),
+                            description: None,
+                            required: None,
+                            default,
+                        },
+                    );
+                }
+                EnvConfigType::User => {
+                    let field_type = match var.value_type {
+                        crate::detect::EnvValueType::String => McpbUserConfigType::String,
+                        crate::detect::EnvValueType::Number => McpbUserConfigType::Number,
+                        crate::detect::EnvValueType::Boolean => McpbUserConfigType::Boolean,
+                        crate::detect::EnvValueType::Port => McpbUserConfigType::Number,
+                        crate::detect::EnvValueType::Hostname => McpbUserConfigType::String,
+                    };
+                    let default: Option<serde_json::Value> =
+                        var.default.as_ref().map(|d| match var.value_type {
+                            crate::detect::EnvValueType::Number
+                            | crate::detect::EnvValueType::Port => d
+                                .parse::<i64>()
+                                .map(|n| serde_json::Value::Number(serde_json::Number::from(n)))
+                                .unwrap_or_else(|_| serde_json::Value::String(d.clone())),
+                            crate::detect::EnvValueType::Boolean => {
+                                serde_json::Value::Bool(d == "true")
+                            }
+                            _ => serde_json::Value::String(d.clone()),
+                        });
+                    user_config.insert(
+                        var.config_key(),
+                        McpbUserConfigField {
+                            field_type,
+                            title: var.name.clone(),
+                            description: None,
+                            required: None,
+                            default,
+                            multiple: None,
+                            sensitive: if var.sensitive { Some(true) } else { None },
+                            enum_values: None,
+                            min: None,
+                            max: None,
+                        },
+                    );
+                }
+            }
+        }
+
+        if !user_config.is_empty() {
+            scaffold.manifest.user_config = Some(user_config);
+        }
+        if !system_config.is_empty() {
+            scaffold.manifest.system_config = Some(system_config);
+        }
+    }
 
     // Write manifest.json
     let manifest_json = serde_json::to_string_pretty(&scaffold.manifest)?;
