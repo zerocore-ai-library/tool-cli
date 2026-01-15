@@ -59,7 +59,7 @@ NC='\033[0m' # No Color
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
-}/
+}
 
 log_warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
