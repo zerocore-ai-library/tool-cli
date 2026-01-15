@@ -31,7 +31,7 @@
 ## INSTALL
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/install.sh | sh
+curl -fsSL https://install.tool.store | sh
 ```
 
 <br />
