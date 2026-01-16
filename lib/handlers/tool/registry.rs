@@ -99,7 +99,7 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
     let pb = ProgressBar::new(bundle_size);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("    [{bar:30.cyan/dim}] {bytes}/{total_bytes} ({percent}%)")
+            .template("    [{bar:30.cyan/dim}] {decimal_bytes}/{decimal_total_bytes} ({percent}%)")
             .unwrap()
             .progress_chars("=>-"),
     );
@@ -475,7 +475,7 @@ pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
     let pb = ProgressBar::new(bundle_size);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("    [{bar:30.cyan/dim}] {bytes}/{total_bytes} ({percent}%)")
+            .template("    [{bar:30.cyan/dim}] {decimal_bytes}/{decimal_total_bytes} ({percent}%)")
             .unwrap()
             .progress_chars("=>-"),
     );
