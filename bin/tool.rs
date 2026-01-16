@@ -25,6 +25,7 @@ async fn main() {
 
 /// Print an error with appropriate formatting based on error type.
 fn print_error(e: &ToolError) {
+    println!();
     match e {
         ToolError::RegistryApi {
             code,
@@ -32,23 +33,137 @@ fn print_error(e: &ToolError) {
             status,
             ..
         } => {
-            println!();
             println!(
                 "  {} {}",
                 format!("error[{}]", code).bright_red().bold(),
                 format!("(HTTP {})", status).dimmed()
             );
             println!();
-            // Format the message with proper indentation
             for line in message.split(", ") {
                 println!("    {}", line);
             }
-            println!();
         }
+        ToolError::EntryPointNotFound {
+            entry_point,
+            full_path,
+            build_script,
+            bundle_path,
+        } => {
+            println!("  {} Entry point not found", "error".bright_red().bold());
+            println!();
+            println!("    {}: {}", "Expected".dimmed(), entry_point);
+            println!("    {}: {}", "Full path".dimmed(), full_path);
+            println!("    {}: {}", "Bundle".dimmed(), bundle_path);
+            if let Some(script) = build_script {
+                println!();
+                println!("    {}", "hint:".bright_blue().bold());
+                println!("      Run build script first: {}", script.bright_white());
+            }
+        }
+        ToolError::AmbiguousReference {
+            requested,
+            candidates,
+            suggestion,
+        } => {
+            println!(
+                "  {} Ambiguous reference '{}'",
+                "error".bright_red().bold(),
+                requested.bright_white()
+            );
+            println!();
+            println!("    Found multiple matches:");
+            for line in candidates.lines() {
+                println!("    {}", line);
+            }
+            println!();
+            println!("    {}: {}", "hint".bright_blue().bold(), suggestion);
+        }
+        ToolError::NotFound { kind, reference } => {
+            println!(
+                "  {} {} not found: {}",
+                "error".bright_red().bold(),
+                kind,
+                reference.bright_white()
+            );
+        }
+        ToolError::InvalidReference(msg) => {
+            println!("  {} Invalid reference", "error".bright_red().bold());
+            println!();
+            println!("    {}", msg);
+        }
+        ToolError::AuthRequired { tool_ref } => {
+            println!(
+                "  {} OAuth authentication required",
+                "error".bright_red().bold()
+            );
+            println!();
+            println!(
+                "    Tool '{}' requires OAuth authentication.",
+                tool_ref.bright_white()
+            );
+            println!();
+            println!(
+                "    {}: Set {} environment variable",
+                "hint".bright_blue().bold(),
+                "CREDENTIALS_SECRET_KEY".bright_white()
+            );
+        }
+        ToolError::OAuthNotConfigured => {
+            println!("  {} OAuth not configured", "error".bright_red().bold());
+            println!();
+            println!(
+                "    The {} environment variable is not set.",
+                "CREDENTIALS_SECRET_KEY".bright_white()
+            );
+        }
+        ToolError::ManifestNotFound(path) => {
+            println!("  {} manifest.json not found", "error".bright_red().bold());
+            println!();
+            println!("    {}: {}", "Searched".dimmed(), path.display());
+            println!();
+            println!(
+                "    {}: Run {} to create one",
+                "hint".bright_blue().bold(),
+                "tool init".bright_white()
+            );
+        }
+        ToolError::ValidationFailed(result) => {
+            println!("  {} Validation failed", "error".bright_red().bold());
+            println!();
+            for err in &result.errors {
+                println!(
+                    "    {} → {}",
+                    format!("error[{}]", err.code).bright_red(),
+                    err.location
+                );
+                println!("      {}", err.message);
+            }
+        }
+        ToolError::Cancelled => {
+            println!("  {} Operation cancelled", "✗".bright_red());
+        }
+        // For all other errors, use a consistent styled format
         _ => {
-            eprintln!("error: {}", e);
+            let msg = e.to_string();
+            // Check if it looks like a prefixed error (e.g., "IO error: ...")
+            if let Some((prefix, rest)) = msg.split_once(": ") {
+                if prefix.len() < 30 && !prefix.contains(' ') || prefix.ends_with("error") {
+                    println!(
+                        "  {} {}",
+                        format!("error[{}]", prefix.to_lowercase().replace(" error", ""))
+                            .bright_red()
+                            .bold(),
+                        rest.dimmed()
+                    );
+                } else {
+                    println!("  {} {}", "error".bright_red().bold(), msg);
+                }
+            } else {
+                println!("  {} {}", "error".bright_red().bold(), msg);
+            }
         }
     }
+    println!();
 }
 
 /// Initialize tracing. Only enables logging when RUST_LOG is set.
