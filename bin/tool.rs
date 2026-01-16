@@ -1,6 +1,7 @@
 //! `tool` is the primary CLI binary.
 
 use clap::{CommandFactory, Parser};
+use colored::Colorize;
 use tool_cli::handlers;
 use tool_cli::tree::try_show_tree;
 use tool_cli::{Cli, Command, ToolError, ToolResult};
@@ -17,8 +18,36 @@ async fn main() {
     init_tracing();
 
     if let Err(e) = run().await {
-        eprintln!("error: {}", e);
+        print_error(&e);
         std::process::exit(1);
+    }
+}
+
+/// Print an error with appropriate formatting based on error type.
+fn print_error(e: &ToolError) {
+    match e {
+        ToolError::RegistryApi {
+            code,
+            message,
+            status,
+            ..
+        } => {
+            println!();
+            println!(
+                "  {} {}",
+                format!("error[{}]", code).bright_red().bold(),
+                format!("(HTTP {})", status).dimmed()
+            );
+            println!();
+            // Format the message with proper indentation
+            for line in message.split(", ") {
+                println!("    {}", line);
+            }
+            println!();
+        }
+        _ => {
+            eprintln!("error: {}", e);
+        }
     }
 }
 

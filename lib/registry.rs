@@ -24,6 +24,17 @@ const API_PREFIX: &str = "/api/v1";
 // Types
 //--------------------------------------------------------------------------------------------------
 
+/// API error response from the registry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApiErrorResponse {
+    /// Error code (e.g., "CONFLICT", "BAD_REQUEST").
+    pub error: String,
+    /// Human-readable error message.
+    pub message: String,
+    /// Additional error details.
+    pub details: Option<serde_json::Value>,
+}
+
 /// Client for the tool registry.
 #[derive(Debug, Clone)]
 pub struct RegistryClient {
@@ -576,10 +587,7 @@ impl RegistryClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(ToolError::Generic(format!(
-                "Failed to init upload ({}): {}",
-                status, body
-            )));
+            return Err(parse_api_error(status, &body, "Publish"));
         }
 
         response
@@ -691,10 +699,7 @@ impl RegistryClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(ToolError::Generic(format!(
-                "Failed to publish version ({}): {}",
-                status, body
-            )));
+            return Err(parse_api_error(status, &body, "Publish"));
         }
 
         response
@@ -843,6 +848,29 @@ impl RegistryClient {
                 total_downloads: item.artifact.total_downloads,
             })
             .collect())
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+// Functions
+//--------------------------------------------------------------------------------------------------
+
+/// Parse an API error response and create a formatted ToolError.
+///
+/// Returns a structured error with the error code and message from the API,
+/// or falls back to raw body if parsing fails.
+pub fn parse_api_error(status: reqwest::StatusCode, body: &str, operation: &str) -> ToolError {
+    // Try to parse as JSON API error
+    if let Ok(api_error) = serde_json::from_str::<ApiErrorResponse>(body) {
+        ToolError::RegistryApi {
+            operation: operation.to_string(),
+            code: api_error.error,
+            message: api_error.message,
+            status: status.as_u16(),
+        }
+    } else {
+        // Fallback for non-JSON or unexpected responses
+        ToolError::Generic(format!("{} failed ({}): {}", operation, status, body))
     }
 }
 

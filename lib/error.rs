@@ -118,6 +118,19 @@ pub enum ToolError {
     /// User cancelled operation.
     #[error("Operation cancelled")]
     Cancelled,
+
+    /// Registry API error with structured response.
+    #[error("{operation} failed")]
+    RegistryApi {
+        /// The operation that failed (e.g., "Upload", "Publish").
+        operation: String,
+        /// API error code (e.g., "CONFLICT", "BAD_REQUEST").
+        code: String,
+        /// Human-readable error message.
+        message: String,
+        /// HTTP status code.
+        status: u16,
+    },
 }
 
 //--------------------------------------------------------------------------------------------------
