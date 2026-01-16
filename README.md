@@ -1,7 +1,7 @@
 <div align="center">
 
   <h3>[ tool ]</h3>
-  <h4>———&nbsp;&nbsp;&nbsp;The Package Manager for MCP Tools&nbsp;&nbsp;&nbsp;———</h4>
+  <h4>———&nbsp;&nbsp;&nbsp;The Missing Package Manager for MCP Tools&nbsp;&nbsp;&nbsp;———</h4>
 
 </div>
 

@@ -2,9 +2,14 @@
 
 use crate::constants::{REGISTRY_TOKEN_ENV, get_registry_url};
 use crate::error::{ToolError, ToolResult};
+use bytes::Bytes;
+use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
@@ -138,6 +143,43 @@ struct PublishVersionRequest {
     description: Option<String>,
 }
 
+/// A stream wrapper that reports progress as chunks are consumed.
+pub struct ProgressStream<F> {
+    content: Vec<u8>,
+    position: usize,
+    chunk_size: usize,
+    on_progress: Arc<F>,
+}
+
+impl<F> ProgressStream<F> {
+    /// Create a new progress stream with the given content and progress callback.
+    pub fn new(content: Vec<u8>, chunk_size: usize, on_progress: F) -> Self {
+        Self {
+            content,
+            position: 0,
+            chunk_size,
+            on_progress: Arc::new(on_progress),
+        }
+    }
+}
+
+impl<F: Fn(u64) + Send + Sync> futures_util::Stream for ProgressStream<F> {
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.position >= self.content.len() {
+            return Poll::Ready(None);
+        }
+
+        let end = (self.position + self.chunk_size).min(self.content.len());
+        let chunk = Bytes::copy_from_slice(&self.content[self.position..end]);
+        self.position = end;
+        (self.on_progress)(self.position as u64);
+
+        Poll::Ready(Some(Ok(chunk)))
+    }
+}
+
 //--------------------------------------------------------------------------------------------------
 // Methods
 //--------------------------------------------------------------------------------------------------
@@ -187,7 +229,7 @@ impl RegistryClient {
             .as_ref()
             .ok_or_else(|| ToolError::Generic("No auth token configured".into()))?;
 
-        let url = format!("{}{}/auth/me", self.url, API_PREFIX);
+        let url = format!("{}{}/identity", self.url, API_PREFIX);
 
         let response = self
             .http
@@ -199,6 +241,11 @@ impl RegistryClient {
 
         if !response.status().is_success() {
             let status = response.status();
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                return Err(ToolError::Generic(
+                    "Authentication failed. Run `tool login` to authenticate.".into(),
+                ));
+            }
             let body = response.text().await.unwrap_or_default();
             return Err(ToolError::Generic(format!(
                 "Token validation failed ({}): {}",
@@ -362,6 +409,73 @@ impl RegistryClient {
         Ok(size)
     }
 
+    /// Download an artifact bundle to a file with progress reporting.
+    pub async fn download_artifact_with_progress<F>(
+        &self,
+        namespace: &str,
+        name: &str,
+        version: &str,
+        output_path: &Path,
+        on_progress: F,
+    ) -> ToolResult<u64>
+    where
+        F: Fn(u64, u64), // (bytes_downloaded, total_size)
+    {
+        let url = self.get_download_url(namespace, name, version);
+
+        let mut request = self.http.get(&url);
+        if let Some(token) = &self.auth_token {
+            request = request.bearer_auth(token);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| ToolError::Generic(format!("Download failed: {}", e)))?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(ToolError::Generic(format!(
+                "Version {} not found for {}/{}",
+                version, namespace, name
+            )));
+        }
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ToolError::Generic(format!(
+                "Download failed ({}): {}",
+                status, body
+            )));
+        }
+
+        let total_size = response.content_length().unwrap_or(0);
+
+        // Stream the response to a file with progress
+        let mut file = tokio::fs::File::create(output_path)
+            .await
+            .map_err(|e| ToolError::Generic(format!("Failed to create file: {}", e)))?;
+
+        let mut downloaded: u64 = 0;
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk =
+                chunk.map_err(|e| ToolError::Generic(format!("Failed to read chunk: {}", e)))?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| ToolError::Generic(format!("Failed to write chunk: {}", e)))?;
+            downloaded += chunk.len() as u64;
+            on_progress(downloaded, total_size);
+        }
+
+        file.flush()
+            .await
+            .map_err(|e| ToolError::Generic(format!("Failed to flush file: {}", e)))?;
+
+        Ok(downloaded)
+    }
+
     /// Check if an artifact exists in the registry.
     pub async fn artifact_exists(&self, namespace: &str, name: &str) -> ToolResult<bool> {
         let url = format!(
@@ -481,6 +595,47 @@ impl RegistryClient {
             .put(upload_url)
             .header("Content-Type", "application/gzip")
             .body(content.to_vec())
+            .send()
+            .await
+            .map_err(|e| ToolError::Generic(format!("Failed to upload bundle: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ToolError::Generic(format!(
+                "Failed to upload bundle ({}): {}",
+                status, body
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Upload a bundle to the presigned URL with progress reporting.
+    pub async fn upload_bundle_with_progress<F>(
+        &self,
+        upload_url: &str,
+        content: &[u8],
+        on_progress: F,
+    ) -> ToolResult<()>
+    where
+        F: Fn(u64) + Send + Sync + 'static,
+    {
+        let total_size = content.len();
+        let stream = ProgressStream::new(
+            content.to_vec(),
+            64 * 1024, // 64KB chunks
+            on_progress,
+        );
+
+        let body = reqwest::Body::wrap_stream(stream);
+
+        let response = self
+            .http
+            .put(upload_url)
+            .header("Content-Type", "application/gzip")
+            .header("Content-Length", total_size)
+            .body(body)
             .send()
             .await
             .map_err(|e| ToolError::Generic(format!("Failed to upload bundle: {}", e)))?;
