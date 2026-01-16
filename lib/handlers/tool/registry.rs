@@ -7,7 +7,9 @@ use crate::references::PluginRef;
 use crate::registry::RegistryClient;
 use crate::resolver::FilePluginResolver;
 use colored::Colorize;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use super::pack_cmd::format_size;
 
@@ -41,24 +43,29 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
     // Create registry client
     let client = RegistryClient::new();
 
-    // Determine version - use specified or fetch latest
+    // Determine version and get bundle size from artifact metadata
+    println!(
+        "  {} Resolving {}...",
+        "→".bright_blue(),
+        plugin_ref.to_string().bright_cyan()
+    );
+
+    let artifact = client.get_artifact(namespace, tool_name).await?;
+    let version_info = artifact.latest_version.ok_or_else(|| {
+        ToolError::Generic(format!(
+            "No versions published for {}/{}",
+            namespace, tool_name
+        ))
+    })?;
+
     let version = if let Some(v) = plugin_ref.version_str() {
         v.to_string()
     } else {
-        println!(
-            "  {} Resolving {}...",
-            "→".bright_blue(),
-            plugin_ref.to_string().bright_cyan()
-        );
-
-        let artifact = client.get_artifact(namespace, tool_name).await?;
-        artifact.latest_version.map(|v| v.version).ok_or_else(|| {
-            ToolError::Generic(format!(
-                "No versions published for {}/{}",
-                namespace, tool_name
-            ))
-        })?
+        version_info.version.clone()
     };
+
+    // Get bundle size from version info (may be None for older versions)
+    let bundle_size = version_info.bundle_size.unwrap_or(0);
 
     // Determine output path
     let bundle_name = format!("{}@{}.mcpb", tool_name, version);
@@ -88,10 +95,33 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
         download_ref.bright_cyan()
     );
 
+    // Create progress bar with known bundle size
+    let pb = ProgressBar::new(bundle_size);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("    [{bar:30.cyan/dim}] {decimal_bytes}/{decimal_total_bytes} ({percent}%)")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+
+    let pb_clone = pb.clone();
     let download_size = client
-        .download_artifact(namespace, tool_name, &version, &output_path)
+        .download_artifact_with_progress(
+            namespace,
+            tool_name,
+            &version,
+            &output_path,
+            move |downloaded, total| {
+                // Use Content-Length if available and bundle_size was 0
+                if total > 0 && pb_clone.length() == Some(0) {
+                    pb_clone.set_length(total);
+                }
+                pb_clone.set_position(downloaded);
+            },
+        )
         .await?;
 
+    pb.finish_and_clear();
     println!(
         "  {} Downloaded {} ({})",
         "✓".bright_green(),
@@ -441,10 +471,25 @@ pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
         .init_upload(&namespace, tool_name, version, bundle_size, &sha256)
         .await?;
 
-    // Upload to presigned URL
+    // Create progress bar for upload
+    let pb = ProgressBar::new(bundle_size);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("    [{bar:30.cyan/dim}] {decimal_bytes}/{decimal_total_bytes} ({percent}%)")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+
+    // Upload to presigned URL with progress
+    let pb_arc = Arc::new(pb);
+    let pb_clone = Arc::clone(&pb_arc);
     client
-        .upload_bundle(&upload_info.upload_url, &bundle)
+        .upload_bundle_with_progress(&upload_info.upload_url, &bundle, move |bytes| {
+            pb_clone.set_position(bytes);
+        })
         .await?;
+
+    pb_arc.finish_and_clear();
     println!("    {} Upload complete", "✓".bright_green());
 
     // Publish the version
