@@ -43,24 +43,29 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
     // Create registry client
     let client = RegistryClient::new();
 
-    // Determine version - use specified or fetch latest
+    // Determine version and get bundle size from artifact metadata
+    println!(
+        "  {} Resolving {}...",
+        "→".bright_blue(),
+        plugin_ref.to_string().bright_cyan()
+    );
+
+    let artifact = client.get_artifact(namespace, tool_name).await?;
+    let version_info = artifact.latest_version.ok_or_else(|| {
+        ToolError::Generic(format!(
+            "No versions published for {}/{}",
+            namespace, tool_name
+        ))
+    })?;
+
     let version = if let Some(v) = plugin_ref.version_str() {
         v.to_string()
     } else {
-        println!(
-            "  {} Resolving {}...",
-            "→".bright_blue(),
-            plugin_ref.to_string().bright_cyan()
-        );
-
-        let artifact = client.get_artifact(namespace, tool_name).await?;
-        artifact.latest_version.map(|v| v.version).ok_or_else(|| {
-            ToolError::Generic(format!(
-                "No versions published for {}/{}",
-                namespace, tool_name
-            ))
-        })?
+        version_info.version.clone()
     };
+
+    // Get bundle size from version info (may be None for older versions)
+    let bundle_size = version_info.bundle_size.unwrap_or(0);
 
     // Determine output path
     let bundle_name = format!("{}@{}.mcpb", tool_name, version);
@@ -90,8 +95,8 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
         download_ref.bright_cyan()
     );
 
-    // Create progress bar
-    let pb = ProgressBar::new(0);
+    // Create progress bar with known bundle size
+    let pb = ProgressBar::new(bundle_size);
     pb.set_style(
         ProgressStyle::default_bar()
             .template("    [{bar:30.cyan/dim}] {bytes}/{total_bytes} ({percent}%)")
@@ -107,7 +112,8 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
             &version,
             &output_path,
             move |downloaded, total| {
-                if total > 0 {
+                // Use Content-Length if available and bundle_size was 0
+                if total > 0 && pb_clone.length() == Some(0) {
                     pb_clone.set_length(total);
                 }
                 pb_clone.set_position(downloaded);
