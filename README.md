@@ -8,7 +8,7 @@
 <br />
 
 <div align="center">
-  <video autoplay src="https://github.com/user-attachments/assets/23618f92-5897-44d1-bfa6-1058f30c09e" width="800" controls></video>
+  <video autoplay src="https://github.com/user-attachments/assets/23618f92-5897-44d1-bfa6-1058f30c09ef" width="800" controls></video>
 </div>
 
 
@@ -49,7 +49,7 @@
 ## INSTALL
 
 ```sh
-curl -fsSL https://install.tool.store | sh
+curl -fsSL https://cli.tool.store | sh
 ```
 
 <br />
