@@ -70,7 +70,7 @@ rmcp = { git = "https://github.com/zerocore-ai/rust-sdk", branch = "develop", fe
     "auth",
 ] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
-indicatif = "0.17"
+indicatif = "0.18"
 futures-util = "0.3"
 bytes = "1.0"
 
