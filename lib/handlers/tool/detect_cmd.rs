@@ -12,6 +12,7 @@ use std::path::PathBuf;
 //--------------------------------------------------------------------------------------------------
 
 /// Detect an existing MCP server project and generate MCPB scaffolding.
+#[allow(clippy::too_many_arguments)]
 pub async fn detect_mcpb(
     path: String,
     write: bool,
@@ -19,6 +20,8 @@ pub async fn detect_mcpb(
     transport: Option<String>,
     name: Option<String>,
     force: bool,
+    concise: bool,
+    no_header: bool,
 ) -> ToolResult<()> {
     // Resolve path
     let dir = PathBuf::from(&path);
@@ -87,6 +90,31 @@ pub async fn detect_mcpb(
         .transport
         .or(detection.result.details.transport)
         .unwrap_or(McpbTransport::Stdio);
+
+    // Concise output: Header + TSV format
+    if concise {
+        use crate::concise::quote;
+        if !no_header {
+            println!("#type\ttransport\tentry\tconfidence\tbuild");
+        }
+        let entry_str = entry_display.map(|s| s.as_str()).unwrap_or("-");
+        let build_str = detection
+            .result
+            .details
+            .build_command
+            .as_ref()
+            .map(|s| quote(s))
+            .unwrap_or_else(|| "-".to_string());
+        println!(
+            "{}\t{}\t{}\t{:.0}%\t{}",
+            detection.display_name,
+            transport_display.to_string().to_lowercase(),
+            entry_str,
+            detection.result.confidence * 100.0,
+            build_str
+        );
+        return Ok(());
+    }
 
     println!(
         "\n  {} Detected {} MCP server\n",
