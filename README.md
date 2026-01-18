@@ -1,6 +1,6 @@
 <div align="center">
 
-  <h3>[ tool ]</h3>
+  <h3>[ tool-cli ]</h3>
   <h4>———&nbsp;&nbsp;&nbsp;The Missing Package Manager for MCP Tools&nbsp;&nbsp;&nbsp;———</h4>
 
 </div>
@@ -11,10 +11,28 @@
   <video autoplay src="https://github.com/user-attachments/assets/23618f92-5897-44d1-bfa6-1058f30c09e" width="800" controls></video>
 </div>
 
-<!--
+
+<br />
+
+<div align='center'>
+  <!-- <a href="https://discord.gg/T95Y3XnEAK" target="_blank">
+    <img src="https://img.shields.io/badge/join forum-%2300acee.svg?color=00a9e7&style=for-the-badge&logo=discourse&logoColor=white" alt=discourse style="margin-bottom: 5px;"/>
+  </a> -->
+
+  <a href="https://discord.gg/T95Y3XnEAK" target="_blank">
+    <img src="https://img.shields.io/badge/join discord-%2300acee.svg?color=mediumslateblue&style=for-the-badge&logo=discord&logoColor=white" alt=discord style="margin-bottom: 5px;"/>
+  </a>
+</div>
+
+<br />
+
 <div align="center">
-  <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDp" target="_blank"><img src="https://cdn.simpleicons.org/gnometerminal" height="12"/></a> <sup><sub><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDp" target="_blank">SEE HOW IT WORKS HERE →</a></sub></sup>
-</div> -->
+    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://cdn.simpleicons.org/readthedocs/8CA1AF" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">DOCUMENTATION →</a></sup>
+</div>
+
+<div align="center">
+    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://cdn.simpleicons.org/bookstack/BBDDE5" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">SEE COOKBOOKS →</a></sup>
+</div>
 
 <br />
 
@@ -99,7 +117,7 @@ Run them directly:
 ```sh
 tool build
 tool test
-tool run dev
+tool dev
 ```
 
 Same muscle memory as npm. Different manifest.
@@ -281,21 +299,89 @@ No `entry_point`, no bundled code. The manifest just describes how to connect. U
 
 ## MANAGING TOOLS
 
-On the consumer side:
+On the consumer side, `tool-cli` handles discovery, installation, and management of MCP tools.
+
+##
+
+<h4>1&nbsp;&nbsp;⏵&nbsp;&nbsp;Search</h4>
+
+Find tools in the registry:
 
 ```sh
-tool add weather-tool        # Install from registry
-tool list                    # See what's installed
-tool remove weather-tool     # Uninstall
-tool search weather          # Find tools
+tool search weather
 ```
 
+Returns matching tools with their descriptions, authors, and versions.
+
+##
+
+<h4>2&nbsp;&nbsp;⏵&nbsp;&nbsp;Install</h4>
+
+```sh
+tool install acme/weather-tool
+```
+
+Installs a tool from the registry. Tools are referenced by `namespace/name`. Pin a specific version with `@version`:
+
+```sh
+tool install acme/weather-tool@1.2.0
+```
+
+##
+
+<h4>3&nbsp;&nbsp;⏵&nbsp;&nbsp;List</h4>
+
+```sh
+tool list
+```
+
+Shows all installed tools. Filter by name pattern:
+
+```sh
+tool list weather
+```
+
+##
+
+<h4>4&nbsp;&nbsp;⏵&nbsp;&nbsp;Grep</h4>
+
+Search across tool schemas to find capabilities:
+
+```sh
+tool grep "file"
+```
+
+Searches tool names, descriptions, and parameters. Useful when you know what you want to do but not which tool does it.
+
+> <details>
+> <summary>&nbsp;Filter options</summary>
+>
+> ```sh
+> tool grep -n "weather"      # Search tool names only
+> tool grep -d "upload"       # Search descriptions only
+> tool grep -p "path"         # Search parameter names only
+> tool grep -i "API"          # Case-insensitive
+> ```
+>
+> </details>
+
+##
+
+<h4>5&nbsp;&nbsp;⏵&nbsp;&nbsp;Uninstall</h4>
+
+```sh
+tool uninstall acme/weather-tool
+```
+
+Removes a tool from your system.
+
+<br />
 
 ## COMMANDS
 
 **Create**
 - `init` — Scaffold a new tool project
-- `detect` — Generate manifest from existing MCP server
+- `detect` — Determine if an existing MCP server can be converted to a MCPB package
 
 **Develop**
 - `run <script>` — Execute a manifest script
@@ -308,16 +394,17 @@ tool search weather          # Find tools
 - `publish` — Upload to registry
 
 **Manage**
-- `add` — Install a tool
-- `remove` — Uninstall a tool
+- `install` — Install a tool
+- `uninstall` — Uninstall a tool
 - `list` — Show installed tools
 - `search` — Find tools in registry
+- `grep` — Search tool schemas by pattern
 - `download` — Download without installing
 
 **Auth**
 - `login` — Authenticate with registry
 - `logout` — Clear authentication
-- `whoami` — Show current user
+- `whoami` — Show authentication status
 
 <br />
 
