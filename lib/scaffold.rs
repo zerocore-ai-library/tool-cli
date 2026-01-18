@@ -702,7 +702,7 @@ Thumbs.db
 
 /// Generate .gitignore content for Node.js projects.
 pub fn node_gitignore_template() -> &'static str {
-    "node_modules/\n*.mcpb\n"
+    "node_modules/\ndist/\n*.mcpb\n"
 }
 
 /// Generate .gitignore content for Python projects.
@@ -712,7 +712,7 @@ pub fn python_gitignore_template() -> &'static str {
 
 /// Generate .gitignore content for Rust projects.
 pub fn rust_gitignore_template() -> &'static str {
-    "target/\n*.mcpb\n"
+    "target/\ndist/\n*.mcpb\n"
 }
 
 //--------------------------------------------------------------------------------------------------

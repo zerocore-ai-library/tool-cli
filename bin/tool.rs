@@ -215,7 +215,19 @@ async fn run() -> ToolResult<()> {
             entry,
             transport,
             name,
-        } => handlers::detect_mcpb(path, false, entry, transport, name, false).await,
+        } => {
+            handlers::detect_mcpb(
+                path,
+                false,
+                entry,
+                transport,
+                name,
+                false,
+                cli.concise,
+                cli.no_header,
+            )
+            .await
+        }
 
         Command::Init {
             path,
