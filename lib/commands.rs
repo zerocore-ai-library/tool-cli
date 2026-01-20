@@ -319,7 +319,33 @@ pub enum Command {
     /// Show authentication status.
     Whoami,
 
+    /// Manage the tool-cli installation itself.
+    #[command(name = "self", subcommand)]
+    SelfCmd(SelfCommand),
+
     /// Catch-all for dynamic script names (e.g., `tool build`, `tool test`).
     #[command(external_subcommand)]
     External(Vec<OsString>),
+}
+
+/// Self-management commands for tool-cli.
+#[derive(Debug, Subcommand)]
+pub enum SelfCommand {
+    /// Update tool-cli to the latest version.
+    Update {
+        /// Only check for updates, don't install.
+        #[arg(long)]
+        check: bool,
+
+        /// Install a specific version.
+        #[arg(long)]
+        version: Option<String>,
+    },
+
+    /// Uninstall tool-cli from this system.
+    Uninstall {
+        /// Skip confirmation prompt.
+        #[arg(short, long)]
+        yes: bool,
+    },
 }

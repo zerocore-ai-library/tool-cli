@@ -15,23 +15,12 @@
 <br />
 
 <div align='center'>
-  <!-- <a href="https://discord.gg/T95Y3XnEAK" target="_blank">
-    <img src="https://img.shields.io/badge/join forum-%2300acee.svg?color=00a9e7&style=for-the-badge&logo=discourse&logoColor=white" alt=discourse style="margin-bottom: 5px;"/>
-  </a> -->
-
   <a href="https://discord.gg/T95Y3XnEAK" target="_blank">
     <img src="https://img.shields.io/badge/join discord-%2300acee.svg?color=mediumslateblue&style=for-the-badge&logo=discord&logoColor=white" alt=discord style="margin-bottom: 5px;"/>
   </a>
-</div>
-
-<br />
-
-<div align="center">
-    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://cdn.simpleicons.org/readthedocs/8CA1AF" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">DOCUMENTATION →</a></sup>
-</div>
-
-<div align="center">
-    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://cdn.simpleicons.org/bookstack/BBDDE5" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">SEE COOKBOOKS →</a></sup>
+  <a href="https://docs.microsandbox.dev" target="_blank">
+    <img src="https://img.shields.io/badge/read the docs-%2300acee.svg?color=ff4500&style=for-the-badge&logo=gitbook&logoColor=white" alt=documentation style="margin-bottom: 5px;"/>
+  </a>
 </div>
 
 <br />
@@ -39,6 +28,12 @@
 > [MCP](https://github.com/modelcontextprotocol) solved how AI agents integrate with other systems. [MCPB](https://github.com/modelcontextprotocol/mcpb) solved how users install them. But if you're building MCP tools, you're still copying JSON configs, wrestling with dependencies, and manually testing against clients.
 >
 > `tool-cli` is the missing piece. It handles the entire lifecycle, from scaffolding to publishing, so you can focus on developing your tool.
+
+<br />
+
+<div align="center">
+    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">HOW TO BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
+</div>
 
 <br />
 
