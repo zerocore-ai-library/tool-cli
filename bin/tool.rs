@@ -4,7 +4,7 @@ use clap::{CommandFactory, Parser};
 use colored::Colorize;
 use tool_cli::handlers;
 use tool_cli::tree::try_show_tree;
-use tool_cli::{Cli, Command, ToolError, ToolResult};
+use tool_cli::{Cli, Command, SelfCommand, ToolError, ToolResult, self_update};
 use tracing_subscriber::EnvFilter;
 
 //--------------------------------------------------------------------------------------------------
@@ -395,5 +395,35 @@ async fn run() -> ToolResult<()> {
             )
             .await
         }
+
+        Command::SelfCmd(subcmd) => match subcmd {
+            SelfCommand::Update { check, version } => {
+                if check {
+                    let result = self_update::check_for_update().await?;
+                    println!();
+                    if result.update_available {
+                        println!(
+                            "  {} Update available: {} → {}",
+                            "✓".bright_green(),
+                            result.current.dimmed(),
+                            result.latest.bright_cyan()
+                        );
+                        println!();
+                        println!("  Run {} to update", "tool self update".bright_cyan());
+                    } else {
+                        println!(
+                            "  {} Already up to date ({})",
+                            "✓".bright_green(),
+                            result.current.bright_cyan()
+                        );
+                    }
+                    println!();
+                    Ok(())
+                } else {
+                    self_update::self_update(version.as_deref()).await
+                }
+            }
+            SelfCommand::Uninstall { yes } => self_update::self_uninstall(yes).await,
+        },
     }
 }
