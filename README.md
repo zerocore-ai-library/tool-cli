@@ -132,10 +132,33 @@ Shows tools, prompts, resources. This is what clients see when they connect.
 Call a tool directly:
 
 ```sh
-tool call my-tool -m get_weather -p location="San Francisco"
+tool call my-tool -m get_weather location="San Francisco"
 ```
 
 Invokes a specific method with parameters. No client needed. Useful for debugging before you ship.
+
+> <details>
+> <summary>&nbsp;Method shorthand</summary>
+>
+> MCP tools often use the `toolname__method` naming convention. Use `.` as shorthand:
+>
+> ```sh
+> # These are equivalent:
+> tool call bash -m bash__exec command="ls -la"
+> tool call bash -m .exec command="ls -la"
+>
+> # Nested names work too:
+> tool call files -m .fs.read path="/tmp"  # expands to files__fs__read
+> ```
+>
+> Parameters can be passed as trailing arguments (no `-p` needed) or with `-p` flags:
+>
+> ```sh
+> tool call my-tool -m .method key=value another=123
+> tool call my-tool -m .method -p key=value -p another=123
+> ```
+>
+> </details>
 
 Validate your manifest:
 
