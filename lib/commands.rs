@@ -323,6 +323,10 @@ pub enum Command {
     #[command(name = "self", subcommand)]
     SelfCmd(SelfCommand),
 
+    /// Configure tool user settings.
+    #[command(subcommand)]
+    Config(ConfigCommand),
+
     /// Catch-all for dynamic script names (e.g., `tool build`, `tool test`).
     #[command(external_subcommand)]
     External(Vec<OsString>),
@@ -347,5 +351,54 @@ pub enum SelfCommand {
         /// Skip confirmation prompt.
         #[arg(short, long)]
         yes: bool,
+    },
+}
+
+/// Config subcommands.
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    /// Set configuration values for a tool.
+    Set {
+        /// Tool reference.
+        tool: String,
+
+        /// Configuration values as trailing args (KEY=VALUE).
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        values: Vec<String>,
+
+        /// Skip interactive prompts, use provided values only.
+        #[arg(short, long)]
+        yes: bool,
+
+        /// Configuration values (KEY=VALUE), repeatable.
+        #[arg(short = 'k', long = "config")]
+        config: Vec<String>,
+    },
+
+    /// Show configuration for a tool.
+    Get {
+        /// Tool reference.
+        tool: String,
+
+        /// Specific key to show (shows all if omitted).
+        key: Option<String>,
+    },
+
+    /// List all tools with saved configuration.
+    List,
+
+    /// Remove a specific configuration key.
+    Unset {
+        /// Tool reference.
+        tool: String,
+
+        /// Key to remove.
+        key: String,
+    },
+
+    /// Remove all configuration for a tool.
+    Reset {
+        /// Tool reference.
+        tool: String,
     },
 }
