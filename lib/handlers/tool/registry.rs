@@ -132,8 +132,13 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
     Ok(())
 }
 
-/// Add a tool from the registry.
+/// Add a tool from the registry or a local path.
 pub async fn add_tool(name: &str) -> ToolResult<()> {
+    // Check if this looks like a local path
+    if is_local_path(name) {
+        return install_local_tool(name).await;
+    }
+
     let plugin_ref = name
         .parse::<PluginRef>()
         .map_err(|e| ToolError::Generic(format!("Invalid tool reference '{}': {}", name, e)))?;
@@ -180,6 +185,121 @@ pub async fn add_tool(name: &str) -> ToolResult<()> {
             );
         }
     }
+
+    Ok(())
+}
+
+/// Check if the input looks like a local path rather than a registry reference.
+fn is_local_path(input: &str) -> bool {
+    // Explicit path indicators
+    input.starts_with('.')
+        || input.starts_with('/')
+        || input.starts_with('~')
+        // Windows absolute paths
+        || (input.len() >= 2 && input.chars().nth(1) == Some(':'))
+        // Check if it's an existing directory with manifest.json
+        || PathBuf::from(input).join(MCPB_MANIFEST_FILE).exists()
+}
+
+/// Install a tool from a local path by creating a symlink.
+async fn install_local_tool(path: &str) -> ToolResult<()> {
+    use crate::constants::DEFAULT_TOOLS_PATH;
+    use crate::mcpb::McpbManifest;
+
+    // Resolve the path
+    let source_path = if path.starts_with('~') {
+        dirs::home_dir()
+            .ok_or_else(|| ToolError::Generic("Could not determine home directory".into()))?
+            .join(&path[2..])
+    } else {
+        PathBuf::from(path)
+    };
+
+    let source_path = source_path
+        .canonicalize()
+        .map_err(|_| ToolError::Generic(format!("Path not found: {}", path)))?;
+
+    // Check for manifest.json
+    let manifest_path = source_path.join(MCPB_MANIFEST_FILE);
+    if !manifest_path.exists() {
+        return Err(ToolError::Generic(format!(
+            "No {} found in {}. Run `tool init` first.",
+            MCPB_MANIFEST_FILE,
+            source_path.display()
+        )));
+    }
+
+    // Load manifest to get name and version
+    let manifest = McpbManifest::load(&source_path)?;
+    let tool_name = manifest
+        .name
+        .as_ref()
+        .ok_or_else(|| ToolError::Generic("manifest.json must include a name field".into()))?;
+    let version = manifest.version.as_ref();
+
+    // Build target directory name
+    let target_name = match version {
+        Some(v) => format!("{}@{}", tool_name, v),
+        None => tool_name.clone(),
+    };
+
+    let target_path = DEFAULT_TOOLS_PATH.join(&target_name);
+
+    println!(
+        "  {} Linking {} from {}...",
+        "→".bright_blue(),
+        target_name.bright_cyan(),
+        source_path.display().to_string().dimmed()
+    );
+
+    // Check if target already exists
+    if target_path.exists() || target_path.is_symlink() {
+        // Check if it's already linked to the same source
+        if target_path.is_symlink()
+            && let Ok(existing_target) = std::fs::read_link(&target_path)
+            && existing_target == source_path
+        {
+            println!(
+                "  {} Already linked {}",
+                "✓".bright_green(),
+                target_name.bright_cyan()
+            );
+            return Ok(());
+        }
+
+        // Remove existing (symlink or directory)
+        if target_path.is_symlink() || target_path.is_file() {
+            std::fs::remove_file(&target_path).map_err(|e| {
+                ToolError::Generic(format!("Failed to remove existing link: {}", e))
+            })?;
+        } else {
+            std::fs::remove_dir_all(&target_path).map_err(|e| {
+                ToolError::Generic(format!("Failed to remove existing directory: {}", e))
+            })?;
+        }
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = target_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ToolError::Generic(format!("Failed to create tools directory: {}", e)))?;
+    }
+
+    // Create symlink
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&source_path, &target_path)
+        .map_err(|e| ToolError::Generic(format!("Failed to create symlink: {}", e)))?;
+
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&source_path, &target_path)
+        .map_err(|e| ToolError::Generic(format!("Failed to create symlink: {}", e)))?;
+
+    println!(
+        "  {} Installed {} {}",
+        "✓".bright_green(),
+        target_name.bright_cyan(),
+        "(linked)".dimmed()
+    );
 
     Ok(())
 }
