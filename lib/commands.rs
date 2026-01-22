@@ -108,9 +108,9 @@ pub enum Command {
         query: String,
     },
 
-    /// Install a tool from the registry.
+    /// Install a tool from the registry or a local path.
     Install {
-        /// Tool reference (`namespace/name[@version]`).
+        /// Tool reference (`namespace/name[@version]`) or local path.
         name: String,
     },
 
