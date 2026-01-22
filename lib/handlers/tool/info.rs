@@ -28,15 +28,19 @@ pub async fn tool_info(
     concise: bool,
     no_header: bool,
 ) -> ToolResult<()> {
-    // Parse user config from -c flags and config file
-    let mut user_config = parse_user_config(&config, config_file.as_deref())?;
-
     // Resolve tool path
     let tool_path = resolve_tool_path(&tool).await?;
 
     // Load manifest to get user_config schema
     let resolved_plugin = load_tool_from_path(&tool_path)?;
     let manifest_schema = resolved_plugin.template.user_config.as_ref();
+
+    // Parse user config from saved config, config file, and -C flags
+    let mut user_config = parse_user_config(
+        &config,
+        config_file.as_deref(),
+        Some(&resolved_plugin.plugin_ref),
+    )?;
 
     // Prompt for missing required config values, then apply defaults
     prompt_missing_user_config(manifest_schema, &mut user_config)?;

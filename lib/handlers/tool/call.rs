@@ -7,6 +7,7 @@ use crate::resolver::load_tool_from_path;
 use colored::Colorize;
 use std::collections::BTreeMap;
 
+use super::config_cmd::load_tool_config;
 use super::list::resolve_tool_path;
 
 //--------------------------------------------------------------------------------------------------
@@ -23,9 +24,6 @@ pub async fn tool_call(
     verbose: bool,
     concise: bool,
 ) -> ToolResult<()> {
-    // Parse user config from -c flags and config file
-    let mut user_config = parse_user_config(&config, config_file.as_deref())?;
-
     // Parse method parameters
     let arguments = parse_method_params(&params)?;
 
@@ -35,6 +33,13 @@ pub async fn tool_call(
     // Load manifest to get user_config schema
     let resolved_plugin = load_tool_from_path(&tool_path)?;
     let manifest_schema = resolved_plugin.template.user_config.as_ref();
+
+    // Parse user config from saved config, config file, and -C flags
+    let mut user_config = parse_user_config(
+        &config,
+        config_file.as_deref(),
+        Some(&resolved_plugin.plugin_ref),
+    )?;
 
     // Prompt for missing required config values, then apply defaults
     prompt_missing_user_config(manifest_schema, &mut user_config)?;
@@ -209,13 +214,26 @@ pub async fn tool_call(
 }
 
 /// Parse user config from -c flags and config file.
+///
+/// Resolution order (later overrides earlier):
+/// 1. Saved config from `~/.tool/config/...` (lowest priority)
+/// 2. Config file (`--config-file`)
+/// 3. CLI flags (`-C`) (highest priority)
 pub(super) fn parse_user_config(
     config_flags: &[String],
     config_file: Option<&str>,
+    tool_ref: Option<&crate::references::PluginRef>,
 ) -> ToolResult<BTreeMap<String, String>> {
     let mut config = BTreeMap::new();
 
-    // Load from config file first
+    // 1. Load saved config (lowest priority)
+    if let Some(ref_) = tool_ref
+        && let Ok(saved) = load_tool_config(ref_)
+    {
+        config.extend(saved);
+    }
+
+    // 2. Load from config file
     if let Some(file_path) = config_file {
         let content = std::fs::read_to_string(file_path)?;
         let file_config: BTreeMap<String, String> = serde_json::from_str(&content)
@@ -224,7 +242,7 @@ pub(super) fn parse_user_config(
         config.extend(file_config);
     }
 
-    // Parse -c flags (key=value format)
+    // 3. Parse -C flags (highest priority)
     for flag in config_flags {
         if let Some((key, value)) = flag.split_once('=') {
             config.insert(key.to_string(), value.to_string());

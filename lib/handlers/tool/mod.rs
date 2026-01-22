@@ -1,6 +1,7 @@
 //! Tool command handlers.
 
 mod call;
+mod config_cmd;
 mod detect_cmd;
 mod grep;
 mod info;
@@ -16,6 +17,7 @@ mod validate_cmd;
 //--------------------------------------------------------------------------------------------------
 
 pub use call::tool_call;
+pub use config_cmd::{config_tool, load_tool_config};
 pub use detect_cmd::detect_mcpb;
 pub use grep::grep_tool;
 pub use info::tool_info;

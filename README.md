@@ -15,10 +15,10 @@
 <br />
 
 <div align='center'>
-  <a href="https://discord.gg/T95Y3XnEAK" target="_blank">
+  <a href="https://discord.gg/ck5xz7vR" target="_blank">
     <img src="https://img.shields.io/badge/join discord-%2300acee.svg?color=mediumslateblue&style=for-the-badge&logo=discord&logoColor=white" alt=discord style="margin-bottom: 5px;"/>
   </a>
-  <a href="https://docs.microsandbox.dev" target="_blank">
+  <a href="https://tool.store/docs" target="_blank">
     <img src="https://img.shields.io/badge/read the docs-%2300acee.svg?color=ff4500&style=for-the-badge&logo=gitbook&logoColor=white" alt=documentation style="margin-bottom: 5px;"/>
   </a>
 </div>
@@ -32,7 +32,7 @@
 <br />
 
 <div align="center">
-    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">HOW TO BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
+    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
 </div>
 
 <br />
@@ -362,7 +362,42 @@ Searches tool names, descriptions, and parameters. Useful when you know what you
 
 ##
 
-<h4>5&nbsp;&nbsp;⏵&nbsp;&nbsp;Uninstall</h4>
+<h4>5&nbsp;&nbsp;⏵&nbsp;&nbsp;Configure</h4>
+
+Tools that need API keys or other settings can be configured once and used everywhere:
+
+```sh
+tool config set acme/weather-tool
+```
+
+Interactive prompts walk you through each setting. For non-interactive use:
+
+```sh
+tool config set acme/weather-tool -y api_key=xxx
+```
+
+View saved configuration:
+
+```sh
+tool config get acme/weather-tool
+```
+
+Configuration is stored per-tool and automatically loaded by `tool info` and `tool call`. You can still override with `-C` flags when needed.
+
+> <details>
+> <summary>&nbsp;More config commands</summary>
+>
+> ```sh
+> tool config list                        # List all configured tools
+> tool config unset acme/weather-tool api_key  # Remove a key
+> tool config reset acme/weather-tool     # Remove all config
+> ```
+>
+> </details>
+
+##
+
+<h4>6&nbsp;&nbsp;⏵&nbsp;&nbsp;Uninstall</h4>
 
 ```sh
 tool uninstall acme/weather-tool
@@ -395,6 +430,7 @@ Removes a tool from your system.
 - `search` — Find tools in registry
 - `grep` — Search tool schemas by pattern
 - `download` — Download without installing
+- `config` — Configure tool settings (set, get, list, unset, reset)
 
 **Auth**
 - `login` — Authenticate with registry

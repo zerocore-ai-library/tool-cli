@@ -425,5 +425,7 @@ async fn run() -> ToolResult<()> {
             }
             SelfCommand::Uninstall { yes } => self_update::self_uninstall(yes).await,
         },
+
+        Command::Config(cmd) => handlers::config_tool(cmd, cli.concise, cli.no_header).await,
     }
 }
