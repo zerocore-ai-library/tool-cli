@@ -397,7 +397,7 @@ async fn config_reset(tool: String, concise: bool) -> ToolResult<()> {
 /// 1. Local path (e.g., ".") - uses manifest name
 /// 2. Plugin reference (e.g., "appcypher/filesystem") - parses directly
 /// 3. Versioned reference (e.g., "appcypher/filesystem@1.0.0") - strips version
-fn parse_tool_ref_for_config(
+pub fn parse_tool_ref_for_config(
     tool: &str,
     resolved: &crate::resolver::ResolvedPlugin<crate::mcpb::McpbManifest>,
 ) -> ToolResult<PluginRef> {
@@ -485,7 +485,10 @@ pub fn load_tool_config(plugin_ref: &PluginRef) -> ToolResult<BTreeMap<String, S
 }
 
 /// Save config for a tool.
-fn save_tool_config(plugin_ref: &PluginRef, config: &BTreeMap<String, String>) -> ToolResult<()> {
+pub fn save_tool_config(
+    plugin_ref: &PluginRef,
+    config: &BTreeMap<String, String>,
+) -> ToolResult<()> {
     let config_dir = get_config_dir(plugin_ref);
     let config_path = get_config_path(plugin_ref);
 

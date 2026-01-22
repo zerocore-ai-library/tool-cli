@@ -190,12 +190,16 @@ pub enum Command {
         json: bool,
 
         /// Configuration values (KEY=VALUE).
-        #[arg(short = 'C', long)]
+        #[arg(short = 'k', long)]
         config: Vec<String>,
 
         /// Path to config file (JSON).
         #[arg(long)]
         config_file: Option<String>,
+
+        /// Don't auto-save config values for future use.
+        #[arg(long)]
+        no_save: bool,
 
         /// Show verbose output.
         #[arg(short, long)]
@@ -221,12 +225,16 @@ pub enum Command {
         args: Vec<String>,
 
         /// Configuration values (KEY=VALUE).
-        #[arg(short = 'C', long)]
+        #[arg(short = 'k', long)]
         config: Vec<String>,
 
         /// Path to config file (JSON).
         #[arg(long)]
         config_file: Option<String>,
+
+        /// Don't auto-save config values for future use.
+        #[arg(long)]
+        no_save: bool,
 
         /// Show verbose output.
         #[arg(short, long)]

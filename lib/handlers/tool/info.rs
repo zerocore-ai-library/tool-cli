@@ -7,6 +7,7 @@ use colored::Colorize;
 use std::path::Path;
 
 use super::call::{apply_user_config_defaults, parse_user_config, prompt_missing_user_config};
+use super::config_cmd::{parse_tool_ref_for_config, save_tool_config};
 use super::list::resolve_tool_path;
 
 //--------------------------------------------------------------------------------------------------
@@ -24,6 +25,7 @@ pub async fn tool_info(
     json_output: bool,
     config: Vec<String>,
     config_file: Option<String>,
+    no_save: bool,
     verbose: bool,
     concise: bool,
     no_header: bool,
@@ -35,16 +37,21 @@ pub async fn tool_info(
     let resolved_plugin = load_tool_from_path(&tool_path)?;
     let manifest_schema = resolved_plugin.template.user_config.as_ref();
 
-    // Parse user config from saved config, config file, and -C flags
-    let mut user_config = parse_user_config(
-        &config,
-        config_file.as_deref(),
-        Some(&resolved_plugin.plugin_ref),
-    )?;
+    // Parse user config from saved config, config file, and -k flags
+    let mut user_config =
+        parse_user_config(&config, config_file.as_deref(), &tool, &resolved_plugin)?;
 
     // Prompt for missing required config values, then apply defaults
     prompt_missing_user_config(manifest_schema, &mut user_config)?;
     apply_user_config_defaults(manifest_schema, &mut user_config);
+
+    // Auto-save config for future use (unless --no-save)
+    if !no_save
+        && !user_config.is_empty()
+        && let Ok(plugin_ref) = parse_tool_ref_for_config(&tool, &resolved_plugin)
+    {
+        let _ = save_tool_config(&plugin_ref, &user_config);
+    }
 
     // Get tool info - handle EntryPointNotFound specially
     let (capabilities, tool_type, manifest_path) =

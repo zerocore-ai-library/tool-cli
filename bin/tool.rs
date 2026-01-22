@@ -307,6 +307,7 @@ async fn run() -> ToolResult<()> {
             json,
             config,
             config_file,
+            no_save,
             verbose,
         } => {
             handlers::tool_info(
@@ -318,6 +319,7 @@ async fn run() -> ToolResult<()> {
                 json,
                 config,
                 config_file,
+                no_save,
                 verbose,
                 cli.concise,
                 cli.no_header,
@@ -332,6 +334,7 @@ async fn run() -> ToolResult<()> {
             args,
             config,
             config_file,
+            no_save,
             verbose,
         } => {
             handlers::tool_call(
@@ -341,6 +344,7 @@ async fn run() -> ToolResult<()> {
                 args,
                 config,
                 config_file,
+                no_save,
                 verbose,
                 cli.concise,
             )
