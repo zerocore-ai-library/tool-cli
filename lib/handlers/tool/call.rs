@@ -7,7 +7,7 @@ use crate::resolver::load_tool_from_path;
 use colored::Colorize;
 use std::collections::BTreeMap;
 
-use super::config_cmd::load_tool_config;
+use super::config_cmd::{load_tool_config, parse_tool_ref_for_config, save_tool_config};
 use super::list::resolve_tool_path;
 
 //--------------------------------------------------------------------------------------------------
@@ -52,6 +52,7 @@ pub async fn tool_call(
     args: Vec<String>,
     config: Vec<String>,
     config_file: Option<String>,
+    no_save: bool,
     verbose: bool,
     concise: bool,
 ) -> ToolResult<()> {
@@ -72,16 +73,21 @@ pub async fn tool_call(
     let resolved_plugin = load_tool_from_path(&tool_path)?;
     let manifest_schema = resolved_plugin.template.user_config.as_ref();
 
-    // Parse user config from saved config, config file, and -C flags
-    let mut user_config = parse_user_config(
-        &config,
-        config_file.as_deref(),
-        Some(&resolved_plugin.plugin_ref),
-    )?;
+    // Parse user config from saved config, config file, and -k flags
+    let mut user_config =
+        parse_user_config(&config, config_file.as_deref(), &tool, &resolved_plugin)?;
 
     // Prompt for missing required config values, then apply defaults
     prompt_missing_user_config(manifest_schema, &mut user_config)?;
     apply_user_config_defaults(manifest_schema, &mut user_config);
+
+    // Auto-save config for future use (unless --no-save)
+    if !no_save
+        && !user_config.is_empty()
+        && let Ok(plugin_ref) = parse_tool_ref_for_config(&tool, &resolved_plugin)
+    {
+        let _ = save_tool_config(&plugin_ref, &user_config);
+    }
 
     // Get tool name for display
     let tool_name = tool_path
@@ -256,17 +262,18 @@ pub async fn tool_call(
 /// Resolution order (later overrides earlier):
 /// 1. Saved config from `~/.tool/config/...` (lowest priority)
 /// 2. Config file (`--config-file`)
-/// 3. CLI flags (`-C`) (highest priority)
+/// 3. CLI flags (`-k`) (highest priority)
 pub(super) fn parse_user_config(
     config_flags: &[String],
     config_file: Option<&str>,
-    tool_ref: Option<&crate::references::PluginRef>,
+    tool: &str,
+    resolved: &crate::resolver::ResolvedPlugin<crate::mcpb::McpbManifest>,
 ) -> ToolResult<BTreeMap<String, String>> {
     let mut config = BTreeMap::new();
 
     // 1. Load saved config (lowest priority)
-    if let Some(ref_) = tool_ref
-        && let Ok(saved) = load_tool_config(ref_)
+    if let Ok(plugin_ref) = parse_tool_ref_for_config(tool, resolved)
+        && let Ok(saved) = load_tool_config(&plugin_ref)
     {
         config.extend(saved);
     }
@@ -329,8 +336,8 @@ pub(super) fn apply_user_config_defaults(
 
 /// Prompt for user_config values interactively.
 ///
-/// Prompts for all config fields except those that have defaults and aren't required
-/// (those are auto-applied by `apply_user_config_defaults`).
+/// Prompts for all config fields not already provided. Fields with defaults
+/// are shown with the default pre-filled so users can accept or override.
 pub(super) fn prompt_missing_user_config(
     schema: Option<&BTreeMap<String, McpbUserConfigField>>,
     user_config: &mut BTreeMap<String, String>,
@@ -341,29 +348,10 @@ pub(super) fn prompt_missing_user_config(
         return Ok(());
     };
 
-    // Find fields that need prompting:
-    // - Already provided via --config: skip
-    // - Has default AND not required: skip (auto-applied later)
-    // - Otherwise: prompt
+    // Find fields that need prompting (all fields not already provided)
     let to_prompt: Vec<(&String, &McpbUserConfigField)> = schema
         .iter()
-        .filter(|(key, field)| {
-            // Skip if already provided
-            if user_config.contains_key(*key) {
-                return false;
-            }
-
-            let is_required = field.required.unwrap_or(false);
-            let has_default = field.default.is_some();
-
-            // Skip if has default and not required (will be auto-applied)
-            if has_default && !is_required {
-                return false;
-            }
-
-            // Prompt for: required fields OR fields without defaults
-            true
-        })
+        .filter(|(key, _)| !user_config.contains_key(*key))
         .collect();
 
     if to_prompt.is_empty() {
