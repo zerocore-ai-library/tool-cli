@@ -329,6 +329,7 @@ async fn run() -> ToolResult<()> {
             tool,
             method,
             param,
+            args,
             config,
             config_file,
             verbose,
@@ -337,6 +338,7 @@ async fn run() -> ToolResult<()> {
                 tool,
                 method,
                 param,
+                args,
                 config,
                 config_file,
                 verbose,
@@ -344,6 +346,8 @@ async fn run() -> ToolResult<()> {
             )
             .await
         }
+
+        Command::Config(cmd) => handlers::config_tool(cmd, cli.concise, cli.no_header).await,
 
         Command::List { filter, json } => {
             handlers::list_tools(filter.as_deref(), json, cli.concise, cli.no_header).await
@@ -425,7 +429,5 @@ async fn run() -> ToolResult<()> {
             }
             SelfCommand::Uninstall { yes } => self_update::self_uninstall(yes).await,
         },
-
-        Command::Config(cmd) => handlers::config_tool(cmd, cli.concise, cli.no_header).await,
     }
 }

@@ -14,16 +14,54 @@ use super::list::resolve_tool_path;
 // Functions
 //--------------------------------------------------------------------------------------------------
 
+/// Expand shorthand method syntax.
+///
+/// - `.exec` → `{tool}__exec`
+/// - `.fs.read` → `{tool}__fs__read`
+/// - `bash__exec` → `bash__exec` (unchanged)
+fn expand_method_shorthand(method: &str, tool_name: &str) -> String {
+    if let Some(suffix) = method.strip_prefix('.') {
+        let expanded_suffix = suffix.replace('.', "__");
+        format!("{}__{}", tool_name, expanded_suffix)
+    } else {
+        method.to_string()
+    }
+}
+
+/// Extract tool name from reference for method expansion.
+///
+/// - `bash` → `bash`
+/// - `appcypher/filesystem` → `filesystem`
+/// - `appcypher/filesystem@1.0.0` → `filesystem`
+fn extract_tool_name_for_expansion(tool_ref: &str) -> &str {
+    tool_ref
+        .split('@')
+        .next()
+        .unwrap_or(tool_ref) // strip version
+        .rsplit('/')
+        .next()
+        .unwrap_or(tool_ref) // strip namespace
+}
+
 /// Call a tool method.
+#[allow(clippy::too_many_arguments)]
 pub async fn tool_call(
     tool: String,
     method: String,
-    params: Vec<String>,
+    param: Vec<String>,
+    args: Vec<String>,
     config: Vec<String>,
     config_file: Option<String>,
     verbose: bool,
     concise: bool,
 ) -> ToolResult<()> {
+    // Merge -p flags and trailing args
+    let params: Vec<String> = param.into_iter().chain(args).collect();
+
+    // Expand method shorthand (.exec → toolname__exec)
+    let tool_name_for_expansion = extract_tool_name_for_expansion(&tool);
+    let method = expand_method_shorthand(&method, tool_name_for_expansion);
+
     // Parse method parameters
     let arguments = parse_method_params(&params)?;
 
@@ -425,4 +463,74 @@ fn parse_method_params(params: &[String]) -> ToolResult<BTreeMap<String, serde_j
     }
 
     Ok(result)
+}
+
+//--------------------------------------------------------------------------------------------------
+// Tests
+//--------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_method_shorthand() {
+        // Basic shorthand expansion
+        assert_eq!(expand_method_shorthand(".exec", "bash"), "bash__exec");
+        assert_eq!(
+            expand_method_shorthand(".read", "filesystem"),
+            "filesystem__read"
+        );
+
+        // Nested shorthand expansion
+        assert_eq!(
+            expand_method_shorthand(".fs.read", "files"),
+            "files__fs__read"
+        );
+        assert_eq!(expand_method_shorthand(".a.b.c", "tool"), "tool__a__b__c");
+
+        // Full method names pass through unchanged
+        assert_eq!(expand_method_shorthand("bash__exec", "bash"), "bash__exec");
+        assert_eq!(
+            expand_method_shorthand("custom_method", "bash"),
+            "custom_method"
+        );
+
+        // Methods without prefix pass through unchanged
+        assert_eq!(expand_method_shorthand("exec", "bash"), "exec");
+    }
+
+    #[test]
+    fn test_extract_tool_name_for_expansion() {
+        // Simple tool name
+        assert_eq!(extract_tool_name_for_expansion("bash"), "bash");
+        assert_eq!(extract_tool_name_for_expansion("filesystem"), "filesystem");
+
+        // Namespaced tool
+        assert_eq!(
+            extract_tool_name_for_expansion("appcypher/filesystem"),
+            "filesystem"
+        );
+        assert_eq!(
+            extract_tool_name_for_expansion("org/tool-name"),
+            "tool-name"
+        );
+
+        // Versioned tool
+        assert_eq!(extract_tool_name_for_expansion("bash@1.0.0"), "bash");
+        assert_eq!(
+            extract_tool_name_for_expansion("filesystem@0.2.1"),
+            "filesystem"
+        );
+
+        // Namespaced and versioned
+        assert_eq!(
+            extract_tool_name_for_expansion("appcypher/filesystem@1.0.0"),
+            "filesystem"
+        );
+        assert_eq!(
+            extract_tool_name_for_expansion("org/my-tool@2.0.0-beta"),
+            "my-tool"
+        );
+    }
 }

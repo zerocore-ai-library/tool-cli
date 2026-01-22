@@ -208,13 +208,17 @@ pub enum Command {
         #[arg(default_value = ".")]
         tool: String,
 
-        /// Method name to call.
+        /// Method name to call (use .method as shorthand for tool__method).
         #[arg(short, long)]
         method: String,
 
         /// Method parameters (KEY=VALUE or KEY=JSON).
         #[arg(short, long)]
         param: Vec<String>,
+
+        /// Method parameters as trailing arguments (KEY=VALUE or KEY=JSON).
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
 
         /// Configuration values (KEY=VALUE).
         #[arg(short = 'C', long)]
