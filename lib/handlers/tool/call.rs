@@ -372,17 +372,23 @@ pub(super) fn prompt_missing_user_config(
 
     for (key, field) in to_prompt {
         let is_required = field.required.unwrap_or(false);
+        let is_sensitive = field.sensitive.unwrap_or(false);
 
         // Get description
         let description = field.description.as_deref().unwrap_or("");
 
         // Default can be number, string, or bool - convert to string
-        let default_value = field.default.as_ref().map(|d| match d {
-            serde_json::Value::String(s) => s.clone(),
-            serde_json::Value::Number(n) => n.to_string(),
-            serde_json::Value::Bool(b) => b.to_string(),
-            _ => d.to_string(),
-        });
+        // Don't show defaults for sensitive fields
+        let default_value = if is_sensitive {
+            None
+        } else {
+            field.default.as_ref().map(|d| match d {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Bool(b) => b.to_string(),
+                _ => d.to_string(),
+            })
+        };
 
         // Build prompt text
         let prompt_text = if description.is_empty() {
@@ -391,14 +397,22 @@ pub(super) fn prompt_missing_user_config(
             format!("{} ({})", key, description)
         };
 
-        // Get user input using cliclack
-        let value: String = match default_value {
-            Some(default) => cliclack::input(&prompt_text)
-                .default_input(&default)
-                .interact()?,
-            None => cliclack::input(&prompt_text)
-                .required(is_required)
-                .interact()?,
+        // Get user input using cliclack - use password prompt for sensitive fields
+        let value: String = if is_sensitive {
+            let mut password = cliclack::password(&prompt_text);
+            if !is_required {
+                password = password.allow_empty();
+            }
+            password.interact()?
+        } else {
+            match default_value {
+                Some(default) => cliclack::input(&prompt_text)
+                    .default_input(&default)
+                    .interact()?,
+                None => cliclack::input(&prompt_text)
+                    .required(is_required)
+                    .interact()?,
+            }
         };
 
         // Only insert non-empty values (skip optional fields left blank)

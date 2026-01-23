@@ -918,7 +918,11 @@ fn prompt_all_user_config(
             _ => {
                 // string, directory, file
                 if is_sensitive {
-                    cliclack::password(&prompt_text).interact()?
+                    let mut password = cliclack::password(&prompt_text);
+                    if !is_required {
+                        password = password.allow_empty();
+                    }
+                    password.interact()?
                 } else if let Some(default) = &default_value {
                     cliclack::input(&prompt_text)
                         .default_input(default)
