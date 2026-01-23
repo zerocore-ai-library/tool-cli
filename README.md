@@ -41,328 +41,204 @@
 
 <br />
 
-## INSTALL
+## Install
 
-```sh
-curl -fsSL https://cli.tool.store | sh
-```
+> ```sh
+> curl -fsSL https://cli.tool.store | sh
+> ```
 
 <br />
 
-## QUICK START
+## Quick Start
 
-<h4>1&nbsp;&nbsp;⏵&nbsp;&nbsp;Create a New Tool</h4>
+Get your first MCP tool published in three steps.
 
-```sh
-tool init
-```
+<h4>1&nbsp;&nbsp;⏵&nbsp;&nbsp;Create</h4>
 
-Interactive prompts walk you through creating an MCPB package. You get a working scaffold with `manifest.json` configured correctly.
-
-> <details>
-> <summary>&nbsp;Want to skip the prompts?</summary>
->
 > ```sh
-> tool init my-tool --type node --yes
+> tool init my_tool
 > ```
 >
+> This gives you a working MCP server with a valid `manifest.json`. Just follow the prompts to pick your language and transport.
+>
+> <details>
+> <summary>Already have an MCP server?</summary>
+> <blockquote>
+> Run `tool detect` in your project to see what tool-cli finds. Then `tool init` will generate a manifest from your existing code.
+>
+> ```sh
+> cd my_existing_mcp_project
+> tool detect        # shows detected type, transport, entry point
+> tool init          # generates manifest.json
+> ```
+> </blockquote>
 > </details>
 
 ##
 
-<h4>2&nbsp;&nbsp;⏵&nbsp;&nbsp;Or Detect an Existing MCP Server</h4>
+<h4>2&nbsp;&nbsp;⏵&nbsp;&nbsp;Test</h4>
 
-Most MCP servers already exist. They're sitting in repos, working fine, but not packaged for distribution.
-
-```sh
-tool detect
-```
-
-Run this in your project. It scans for patterns and shows what kind of MCP server it detected (type, transport, entry point, package manager, and confidence score).
-
-```sh
-tool init
-```
-
-Running tool init on an existing MCP project shows the detected configuration and prompts you to confirm creating manifest.json and .mcpbignore. Your MCP server is now an MCPB project.
-
-##
-
-<h4>3&nbsp;&nbsp;⏵&nbsp;&nbsp;Develop</h4>
-
-Define scripts in your manifest:
-
-```jsonc
-{
-  // ...
-  "_meta": {
-    "store.tool.mcpb": {
-      "scripts": {
-        "build": "npm run build",
-        "test": "npm test",
-        "dev": "npm run dev"
-      }
-    }
-  }
-}
-```
-
-Run them directly:
-
-```sh
-tool build
-tool test
-tool dev
-```
-
-Same muscle memory as npm. Different manifest.
-
-##
-
-<h4>4&nbsp;&nbsp;⏵&nbsp;&nbsp;Test</h4>
-
-Inspect what your server exposes:
-
-```sh
-tool info
-```
-
-Shows tools, prompts, resources. This is what clients see when they connect.
-
-Call a tool directly:
-
-```sh
-tool call my-tool -m get_weather location="San Francisco"
-```
-
-Invokes a specific method with parameters. No client needed. Useful for debugging before you ship.
-
+> ```sh
+> tool info
+> ```
+>
+> Shows you what your server exposes. Tools, prompts, resources. This is what clients will see when they connect.
+>
+> ```sh
+> tool call my_tool -m get_weather location="San Francisco"
+> ```
+>
+> You can call any method directly. No client needed.
+>
 > <details>
-> <summary>&nbsp;Method shorthand</summary>
->
-> MCP tools often use the `toolname__method` naming convention. Use `.` as shorthand:
->
-> ```sh
-> # These are equivalent:
-> tool call bash -m bash__exec command="ls -la"
-> tool call bash -m .exec command="ls -la"
->
-> # Nested names work too:
-> tool call files -m .fs.read path="/tmp"  # expands to files__fs__read
-> ```
->
-> Parameters can be passed as trailing arguments (no `-p` needed) or with `-p` flags:
+> <summary>Method shorthand</summary>
+> <blockquote>
+> MCP tools often use `toolname__method` naming. You can use `.` as shorthand.
 >
 > ```sh
-> tool call my-tool -m .method key=value another=123
-> tool call my-tool -m .method -p key=value -p another=123
+> tool call bash -m .exec command="ls -la"     # expands to bash__exec
+> tool call files -m .fs.read path="/tmp"      # expands to files__fs__read
 > ```
->
-> </details>
-
-Validate your manifest:
-
-```sh
-tool validate
-```
-
-Catches missing fields, type mismatches, invalid paths. Better to find these now than after publishing.
-
-Run your server in proxy mode:
-
-```sh
-tool run
-```
-
-Starts the server with native transport (stdio or HTTP based on manifest). Useful for connecting MCP clients like Claude Desktop.
-
-> <details>
-> <summary>&nbsp;Protocol bridging</summary>
->
-> Expose a server via a different transport:
->
-> ```sh
-> # Expose an HTTP backend as stdio (for Claude Desktop)
-> tool run --expose stdio
->
-> # Expose a stdio backend as HTTP
-> tool run --expose http --port 3000
->
-> # With custom host binding
-> tool run --expose http --port 8080 --host 0.0.0.0
-> ```
->
-> This is useful for:
-> - Connecting Claude Desktop (stdio) to remote HTTP MCP servers
-> - Exposing local stdio tools over the network
-> - Testing tools with different clients
->
+> </blockquote>
 > </details>
 
 ##
 
-<h4>5&nbsp;&nbsp;⏵&nbsp;&nbsp;Pack</h4>
+<h4>3&nbsp;&nbsp;⏵&nbsp;&nbsp;Share</h4>
 
-```sh
-tool pack
-```
-
-Creates a `.mcpb` file, a zipped file with your server, dependencies, and manifest. This is what gets distributed.
-
-The packer validates your manifest first and respects `.mcpbignore` (same syntax as `.gitignore`).
-
-##
-
-<h4>6&nbsp;&nbsp;⏵&nbsp;&nbsp;Publish</h4>
-
-```sh
-tool login
-tool publish
-```
-
-Authenticate once with tool.store, then publish. Your tool becomes discoverable and installable by anyone.
-
-> <details>
-> <summary>&nbsp;Preview first</summary>
->
 > ```sh
-> tool publish --dry-run
+> tool login
+> tool publish
 > ```
 >
+> Log in once, then publish. Now anyone can install your tool.
+>
+> <details>
+> <summary>Just want to bundle it?</summary>
+> <blockquote>
+>
+> ```sh
+> tool pack
+> ```
+>
+> Creates a `.mcpb` file you can distribute yourself.
+> </blockquote>
 > </details>
+
+<br />
+
+<div align='center'>• • •</div>
+
+<br />
+
+## Using Tools
+
+### Find Tools
+
+> ```sh
+> tool search filesystem
+> ```
+>
+> Search the registry for tools. You'll see names, descriptions, and download counts.
+>
+> ```sh
+> tool grep "file"
+> ```
+>
+> Search through tool schemas by pattern. Useful when you're looking for tools with specific capabilities.
 
 ##
 
-### All Commands
+### Install Tools
 
-| Command | Description |
-|---------|-------------|
-| `init` | Scaffold a new tool project |
-| `detect` | Detect existing MCP server type |
-| `validate` | Check manifest against spec |
-| `info` | Display tool capabilities |
-| `call` | Invoke a tool method directly |
-| `run` | Run MCP server in proxy mode |
-| `pack` | Create .mcpb bundle |
-| `publish` | Upload to registry |
-| `install` | Install a tool from registry |
+> ```sh
+> tool install appcypher/bash
+> ```
+>
+> Installs a tool from the registry. You can also install from a local path.
+>
+> ```sh
+> tool list
+> ```
+>
+> See what you have installed.
+
+##
+
+### Run Tools
+
+> ```sh
+> tool run appcypher/bash
+> ```
+>
+> Starts the tool with its native transport. Connect your MCP client to it.
+>
+> You can also use `--expose` to bridge between transports.
+>
+> ```sh
+> tool run --expose stdio              # HTTP backend to stdio
+> tool run --expose http --port 3000   # stdio backend to HTTP
+> ```
+
+##
+
+### Configure Tools
+
+> ```sh
+> tool config set appcypher/bash
+> ```
+>
+> Some tools need configuration like API keys. This walks you through setting them up interactively.
+>
+> ```sh
+> tool config get appcypher/bash
+> ```
+>
+> Check what config values are set.
+
+##
+
+### Use Tools
+
+> ```sh
+> tool info appcypher/bash
+> ```
+>
+> See what a tool exposes. Tools, prompts, resources.
+>
+> ```sh
+> tool call appcypher/bash -m .exec command="echo hello"
+> ```
+>
+> Call a method directly. Great for testing things out.
+
+<br />
+
+<div align='center'>• • •</div>
+
+<br />
+
+## Commands
+
+| Command | What it does |
+|---------|--------------|
+| `init` | Create a new tool or convert an existing MCP server |
+| `detect` | Scan a project and show what tool-cli finds |
+| `validate` | Check your manifest for errors |
+| `info` | Show what a tool exposes |
+| `call` | Call a tool method directly |
+| `run` | Start a tool as a server |
+| `pack` | Bundle into a `.mcpb` file |
+| `publish` | Upload to the registry |
+| `install` | Install a tool from the registry |
 | `uninstall` | Remove an installed tool |
 | `list` | Show installed tools |
-| `search` | Find tools in registry |
+| `search` | Find tools in the registry |
 | `grep` | Search tool schemas by pattern |
-| `config` | Configure tool settings |
-| `login` | Authenticate with registry |
+| `config` | Manage tool configuration |
+| `login` | Log in to the registry |
 
-For the full list of commands and detailed usage, check out the [CLI documentation](https://tool.store/docs/cli).
-
-<br />
-
-<div align='center'>• • •</div>
-
-<br />
-
-## THE MANIFEST
-
-Everything about your tool lives in `manifest.json`. Minimal example:
-
-```jsonc
-{
-  "manifest_version": "0.3",
-  "name": "weather-tool",
-  "version": "1.0.0",
-  "description": "Get weather data for any location",
-  "author": {
-    "name": "Your Name"
-  },
-  "server": {
-    "type": "node",
-    "transport": "stdio",
-    "entry_point": "dist/index.js"
-  },
-  "tools": [
-    {
-      "name": "get_weather",
-      "description": "Fetches current weather for a location"
-    }
-  ]
-}
-```
-
-### Server Types
-
-| Type | Use Case |
-|------|----------|
-| `node` | JavaScript/TypeScript servers |
-| `python` | Python servers |
-| `binary` | Pre-compiled executables (Rust, Go, etc.) |
-
-### Transports
-
-| Transport | Description |
-|-----------|-------------|
-| `stdio` | Runs as child process, communicates over stdin/stdout |
-| `http` | Runs as service, communicates over HTTP |
-
-The `http` transport is a tool.store extension to MCPB. It enables remote MCP servers, tools that live on the network rather than the local machine.
-
-### User Configuration
-
-If your tool needs API keys or user-provided settings:
-
-```jsonc
-{
-  // ...
-  "user_config": {
-    "api_key": {
-      "type": "string",
-      "title": "API Key",
-      "description": "Your weather service API key",
-      "required": true,
-      "sensitive": true
-    }
-  }
-}
-```
-
-MCP hosts handle the UI. They prompt users during installation, validate inputs, and store sensitive values in the system keychain.
-
-Variables become available in your server config:
-
-```jsonc
-{
-  // ...
-  "server": {
-    "mcp_config": {
-      "command": "node",
-      "args": ["${__dirname}/server/index.js"],
-      "env": {
-        "API_KEY": "${user_config.api_key}"
-      }
-    }
-  }
-}
-```
-
-### Reference Mode
-
-Not all tools need bundled code. Some point to existing commands or remote servers:
-
-```jsonc
-{
-  // ...
-  "server": {
-    "transport": "http",
-    "mcp_config": {
-      "url": "https://api.example.com/mcp/",
-      "headers": {
-        "Authorization": "Bearer ${user_config.token}"
-      }
-    }
-  }
-}
-```
-
-No `entry_point`, no bundled code. The manifest just describes how to connect. Useful for wrapping system-installed MCP servers, connecting to remote endpoints, or creating thin clients over existing infrastructure.
+Check out the [CLI docs](https://tool.store/docs/cli) for the full details.
 
 <br />
 
@@ -370,20 +246,28 @@ No `entry_point`, no bundled code. The manifest just describes how to connect. U
 
 <br />
 
-## WHY THIS EXISTS
+## Why This Exists
 
 MCP is becoming the standard for AI tool integration. But standards only matter if people can actually use them.
 
-Anthropic's MCPB format solved the installation problem: users can now install MCP tools with one click. But developers still need to create those packages. They need to validate manifests, bundle dependencies, test locally, and publish somewhere discoverable.
+Anthropic's MCPB format solved the installation problem. Users can install MCP tools with one click now. But developers still need to create those packages. They need to validate manifests, bundle dependencies, test locally, and publish somewhere discoverable.
 
 tool-cli is that toolchain. And tool.store is that registry.
 
-The goal is simple: make building and sharing MCP tools as easy as publishing an npm package.
+The goal is simple. Make building and sharing MCP tools as easy as publishing an npm package.
+
 
 <br />
 
-## LINKS
+<div align="center">
+    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
+</div>
 
-- [tool.store](https://tool.store) — The MCP tool registry
-- [MCPB Specification](https://github.com/modelcontextprotocol/mcpb) — The bundle format
-- [MCP Protocol](https://modelcontextprotocol.io) — Model Context Protocol docs
+<br />
+
+
+## Links
+
+- [tool.store](https://tool.store) is the MCP tool registry
+- [MCPB Specification](https://github.com/modelcontextprotocol/mcpb) is the bundle format
+- [MCP Protocol](https://modelcontextprotocol.io) has the Model Context Protocol docs
