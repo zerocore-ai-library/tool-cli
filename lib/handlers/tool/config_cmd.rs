@@ -545,22 +545,26 @@ pub fn parse_tool_ref_for_config(
     // Try to parse as plugin reference
     if let Ok(mut plugin_ref) = PluginRef::parse(tool) {
         // If parsed but no namespace, check if we can infer from resolved path
+        // ONLY if the tool is in the standard tools directory (~/.tool/tools/)
         if plugin_ref.namespace().is_none() {
-            // Try to detect namespace from the resolved path
-            // Path pattern: ~/.tool/tools/<namespace>/<name>@<version>/manifest.json
-            if let Some(parent) = resolved.path.parent() {
-                // parent is the tool directory (e.g., filesystem@0.1.2)
-                if let Some(namespace_dir) = parent.parent() {
-                    // namespace_dir might be the namespace or tools root
-                    if let Some(ns_name) = namespace_dir.file_name().and_then(|n| n.to_str())
-                        && ns_name != "tools"
-                        && !ns_name.contains('@')
-                        && PluginRef::new(ns_name)
-                            .and_then(|r| r.with_namespace(ns_name))
-                            .is_ok()
-                        && let Ok(ref_with_ns) = plugin_ref.clone().with_namespace(ns_name)
-                    {
-                        plugin_ref = ref_with_ns;
+            let tools_path = crate::constants::DEFAULT_TOOLS_PATH.as_path();
+            if resolved.path.starts_with(tools_path) {
+                // Try to detect namespace from the resolved path
+                // Path pattern: ~/.tool/tools/<namespace>/<name>@<version>/manifest.json
+                if let Some(parent) = resolved.path.parent() {
+                    // parent is the tool directory (e.g., filesystem@0.1.2)
+                    if let Some(namespace_dir) = parent.parent() {
+                        // namespace_dir is the namespace directory
+                        if let Some(ns_name) = namespace_dir.file_name().and_then(|n| n.to_str())
+                            && ns_name != "tools"
+                            && !ns_name.contains('@')
+                            && PluginRef::new(ns_name)
+                                .and_then(|r| r.with_namespace(ns_name))
+                                .is_ok()
+                            && let Ok(ref_with_ns) = plugin_ref.clone().with_namespace(ns_name)
+                        {
+                            plugin_ref = ref_with_ns;
+                        }
                     }
                 }
             }
