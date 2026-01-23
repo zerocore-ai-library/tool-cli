@@ -62,6 +62,14 @@ pub static REGISTRY_AUTH_DIR: LazyLock<PathBuf> = LazyLock::new(|| DEFAULT_HOME_
 pub static DEFAULT_CONFIG_PATH: LazyLock<PathBuf> =
     LazyLock::new(|| DEFAULT_HOME_PATH.join("config"));
 
+/// Default path for host config backups.
+pub static DEFAULT_BACKUPS_PATH: LazyLock<PathBuf> =
+    LazyLock::new(|| DEFAULT_HOME_PATH.join("backups"));
+
+/// Default path for host metadata (tracking managed tools).
+pub static DEFAULT_HOSTS_PATH: LazyLock<PathBuf> =
+    LazyLock::new(|| DEFAULT_HOME_PATH.join("hosts"));
+
 //--------------------------------------------------------------------------------------------------
 // Functions
 //--------------------------------------------------------------------------------------------------

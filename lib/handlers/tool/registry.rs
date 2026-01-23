@@ -100,9 +100,9 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
     let pb = ProgressBar::new(bundle_size);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("    [{bar:30.cyan/dim}] {decimal_bytes}/{decimal_total_bytes} ({percent}%)")
+            .template("    [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
             .unwrap()
-            .progress_chars("=>-"),
+            .progress_chars("█░░"),
     );
 
     let pb_clone = pb.clone();
@@ -135,6 +135,8 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
 
 /// Add a tool from the registry or a local path.
 pub async fn add_tool(name: &str) -> ToolResult<()> {
+    use crate::constants::DEFAULT_TOOLS_PATH;
+
     // Check if this looks like a local path
     if is_local_path(name) {
         return install_local_tool(name).await;
@@ -145,45 +147,181 @@ pub async fn add_tool(name: &str) -> ToolResult<()> {
         .map_err(|e| ToolError::Generic(format!("Invalid tool reference '{}': {}", name, e)))?;
 
     // Check if it has a namespace (required for registry fetch)
-    if plugin_ref.namespace().is_none() {
-        println!(
-            "  {} Tool reference must include a namespace for registry fetch",
-            "✗".bright_red()
-        );
-        println!(
-            "    Example: {} or {}",
-            "appcypher/filesystem".bright_cyan(),
-            "myorg/mytool".bright_cyan()
-        );
-        return Ok(());
-    }
+    let namespace = match plugin_ref.namespace() {
+        Some(ns) => ns,
+        None => {
+            println!(
+                "  {} Tool reference must include a namespace for registry fetch",
+                "✗".bright_red()
+            );
+            println!(
+                "    Example: {} or {}",
+                "appcypher/filesystem".bright_cyan(),
+                "myorg/mytool".bright_cyan()
+            );
+            return Ok(());
+        }
+    };
+
+    let tool_name = plugin_ref.name();
 
     println!(
-        "  {} Adding tool {} from registry...",
+        "  {} Installing {} from registry...",
         "→".bright_blue(),
         name.bright_cyan()
     );
 
-    // Create resolver with auto-install enabled
+    // Get artifact details from registry
     let client = RegistryClient::new();
-    let resolver = FilePluginResolver::default().with_auto_install(client);
-
-    // Resolve will trigger auto-install if not found locally
-    match resolver.resolve_tool(name).await? {
-        Some(resolved) => {
-            println!(
-                "  {} Installed {} to {}",
-                "✓".bright_green(),
-                resolved.plugin_ref.to_string().bright_cyan(),
-                resolved.path.parent().unwrap_or(&resolved.path).display()
-            );
-        }
-        None => {
+    let artifact = match client.get_artifact(namespace, tool_name).await {
+        Ok(a) => a,
+        Err(_) => {
             println!(
                 "  {} Tool {} not found in registry",
                 "✗".bright_red(),
                 name.bright_white().bold()
             );
+            return Ok(());
+        }
+    };
+
+    // Get version info
+    let version_info = artifact
+        .latest_version
+        .ok_or_else(|| ToolError::Generic(format!("No published version found for {}", name)))?;
+    let version = &version_info.version;
+    let bundle_size = version_info.bundle_size.unwrap_or(0);
+
+    // Check if already installed
+    let target_dir = DEFAULT_TOOLS_PATH
+        .join(namespace)
+        .join(format!("{}@{}", tool_name, version));
+
+    if target_dir.join(MCPB_MANIFEST_FILE).exists() {
+        println!(
+            "  {} Already installed {}/{}@{}",
+            "✓".bright_green(),
+            namespace.bright_cyan(),
+            tool_name.bright_cyan(),
+            version.bright_cyan()
+        );
+        return Ok(());
+    }
+
+    // Create temp file for download
+    let temp_file =
+        std::env::temp_dir().join(format!("tool-{}-{}-{}.zip", namespace, tool_name, version));
+
+    // Create progress bar
+    let pb = ProgressBar::new(bundle_size);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("    [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
+            .unwrap()
+            .progress_chars("█░░"),
+    );
+
+    // Download with progress
+    let pb_clone = pb.clone();
+    client
+        .download_artifact_with_progress(
+            namespace,
+            tool_name,
+            version,
+            &temp_file,
+            move |downloaded, total| {
+                if total > 0 && pb_clone.length() == Some(0) {
+                    pb_clone.set_length(total);
+                }
+                pb_clone.set_position(downloaded);
+            },
+        )
+        .await?;
+
+    pb.finish_and_clear();
+
+    // Create target directory
+    tokio::fs::create_dir_all(&target_dir).await.map_err(|e| {
+        ToolError::Generic(format!(
+            "Failed to create tool directory {:?}: {}",
+            target_dir, e
+        ))
+    })?;
+
+    // Extract the bundle
+    extract_bundle(&temp_file, &target_dir)?;
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&temp_file);
+
+    println!(
+        "  {} Installed {}/{}@{} to {}",
+        "✓".bright_green(),
+        namespace.bright_cyan(),
+        tool_name.bright_cyan(),
+        version.bright_cyan(),
+        target_dir.display()
+    );
+
+    Ok(())
+}
+
+/// Extract a ZIP bundle to a directory.
+fn extract_bundle(bundle_path: &std::path::Path, target_dir: &std::path::Path) -> ToolResult<()> {
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    let file = std::fs::File::open(bundle_path)
+        .map_err(|e| ToolError::Generic(format!("Failed to open bundle: {}", e)))?;
+
+    let mut archive = ZipArchive::new(file)
+        .map_err(|e| ToolError::Generic(format!("Failed to read ZIP archive: {}", e)))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| ToolError::Generic(format!("Failed to read archive entry: {}", e)))?;
+
+        let entry_path = entry
+            .enclosed_name()
+            .ok_or_else(|| ToolError::Generic("Invalid entry path in archive".into()))?;
+
+        let dest_path = target_dir.join(entry_path);
+
+        if let Some(parent) = dest_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                ToolError::Generic(format!("Failed to create directory {:?}: {}", parent, e))
+            })?;
+        }
+
+        #[cfg(unix)]
+        let unix_mode = entry.unix_mode();
+
+        if entry.is_dir() {
+            std::fs::create_dir_all(&dest_path).map_err(|e| {
+                ToolError::Generic(format!("Failed to create directory {:?}: {}", dest_path, e))
+            })?;
+        } else {
+            let mut content = Vec::new();
+            entry
+                .read_to_end(&mut content)
+                .map_err(|e| ToolError::Generic(format!("Failed to read entry content: {}", e)))?;
+
+            std::fs::write(&dest_path, &content).map_err(|e| {
+                ToolError::Generic(format!("Failed to write file {:?}: {}", dest_path, e))
+            })?;
+
+            #[cfg(unix)]
+            if let Some(mode) = unix_mode {
+                use std::os::unix::fs::PermissionsExt;
+                let permissions = std::fs::Permissions::from_mode(mode);
+                std::fs::set_permissions(&dest_path, permissions).map_err(|e| {
+                    ToolError::Generic(format!(
+                        "Failed to set permissions on {:?}: {}",
+                        dest_path, e
+                    ))
+                })?;
+            }
         }
     }
 
@@ -439,7 +577,7 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
     println!(
         "    {} {}",
         "Install with:".dimmed(),
-        "tool add <namespace>/<name>".bright_white()
+        "tool install <namespace>/<name>".bright_white()
     );
 
     Ok(())
@@ -604,9 +742,9 @@ pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
     let pb = ProgressBar::new(bundle_size);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("    [{bar:30.cyan/dim}] {decimal_bytes}/{decimal_total_bytes} ({percent}%)")
+            .template("    [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
             .unwrap()
-            .progress_chars("=>-"),
+            .progress_chars("█░░"),
     );
 
     // Upload to presigned URL with progress

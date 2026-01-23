@@ -131,6 +131,14 @@ pub enum ToolError {
         /// HTTP status code.
         status: u16,
     },
+
+    /// Invalid host name.
+    #[error("Unknown host '{0}'. Supported: claude-desktop, cursor, claude-code, vscode")]
+    InvalidHost(String),
+
+    /// Failed to parse host config.
+    #[error("Failed to parse {host} config: {message}")]
+    HostConfigParseError { host: String, message: String },
 }
 
 //--------------------------------------------------------------------------------------------------
