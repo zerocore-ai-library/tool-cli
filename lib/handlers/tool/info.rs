@@ -1,6 +1,7 @@
 //! Tool info command handlers.
 
 use crate::error::{ToolError, ToolResult};
+use crate::format::format_description;
 use crate::mcp::{ToolCapabilities, ToolType, get_tool_info, get_tool_type};
 use crate::resolver::load_tool_from_path;
 use crate::system_config::allocate_system_config;
@@ -176,32 +177,46 @@ pub async fn tool_info(
 
     // Tools section
     if (show_all || show_tools) && !capabilities.tools.is_empty() {
-        output_tools_section(&capabilities);
+        output_tools_section(&capabilities, verbose);
     }
 
     // Prompts section
     if (show_all || show_prompts) && !capabilities.prompts.is_empty() {
-        output_prompts_section(&capabilities);
+        output_prompts_section(&capabilities, verbose);
     }
 
     // Resources section
     if (show_all || show_resources) && !capabilities.resources.is_empty() {
-        output_resources_section(&capabilities);
+        output_resources_section(&capabilities, verbose);
     }
 
     Ok(())
 }
 
 /// Output tools section in human-readable format.
-fn output_tools_section(capabilities: &ToolCapabilities) {
+fn output_tools_section(capabilities: &ToolCapabilities, verbose: bool) {
     println!("    {}:", "Tools".dimmed());
     for (idx, tool) in capabilities.tools.iter().enumerate() {
-        let desc = tool
-            .description
-            .as_ref()
-            .map(|d| format!("  {}", d.dimmed()))
-            .unwrap_or_default();
-        println!("      {}{}", tool.name.bright_cyan(), desc);
+        if verbose {
+            // Verbose: name on its own line, description block below
+            println!("      {}", tool.name.bright_cyan());
+            if let Some(desc) = tool
+                .description
+                .as_ref()
+                .and_then(|d| format_description(d, true, "        "))
+            {
+                println!("{}", desc.dimmed());
+            }
+        } else {
+            // Default: name + first line inline
+            let desc = tool
+                .description
+                .as_ref()
+                .and_then(|d| format_description(d, false, ""))
+                .map(|d| format!("  {}", d.dimmed()))
+                .unwrap_or_default();
+            println!("      {}{}", tool.name.bright_cyan(), desc);
+        }
 
         let has_input = tool
             .input_schema
@@ -301,15 +316,29 @@ fn output_tools_section(capabilities: &ToolCapabilities) {
 }
 
 /// Output prompts section in human-readable format.
-fn output_prompts_section(capabilities: &ToolCapabilities) {
+fn output_prompts_section(capabilities: &ToolCapabilities, verbose: bool) {
     println!("    {}:", "Prompts".dimmed());
     for (idx, prompt) in capabilities.prompts.iter().enumerate() {
-        let desc = prompt
-            .description
-            .as_ref()
-            .map(|d| format!("  {}", d.dimmed()))
-            .unwrap_or_default();
-        println!("      {}{}", prompt.name.to_string().bright_magenta(), desc);
+        if verbose {
+            // Verbose: name on its own line, description block below
+            println!("      {}", prompt.name.to_string().bright_magenta());
+            if let Some(desc) = prompt
+                .description
+                .as_ref()
+                .and_then(|d| format_description(d, true, "        "))
+            {
+                println!("{}", desc.dimmed());
+            }
+        } else {
+            // Default: name + first line inline
+            let desc = prompt
+                .description
+                .as_ref()
+                .and_then(|d| format_description(d, false, ""))
+                .map(|d| format!("  {}", d.dimmed()))
+                .unwrap_or_default();
+            println!("      {}{}", prompt.name.to_string().bright_magenta(), desc);
+        }
 
         // Show arguments if available
         if let Some(args) = &prompt.arguments
@@ -343,15 +372,29 @@ fn output_prompts_section(capabilities: &ToolCapabilities) {
 }
 
 /// Output resources section in human-readable format.
-fn output_resources_section(capabilities: &ToolCapabilities) {
+fn output_resources_section(capabilities: &ToolCapabilities, verbose: bool) {
     println!("    {}:", "Resources".dimmed());
     for (idx, resource) in capabilities.resources.iter().enumerate() {
-        let desc = resource
-            .description
-            .as_ref()
-            .map(|d| format!("  {}", d.dimmed()))
-            .unwrap_or_default();
-        println!("      {}{}", resource.uri.to_string().bright_yellow(), desc);
+        if verbose {
+            // Verbose: uri on its own line, description block below
+            println!("      {}", resource.uri.to_string().bright_yellow());
+            if let Some(desc) = resource
+                .description
+                .as_ref()
+                .and_then(|d| format_description(d, true, "        "))
+            {
+                println!("{}", desc.dimmed());
+            }
+        } else {
+            // Default: uri + first line inline
+            let desc = resource
+                .description
+                .as_ref()
+                .and_then(|d| format_description(d, false, ""))
+                .map(|d| format!("  {}", d.dimmed()))
+                .unwrap_or_default();
+            println!("      {}{}", resource.uri.to_string().bright_yellow(), desc);
+        }
 
         // Show resource details
         let has_name = !resource.name.is_empty();

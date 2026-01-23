@@ -1,6 +1,7 @@
 //! Tool list command handlers.
 
 use crate::error::{ToolError, ToolResult};
+use crate::format::format_description;
 use crate::resolver::FilePluginResolver;
 use colored::Colorize;
 use std::path::PathBuf;
@@ -158,6 +159,7 @@ pub async fn list_tools(
         let desc = entry
             .description
             .as_ref()
+            .and_then(|d| format_description(d, false, ""))
             .map(|d| format!("  {}", d.dimmed()))
             .unwrap_or_default();
         println!("    {}{}", entry.name.bright_cyan(), desc);
