@@ -175,10 +175,18 @@ pub async fn list_tools(
 }
 
 /// Resolve a tool reference to a path.
+///
+/// Resolution order:
+/// 1. Explicit path indicators (`.`, `./`, `/`, `..`) - treat as local path
+/// 2. Try to resolve from installed tools
+/// 3. Fallback to relative path if it exists locally
 pub async fn resolve_tool_path(tool: &str) -> ToolResult<PathBuf> {
-    // Check if it's a local path
-    let path = PathBuf::from(tool);
-    if path.exists() || tool == "." || tool.starts_with("./") || tool.starts_with("/") {
+    // Check for explicit path indicators first
+    let is_explicit_path =
+        tool == "." || tool.starts_with("./") || tool.starts_with('/') || tool.contains("..");
+
+    if is_explicit_path {
+        let path = PathBuf::from(tool);
         let abs_path = if path.is_absolute() {
             path
         } else {
@@ -187,12 +195,19 @@ pub async fn resolve_tool_path(tool: &str) -> ToolResult<PathBuf> {
         return Ok(abs_path);
     }
 
-    // Try to resolve from installed tools
+    // Try to resolve from installed tools first
     let resolver = FilePluginResolver::default();
     if let Some(resolved) = resolver.resolve_tool(tool).await? {
         // Get the directory containing the manifest
         let dir = resolved.path.parent().unwrap_or(&resolved.path);
         return Ok(dir.to_path_buf());
+    }
+
+    // Fallback: check if it exists as a relative path
+    let path = PathBuf::from(tool);
+    if path.exists() {
+        let abs_path = std::env::current_dir()?.join(&path);
+        return Ok(abs_path);
     }
 
     Err(ToolError::Generic(format!(
