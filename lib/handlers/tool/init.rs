@@ -679,6 +679,13 @@ fn print_migrate_next_steps(
     println!(
         "    {}. {}",
         step,
+        format!("tool run {}", display_path).bright_white(),
+    );
+    step += 1;
+
+    println!(
+        "    {}. {}",
+        step,
         format!("tool pack {}", display_path).bright_white(),
     );
 }
@@ -862,8 +869,13 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
             "# test a tool".dimmed()
         );
         println!(
-            "    {}. tool pack               {}",
+            "    {}. tool run                {}",
             step + 3,
+            "# run server interactively".dimmed()
+        );
+        println!(
+            "    {}. tool pack               {}",
+            step + 4,
             "# create .mcpb bundle".dimmed()
         );
     } else {
@@ -883,8 +895,13 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
             "# test a tool".dimmed()
         );
         println!(
-            "    {}. tool pack               {}",
+            "    {}. tool run                {}",
             step + 3,
+            "# run server interactively".dimmed()
+        );
+        println!(
+            "    {}. tool pack               {}",
+            step + 4,
             "# create .mcpb bundle".dimmed()
         );
     }
