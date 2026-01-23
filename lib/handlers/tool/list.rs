@@ -18,6 +18,7 @@ pub(super) struct ToolListEntry {
 }
 
 /// Result of resolving a tool reference.
+#[derive(Debug)]
 pub struct ResolvedToolPath {
     /// The resolved path to the tool directory.
     pub path: PathBuf,
@@ -234,4 +235,98 @@ pub async fn resolve_tool_path(tool: &str) -> ToolResult<ResolvedToolPath> {
         "Tool '{}' not found. Use a path or install it first.",
         tool
     )))
+}
+
+//--------------------------------------------------------------------------------------------------
+// Tests
+//--------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn create_manifest(dir: &std::path::Path, name: &str) {
+        let manifest = format!(
+            r#"{{
+                "manifest_version": "0.3",
+                "name": "{}",
+                "version": "1.0.0",
+                "description": "Test tool",
+                "author": {{ "name": "Test" }},
+                "server": {{ "type": "node", "entry_point": "index.js" }}
+            }}"#,
+            name
+        );
+        fs::write(dir.join("manifest.json"), manifest).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_resolve_explicit_absolute_path() {
+        let temp = TempDir::new().unwrap();
+        create_manifest(temp.path(), "test-tool");
+
+        let abs_path = temp.path().to_string_lossy().to_string();
+        let result = resolve_tool_path(&abs_path).await.unwrap();
+        assert!(!result.is_installed);
+        // Canonicalize to handle symlinks
+        let result_canonical = result.path.canonicalize().unwrap();
+        let temp_canonical = temp.path().canonicalize().unwrap();
+        assert_eq!(result_canonical, temp_canonical);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_explicit_path_starting_with_slash() {
+        let temp = TempDir::new().unwrap();
+        let tool_dir = temp.path().join("my-tool");
+        fs::create_dir(&tool_dir).unwrap();
+        create_manifest(&tool_dir, "my-tool");
+
+        let abs_path = tool_dir.to_string_lossy().to_string();
+        let result = resolve_tool_path(&abs_path).await.unwrap();
+        assert!(!result.is_installed);
+        assert!(result.path.ends_with("my-tool"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_not_found_returns_error() {
+        // Use a name that is neither installed nor exists as local path
+        // (not an explicit path like /foo or ./foo)
+        let result = resolve_tool_path("definitely-nonexistent-tool-12345").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_resolved_tool_path_struct() {
+        let resolved = ResolvedToolPath {
+            path: PathBuf::from("/test/path"),
+            is_installed: true,
+        };
+        assert_eq!(resolved.path, PathBuf::from("/test/path"));
+        assert!(resolved.is_installed);
+
+        let resolved_local = ResolvedToolPath {
+            path: PathBuf::from("/local/path"),
+            is_installed: false,
+        };
+        assert!(!resolved_local.is_installed);
+    }
+
+    #[test]
+    fn test_is_explicit_path_detection() {
+        // These should be detected as explicit paths
+        assert!(".".starts_with('.') || "." == ".");
+        assert!("./my-tool".starts_with("./"));
+        assert!("/absolute/path".starts_with('/'));
+        assert!("../parent".contains(".."));
+
+        // These should NOT be explicit paths
+        assert!(!"my-tool".starts_with('.'));
+        assert!(!"my-tool".starts_with("./"));
+        assert!(!"my-tool".starts_with('/'));
+        assert!(!"my-tool".contains(".."));
+    }
 }

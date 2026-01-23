@@ -991,3 +991,125 @@ fn mask_sensitive(value: &str) -> String {
         format!("{}...{}", &value[..3], &value[value.len() - 3..])
     }
 }
+
+//--------------------------------------------------------------------------------------------------
+// Tests
+//--------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mcpb::McpbManifest;
+    use crate::references::PluginRef;
+    use crate::resolver::ResolvedPlugin;
+    use std::path::PathBuf;
+
+    fn create_resolved_plugin(name: &str) -> ResolvedPlugin<McpbManifest> {
+        let json = format!(
+            r#"{{
+                "manifest_version": "0.3",
+                "name": "{}",
+                "version": "1.0.0",
+                "description": "Test tool",
+                "author": {{ "name": "Test" }},
+                "server": {{ "type": "node", "entry_point": "index.js" }}
+            }}"#,
+            name
+        );
+        let manifest: McpbManifest = serde_json::from_str(&json).unwrap();
+        ResolvedPlugin {
+            template: manifest,
+            path: PathBuf::from("/tmp/test/manifest.json"),
+            plugin_ref: PluginRef::new(name).unwrap(),
+        }
+    }
+
+    #[test]
+    fn test_parse_tool_ref_installed_simple_name() {
+        let resolved = create_resolved_plugin("my-tool");
+        let result = parse_tool_ref_for_config("my-tool", &resolved, true).unwrap();
+        assert_eq!(result.name(), "my-tool");
+        assert!(result.namespace().is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_ref_installed_with_namespace() {
+        let resolved = create_resolved_plugin("my-tool");
+        let result = parse_tool_ref_for_config("appcypher/my-tool", &resolved, true).unwrap();
+        assert_eq!(result.name(), "my-tool");
+        assert_eq!(result.namespace(), Some("appcypher"));
+    }
+
+    #[test]
+    fn test_parse_tool_ref_installed_strips_version() {
+        let resolved = create_resolved_plugin("my-tool");
+        let result = parse_tool_ref_for_config("appcypher/my-tool@1.0.0", &resolved, true).unwrap();
+        assert_eq!(result.name(), "my-tool");
+        assert_eq!(result.namespace(), Some("appcypher"));
+    }
+
+    #[test]
+    fn test_parse_tool_ref_not_installed_uses_manifest_name() {
+        let resolved = create_resolved_plugin("manifest-name");
+        // Even though ref has namespace, not installed means use manifest name
+        let result = parse_tool_ref_for_config("appcypher/my-tool", &resolved, false).unwrap();
+        assert_eq!(result.name(), "manifest-name");
+        assert!(result.namespace().is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_ref_local_path_uses_manifest_name() {
+        let resolved = create_resolved_plugin("local-tool");
+        let result = parse_tool_ref_for_config("./my-dir", &resolved, false).unwrap();
+        assert_eq!(result.name(), "local-tool");
+        assert!(result.namespace().is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_ref_dot_path_uses_manifest_name() {
+        let resolved = create_resolved_plugin("current-dir-tool");
+        let result = parse_tool_ref_for_config(".", &resolved, false).unwrap();
+        assert_eq!(result.name(), "current-dir-tool");
+        assert!(result.namespace().is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_ref_invalid_ref_not_installed_uses_manifest() {
+        let resolved = create_resolved_plugin("nested-tool");
+        // "org/team/tool" is invalid plugin ref, not installed → manifest name
+        let result = parse_tool_ref_for_config("org/team/tool", &resolved, false).unwrap();
+        assert_eq!(result.name(), "nested-tool");
+        assert!(result.namespace().is_none());
+    }
+
+    #[test]
+    fn test_get_config_path_no_namespace() {
+        let plugin_ref = PluginRef::new("my-tool").unwrap();
+        let path = get_config_path(&plugin_ref);
+        assert!(path.ends_with("my-tool/config.json"));
+        assert!(!path.to_string_lossy().contains("//"));
+    }
+
+    #[test]
+    fn test_get_config_path_with_namespace() {
+        let plugin_ref = PluginRef::new("my-tool")
+            .unwrap()
+            .with_namespace("appcypher")
+            .unwrap();
+        let path = get_config_path(&plugin_ref);
+        assert!(path.to_string_lossy().contains("appcypher"));
+        assert!(path.ends_with("appcypher/my-tool/config.json"));
+    }
+
+    #[test]
+    fn test_mask_sensitive_short() {
+        assert_eq!(mask_sensitive("secret"), "***");
+        assert_eq!(mask_sensitive("12345678"), "***");
+    }
+
+    #[test]
+    fn test_mask_sensitive_long() {
+        assert_eq!(mask_sensitive("123456789"), "123...789");
+        assert_eq!(mask_sensitive("my-secret-api-key"), "my-...key");
+    }
+}
