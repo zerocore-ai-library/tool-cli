@@ -639,7 +639,7 @@ configure_path() {
 
 do_install() {
     log ""
-    box_top "Tool CLI Installer v${SCRIPT_VERSION}"
+    box_top "Tool CLI Installer"
     log ""
 
     # Detect platform

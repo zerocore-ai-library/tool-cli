@@ -48,14 +48,6 @@ fn allocate_field(field: &McpbSystemConfigField) -> ToolResult<String> {
             let port = reserve_port(default)?;
             Ok(port.to_string())
         }
-        McpbSystemConfigType::Hostname => {
-            let default = field
-                .default
-                .as_ref()
-                .and_then(|v| v.as_str())
-                .unwrap_or("127.0.0.1");
-            Ok(default.to_string())
-        }
         McpbSystemConfigType::DataDirectory => {
             let dir = allocate_data_dir()?;
             Ok(dir.to_string_lossy().to_string())
@@ -67,25 +59,28 @@ fn allocate_field(field: &McpbSystemConfigField) -> ToolResult<String> {
     }
 }
 
-/// Reserve an available port, preferring the default if available.
-pub fn reserve_port(preferred: Option<u16>) -> ToolResult<u16> {
-    // Try preferred port first
-    if let Some(port) = preferred
+/// Reserve an available port.
+///
+/// Tries to allocate an available port first, falling back to the default
+/// if OS allocation fails.
+pub fn reserve_port(default: Option<u16>) -> ToolResult<u16> {
+    // First try to let OS assign an available port
+    if let Ok(listener) = TcpListener::bind("127.0.0.1:0")
+        && let Ok(addr) = listener.local_addr()
+    {
+        return Ok(addr.port());
+    }
+
+    // Fall back to default port if allocation failed
+    if let Some(port) = default
         && TcpListener::bind(("127.0.0.1", port)).is_ok()
     {
         return Ok(port);
     }
 
-    // Let OS assign an available port
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| ToolError::Generic(format!("Failed to allocate port: {}", e)))?;
-
-    let port = listener
-        .local_addr()
-        .map_err(|e| ToolError::Generic(format!("Failed to get allocated port: {}", e)))?
-        .port();
-
-    Ok(port)
+    Err(ToolError::Generic(
+        "Failed to allocate port: no available ports".to_string(),
+    ))
 }
 
 /// Check if a port is currently available.

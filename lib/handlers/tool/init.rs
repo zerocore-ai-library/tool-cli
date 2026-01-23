@@ -536,28 +536,47 @@ async fn init_migrate(
         for var in selected_env_vars {
             match var.config_type {
                 EnvConfigType::System => {
-                    let field_type = match var.value_type {
-                        crate::detect::EnvValueType::Port => McpbSystemConfigType::Port,
-                        crate::detect::EnvValueType::Hostname => McpbSystemConfigType::Hostname,
-                        _ => McpbSystemConfigType::Hostname, // fallback
-                    };
-                    let default: Option<serde_json::Value> = var.default.as_ref().map(|d| {
-                        if let Ok(n) = d.parse::<i64>() {
-                            serde_json::Value::Number(serde_json::Number::from(n))
-                        } else {
-                            serde_json::Value::String(d.clone())
-                        }
-                    });
-                    system_config.insert(
-                        var.config_key(),
-                        McpbSystemConfigField {
-                            field_type,
-                            title: var.name.clone(),
-                            description: None,
-                            required: None,
-                            default,
-                        },
-                    );
+                    // Only Port is a valid system config type; others go to user_config
+                    if matches!(var.value_type, crate::detect::EnvValueType::Port) {
+                        let default: Option<serde_json::Value> = var.default.as_ref().map(|d| {
+                            if let Ok(n) = d.parse::<i64>() {
+                                serde_json::Value::Number(serde_json::Number::from(n))
+                            } else {
+                                serde_json::Value::String(d.clone())
+                            }
+                        });
+                        system_config.insert(
+                            var.config_key(),
+                            McpbSystemConfigField {
+                                field_type: McpbSystemConfigType::Port,
+                                title: var.name.clone(),
+                                description: None,
+                                required: None,
+                                default,
+                            },
+                        );
+                    } else {
+                        // Non-port system vars (like hostname) go to user_config as strings
+                        let default = var
+                            .default
+                            .as_ref()
+                            .map(|d| serde_json::Value::String(d.clone()));
+                        user_config.insert(
+                            var.config_key(),
+                            McpbUserConfigField {
+                                field_type: McpbUserConfigType::String,
+                                title: var.name.clone(),
+                                description: None,
+                                required: None,
+                                default,
+                                multiple: None,
+                                sensitive: None,
+                                enum_values: None,
+                                min: None,
+                                max: None,
+                            },
+                        );
+                    }
                 }
                 EnvConfigType::User => {
                     let field_type = match var.value_type {
@@ -654,6 +673,13 @@ fn print_migrate_next_steps(
         "    {}. {}",
         step,
         format!("tool info {}", display_path).bright_white(),
+    );
+    step += 1;
+
+    println!(
+        "    {}. {}",
+        step,
+        format!("tool run {}", display_path).bright_white(),
     );
     step += 1;
 
@@ -843,8 +869,13 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
             "# test a tool".dimmed()
         );
         println!(
-            "    {}. tool pack               {}",
+            "    {}. tool run                {}",
             step + 3,
+            "# run server interactively".dimmed()
+        );
+        println!(
+            "    {}. tool pack               {}",
+            step + 4,
             "# create .mcpb bundle".dimmed()
         );
     } else {
@@ -864,8 +895,13 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
             "# test a tool".dimmed()
         );
         println!(
-            "    {}. tool pack               {}",
+            "    {}. tool run                {}",
             step + 3,
+            "# run server interactively".dimmed()
+        );
+        println!(
+            "    {}. tool pack               {}",
+            step + 4,
             "# create .mcpb bundle".dimmed()
         );
     }

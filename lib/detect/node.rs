@@ -6,8 +6,8 @@ use super::{
     GeneratedScaffold, ProjectDetector,
 };
 use crate::mcpb::{
-    McpbManifest, McpbMcpConfig, McpbServer, McpbServerType, McpbTransport, NodePackageManager,
-    PackageManager,
+    McpbManifest, McpbMcpConfig, McpbServer, McpbServerType, McpbTransport, McpbUserConfigField,
+    McpbUserConfigType, NodePackageManager, PackageManager,
 };
 use crate::scaffold::mcpbignore_template;
 use std::collections::BTreeMap;
@@ -363,10 +363,10 @@ impl ProjectDetector for NodeDetector {
                 args: vec![
                     format!("${{__dirname}}/{}", entry_point),
                     "--port=${system_config.port}".to_string(),
-                    "--host=${system_config.hostname}".to_string(),
+                    "--host=${user_config.host}".to_string(),
                 ],
                 env: BTreeMap::new(),
-                url: Some("http://${system_config.hostname}:${system_config.port}/mcp".to_string()),
+                url: Some("http://${user_config.host}:${system_config.port}/mcp".to_string()),
                 headers: BTreeMap::new(),
                 oauth_config: None,
                 platform_overrides: BTreeMap::new(),
@@ -383,6 +383,29 @@ impl ProjectDetector for NodeDetector {
                     Some(PackageManager::Node(pm)) => pm.build_command().to_string(),
                     _ => "npm install".to_string(),
                 });
+
+        // Create user_config with host for HTTP transport
+        let user_config = if transport == McpbTransport::Http {
+            let mut cfg = BTreeMap::new();
+            cfg.insert(
+                "host".to_string(),
+                McpbUserConfigField {
+                    field_type: McpbUserConfigType::String,
+                    title: "Bind Address".to_string(),
+                    description: Some("Network interface to bind to".to_string()),
+                    required: None,
+                    default: Some(serde_json::json!("127.0.0.1")),
+                    multiple: None,
+                    sensitive: None,
+                    enum_values: None,
+                    min: None,
+                    max: None,
+                },
+            );
+            Some(cfg)
+        } else {
+            None
+        };
 
         // Build manifest
         let manifest = McpbManifest {
@@ -411,7 +434,7 @@ impl ProjectDetector for NodeDetector {
             prompts: None,
             tools_generated: None,
             prompts_generated: None,
-            user_config: None,
+            user_config,
             system_config: None,
             compatibility: None,
             privacy_policies: None,

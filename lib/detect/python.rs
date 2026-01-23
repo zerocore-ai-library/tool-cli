@@ -6,8 +6,8 @@ use super::{
     GeneratedScaffold, ProjectDetector,
 };
 use crate::mcpb::{
-    McpbManifest, McpbMcpConfig, McpbServer, McpbServerType, McpbTransport, PackageManager,
-    PythonPackageManager,
+    McpbManifest, McpbMcpConfig, McpbServer, McpbServerType, McpbTransport, McpbUserConfigField,
+    McpbUserConfigType, PackageManager, PythonPackageManager,
 };
 use crate::scaffold::mcpbignore_template;
 use std::collections::BTreeMap;
@@ -487,6 +487,29 @@ impl ProjectDetector for PythonDetector {
             None
         };
 
+        // Create user_config with host for HTTP transport
+        let user_config = if transport == McpbTransport::Http {
+            let mut cfg = BTreeMap::new();
+            cfg.insert(
+                "host".to_string(),
+                McpbUserConfigField {
+                    field_type: McpbUserConfigType::String,
+                    title: "Bind Address".to_string(),
+                    description: Some("Network interface to bind to".to_string()),
+                    required: None,
+                    default: Some(serde_json::json!("127.0.0.1")),
+                    multiple: None,
+                    sensitive: None,
+                    enum_values: None,
+                    min: None,
+                    max: None,
+                },
+            );
+            Some(cfg)
+        } else {
+            None
+        };
+
         // Build manifest
         let manifest = McpbManifest {
             manifest_version: "0.3".to_string(),
@@ -514,7 +537,7 @@ impl ProjectDetector for PythonDetector {
             prompts: None,
             tools_generated: None,
             prompts_generated: None,
-            user_config: None,
+            user_config,
             system_config: None,
             compatibility: None,
             privacy_policies: None,
@@ -617,13 +640,13 @@ fn build_mcp_config(
             args.push("--port".to_string());
             args.push("${system_config.port}".to_string());
             args.push("--host".to_string());
-            args.push("${system_config.hostname}".to_string());
+            args.push("${user_config.host}".to_string());
 
             McpbMcpConfig {
                 command: Some(command),
                 args,
                 env: BTreeMap::new(),
-                url: Some("http://${system_config.hostname}:${system_config.port}/mcp".to_string()),
+                url: Some("http://${user_config.host}:${system_config.port}/mcp".to_string()),
                 headers: BTreeMap::new(),
                 oauth_config: None,
                 platform_overrides: BTreeMap::new(),

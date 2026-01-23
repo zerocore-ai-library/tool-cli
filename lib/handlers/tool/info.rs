@@ -1,8 +1,9 @@
 //! Tool info command handlers.
 
 use crate::error::{ToolError, ToolResult};
-use crate::mcp::{ToolCapabilities, ToolType, get_tool_info_from_path};
+use crate::mcp::{ToolCapabilities, ToolType, get_tool_info, get_tool_type};
 use crate::resolver::load_tool_from_path;
+use crate::system_config::allocate_system_config;
 use colored::Colorize;
 use std::path::Path;
 
@@ -54,64 +55,80 @@ pub async fn tool_info(
         let _ = save_tool_config(&plugin_ref, &user_config);
     }
 
+    // Allocate system config and resolve manifest
+    let system_config = allocate_system_config(resolved_plugin.template.system_config.as_ref())?;
+    let resolved = resolved_plugin
+        .template
+        .resolve(&user_config, &system_config)?;
+
+    // Get tool metadata
+    let tool_type = get_tool_type(&resolved_plugin.template);
+    let manifest_path = resolved_plugin.path.clone();
+    let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
+        tool_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
+
     // Get tool info - handle EntryPointNotFound specially
-    let (capabilities, tool_type, manifest_path) =
-        match get_tool_info_from_path(&tool_path, &user_config, verbose).await {
-            Ok(result) => result,
-            Err(ToolError::EntryPointNotFound {
-                entry_point,
-                full_path: _,
-                build_script,
-                bundle_path,
-            }) => {
+    let capabilities = match get_tool_info(&resolved, &tool_name, verbose).await {
+        Ok(result) => result,
+        Err(ToolError::EntryPointNotFound {
+            entry_point,
+            full_path: _,
+            build_script,
+            bundle_path,
+        }) => {
+            println!(
+                "  {} Entry point not found: {}\n",
+                "✗".bright_red(),
+                entry_point.bright_white()
+            );
+            if let Some(build_cmd) = build_script {
+                println!("    The tool needs to be built before it can be run.\n");
+                println!("    {}:", "To build".dimmed());
+                println!("      cd {} && tool build\n", bundle_path);
+                println!("    {}: {}", "Runs".dimmed(), build_cmd.dimmed());
+            } else {
+                println!("    {}:", "If this tool requires building".dimmed());
+                println!("      Add a build script to manifest.json:\n");
+                println!("      {}", "\"_meta\": {".dimmed());
+                println!("        {}", "\"store.tool.mcpb\": {".dimmed());
                 println!(
-                    "  {} Entry point not found: {}\n",
-                    "✗".bright_red(),
-                    entry_point.bright_white()
+                    "          {}",
+                    "\"scripts\": { \"build\": \"...\" }".dimmed()
                 );
-                if let Some(build_cmd) = build_script {
-                    println!("    The tool needs to be built before it can be run.\n");
-                    println!("    {}:", "To build".dimmed());
-                    println!("      cd {} && tool build\n", bundle_path);
-                    println!("    {}: {}", "Runs".dimmed(), build_cmd.dimmed());
-                } else {
-                    println!("    {}:", "If this tool requires building".dimmed());
-                    println!("      Add a build script to manifest.json:\n");
-                    println!("      {}", "\"_meta\": {".dimmed());
-                    println!("        {}", "\"store.tool.mcpb\": {".dimmed());
-                    println!(
-                        "          {}",
-                        "\"scripts\": { \"build\": \"...\" }".dimmed()
-                    );
-                    println!("        {}", "}".dimmed());
-                    println!("      {}", "}".dimmed());
-                }
-                std::process::exit(1);
+                println!("        {}", "}".dimmed());
+                println!("      {}", "}".dimmed());
             }
-            Err(ToolError::OAuthNotConfigured) | Err(ToolError::AuthRequired { tool_ref: _ }) => {
-                println!(
-                    "  {} This tool requires OAuth authentication\n",
-                    "✗".bright_red()
-                );
-                println!(
-                    "    To enable OAuth, set the {} environment variable:\n",
-                    "CREDENTIALS_SECRET_KEY".bright_cyan()
-                );
-                println!("    {}  Generate a key:", "1.".dimmed());
-                println!("       {}\n", "openssl rand -base64 32".bright_white());
-                println!("    {}  Set it in your shell:", "2.".dimmed());
-                println!(
-                    "       {}\n",
-                    "export CREDENTIALS_SECRET_KEY=\"<your-key>\"".bright_white()
-                );
-                println!(
-                    "    {}  Re-run this command to start OAuth flow",
-                    "3.".dimmed()
-                );
-                std::process::exit(1);
-            }
-            Err(e) => return Err(e),
-        };
+            std::process::exit(1);
+        }
+        Err(ToolError::OAuthNotConfigured) | Err(ToolError::AuthRequired { tool_ref: _ }) => {
+            println!(
+                "  {} This tool requires OAuth authentication\n",
+                "✗".bright_red()
+            );
+            println!(
+                "    To enable OAuth, set the {} environment variable:\n",
+                "CREDENTIALS_SECRET_KEY".bright_cyan()
+            );
+            println!("    {}  Generate a key:", "1.".dimmed());
+            println!("       {}\n", "openssl rand -base64 32".bright_white());
+            println!("    {}  Set it in your shell:", "2.".dimmed());
+            println!(
+                "       {}\n",
+                "export CREDENTIALS_SECRET_KEY=\"<your-key>\"".bright_white()
+            );
+            println!(
+                "    {}  Re-run this command to start OAuth flow",
+                "3.".dimmed()
+            );
+            std::process::exit(1);
+        }
+        Err(e) => return Err(e),
+    };
 
     if json_output {
         output_tool_info_json(&capabilities, tool_type, &manifest_path, concise)?;

@@ -239,6 +239,13 @@ pub async fn detect_mcpb(
     println!(
         "    {}. {}",
         step,
+        format!("tool run {}", display_path).bright_white(),
+    );
+    step += 1;
+
+    println!(
+        "    {}. {}",
+        step,
         format!("tool pack {}", display_path).bright_white(),
     );
 
