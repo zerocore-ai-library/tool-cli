@@ -1,8 +1,9 @@
 //! Tool grep command handlers.
 
 use crate::error::{ToolError, ToolResult};
-use crate::mcp::get_tool_info_from_path;
-use crate::resolver::FilePluginResolver;
+use crate::mcp::get_tool_info;
+use crate::resolver::{FilePluginResolver, load_tool_from_path};
+use crate::system_config::allocate_system_config;
 use colored::Colorize;
 use std::collections::BTreeMap;
 
@@ -99,13 +100,40 @@ pub async fn grep_tool(
 
     // Search each tool
     for (tool_ref, tool_path) in &tools_to_search {
-        // Get tool info
+        // Load manifest and resolve config
+        let resolved_plugin = match load_tool_from_path(tool_path) {
+            Ok(p) => p,
+            Err(_) => continue, // Skip tools that can't be loaded
+        };
+
         let user_config = BTreeMap::new();
-        let (capabilities, _tool_type, _manifest_path) =
-            match get_tool_info_from_path(tool_path, &user_config, false).await {
-                Ok(result) => result,
-                Err(_) => continue, // Skip tools that can't be connected
+        let system_config =
+            match allocate_system_config(resolved_plugin.template.system_config.as_ref()) {
+                Ok(c) => c,
+                Err(_) => continue,
             };
+
+        let resolved = match resolved_plugin
+            .template
+            .resolve(&user_config, &system_config)
+        {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
+            tool_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
+        });
+
+        // Get tool info
+        let capabilities = match get_tool_info(&resolved, &tool_name, false).await {
+            Ok(result) => result,
+            Err(_) => continue, // Skip tools that can't be connected
+        };
 
         // Extract toolset name from tool_ref (e.g., "appcypher/filesystem" -> "appcypher/filesystem")
         let toolset = tool_ref.split('@').next().unwrap_or(tool_ref);

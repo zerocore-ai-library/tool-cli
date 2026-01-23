@@ -13,8 +13,8 @@ use super::resolved::{ResolvedMcpConfig, ResolvedMcpbManifest};
 use super::types::{
     McpbAuthor, McpbCompatibility, McpbIcon, McpbLocalization, McpbMcpConfig, McpbPlatform,
     McpbPrompt, McpbRepository, McpbServer, McpbServerType, McpbSystemConfigField,
-    McpbSystemConfigType, McpbTool, McpbTransport, McpbUserConfigField, NodePackageManager,
-    PackageManager, PythonPackageManager, Scripts, StaticResponses,
+    McpbSystemConfigType, McpbTool, McpbTransport, McpbUserConfigField, McpbUserConfigType,
+    NodePackageManager, PackageManager, PythonPackageManager, Scripts, StaticResponses,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -342,9 +342,10 @@ impl McpbManifest {
                     )
                 }
                 (McpbServerType::Binary, McpbTransport::Stdio) => (None, None, None, None, None),
-                // Bundle HTTP modes - use system_config for ports/hostname
+                // Bundle HTTP modes - use system_config for port, user_config for host
                 (McpbServerType::Node, McpbTransport::Http) => {
                     let sys_cfg = create_http_system_config();
+                    let user_cfg = create_http_user_config();
                     (
                         Some("server/index.js".to_string()),
                         Some(McpbMcpConfig {
@@ -352,18 +353,17 @@ impl McpbManifest {
                             args: vec![
                                 "${__dirname}/server/index.js".to_string(),
                                 "--port=${system_config.port}".to_string(),
-                                "--host=${system_config.hostname}".to_string(),
+                                "--host=${user_config.host}".to_string(),
                             ],
                             env: BTreeMap::new(),
                             url: Some(
-                                "http://${system_config.hostname}:${system_config.port}/mcp"
-                                    .to_string(),
+                                "http://${user_config.host}:${system_config.port}/mcp".to_string(),
                             ),
                             headers: BTreeMap::new(),
                             oauth_config: None,
                             platform_overrides: BTreeMap::new(),
                         }),
-                        None,
+                        Some(user_cfg),
                         Some(sys_cfg),
                         Some(serde_json::json!({
                             "store.tool.mcpb": {
@@ -376,6 +376,7 @@ impl McpbManifest {
                 }
                 (McpbServerType::Python, McpbTransport::Http) => {
                     let sys_cfg = create_http_system_config();
+                    let user_cfg = create_http_user_config();
 
                     let mut args: Vec<String> = python_pm
                         .run_args_prefix()
@@ -386,7 +387,7 @@ impl McpbManifest {
                     args.push("--port".to_string());
                     args.push("${system_config.port}".to_string());
                     args.push("--host".to_string());
-                    args.push("${system_config.hostname}".to_string());
+                    args.push("${user_config.host}".to_string());
 
                     (
                         Some("server/main.py".to_string()),
@@ -395,14 +396,13 @@ impl McpbManifest {
                             args,
                             env: BTreeMap::new(),
                             url: Some(
-                                "http://${system_config.hostname}:${system_config.port}/mcp"
-                                    .to_string(),
+                                "http://${user_config.host}:${system_config.port}/mcp".to_string(),
                             ),
                             headers: BTreeMap::new(),
                             oauth_config: None,
                             platform_overrides: BTreeMap::new(),
                         }),
-                        None,
+                        Some(user_cfg),
                         Some(sys_cfg),
                         Some(serde_json::json!({
                             "store.tool.mcpb": {
@@ -415,7 +415,8 @@ impl McpbManifest {
                 }
                 (McpbServerType::Binary, McpbTransport::Http) => {
                     let sys_cfg = create_http_system_config();
-                    (None, None, None, Some(sys_cfg), None)
+                    let user_cfg = create_http_user_config();
+                    (None, None, Some(user_cfg), Some(sys_cfg), None)
                 }
             };
 
@@ -457,7 +458,7 @@ impl McpbManifest {
 
     /// Create a manifest for reference mode (no scaffolding).
     fn new_reference(transport: McpbTransport) -> Self {
-        let (mcp_config, system_config) = match transport {
+        let (mcp_config, user_config, system_config) = match transport {
             McpbTransport::Stdio => (
                 Some(McpbMcpConfig {
                     command: Some("TODO".to_string()),
@@ -469,22 +470,24 @@ impl McpbManifest {
                     platform_overrides: BTreeMap::new(),
                 }),
                 None,
+                None,
             ),
             McpbTransport::Http => {
                 let sys_cfg = create_http_system_config();
+                let user_cfg = create_http_user_config();
                 (
                     Some(McpbMcpConfig {
                         command: None,
                         args: vec![],
                         env: BTreeMap::new(),
                         url: Some(
-                            "http://${system_config.hostname}:${system_config.port}/mcp"
-                                .to_string(),
+                            "http://${user_config.host}:${system_config.port}/mcp".to_string(),
                         ),
                         headers: BTreeMap::new(),
                         oauth_config: None,
                         platform_overrides: BTreeMap::new(),
                     }),
+                    Some(user_cfg),
                     Some(sys_cfg),
                 )
             }
@@ -516,7 +519,7 @@ impl McpbManifest {
             prompts: None,
             tools_generated: None,
             prompts_generated: None,
-            user_config: None,
+            user_config,
             system_config,
             compatibility: None,
             privacy_policies: None,
@@ -547,7 +550,7 @@ impl McpbManifest {
             ),
         };
 
-        let (mcp_config, system_config) = match transport {
+        let (mcp_config, user_config, system_config) = match transport {
             McpbTransport::Stdio => (
                 Some(McpbMcpConfig {
                     command: Some(command),
@@ -559,25 +562,27 @@ impl McpbManifest {
                     platform_overrides: BTreeMap::new(),
                 }),
                 None,
+                None,
             ),
             McpbTransport::Http => {
                 let sys_cfg = create_http_system_config();
+                let user_cfg = create_http_user_config();
                 (
                     Some(McpbMcpConfig {
                         command: Some(command),
                         args: vec![
                             "--port=${system_config.port}".to_string(),
-                            "--host=${system_config.hostname}".to_string(),
+                            "--host=${user_config.host}".to_string(),
                         ],
                         env: BTreeMap::new(),
                         url: Some(
-                            "http://${system_config.hostname}:${system_config.port}/mcp"
-                                .to_string(),
+                            "http://${user_config.host}:${system_config.port}/mcp".to_string(),
                         ),
                         headers: BTreeMap::new(),
                         oauth_config: None,
                         platform_overrides: BTreeMap::new(),
                     }),
+                    Some(user_cfg),
                     Some(sys_cfg),
                 )
             }
@@ -609,7 +614,7 @@ impl McpbManifest {
             prompts: None,
             tools_generated: None,
             prompts_generated: None,
-            user_config: None,
+            user_config,
             system_config,
             compatibility: Some(McpbCompatibility {
                 claude_desktop: None,
@@ -673,7 +678,7 @@ impl McpbManifest {
 // Functions
 //--------------------------------------------------------------------------------------------------
 
-/// Create the standard HTTP system config (port + hostname).
+/// Create the standard HTTP system config (port only).
 fn create_http_system_config() -> BTreeMap<String, McpbSystemConfigField> {
     let mut sys_cfg = BTreeMap::new();
     sys_cfg.insert(
@@ -686,15 +691,26 @@ fn create_http_system_config() -> BTreeMap<String, McpbSystemConfigField> {
             default: Some(serde_json::json!(3000)),
         },
     );
-    sys_cfg.insert(
-        "hostname".to_string(),
-        McpbSystemConfigField {
-            field_type: McpbSystemConfigType::Hostname,
+    sys_cfg
+}
+
+/// Create the standard HTTP user config (host only).
+fn create_http_user_config() -> BTreeMap<String, McpbUserConfigField> {
+    let mut user_cfg = BTreeMap::new();
+    user_cfg.insert(
+        "host".to_string(),
+        McpbUserConfigField {
+            field_type: McpbUserConfigType::String,
             title: "Bind Address".to_string(),
             description: Some("Network interface to bind to".to_string()),
             required: None,
             default: Some(serde_json::json!("127.0.0.1")),
+            multiple: None,
+            sensitive: None,
+            enum_values: None,
+            min: None,
+            max: None,
         },
     );
-    sys_cfg
+    user_cfg
 }

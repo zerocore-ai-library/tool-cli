@@ -233,9 +233,7 @@ pub fn validate_system_config(
                         )));
                     }
                 }
-                McpbSystemConfigType::Hostname
-                | McpbSystemConfigType::TempDirectory
-                | McpbSystemConfigType::DataDirectory => {}
+                McpbSystemConfigType::TempDirectory | McpbSystemConfigType::DataDirectory => {}
             }
         }
     }

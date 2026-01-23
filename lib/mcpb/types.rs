@@ -510,8 +510,6 @@ pub struct McpbSystemConfigField {
 pub enum McpbSystemConfigType {
     /// Network port for binding.
     Port,
-    /// Bind address/hostname.
-    Hostname,
     /// Ephemeral directory.
     TempDirectory,
     /// Persistent directory.

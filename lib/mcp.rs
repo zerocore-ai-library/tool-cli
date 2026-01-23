@@ -6,8 +6,6 @@ use colored::Colorize;
 
 use crate::error::{ToolError, ToolResult};
 use crate::mcpb::{McpbManifest, McpbTransport, ResolvedMcpbManifest};
-use crate::resolver::load_tool_from_path;
-use crate::system_config::allocate_system_config;
 use rmcp::model::{CallToolRequestParam, CallToolResult, ClientInfo, Tool};
 use rmcp::service::RunningService;
 use rmcp::transport::StreamableHttpClientTransport;
@@ -16,7 +14,6 @@ use rmcp::transport::auth::AuthClient;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::{RoleClient, serve_client};
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::process::{Child, Stdio};
 use std::time::Duration;
 use tokio::process::Command;
@@ -687,33 +684,13 @@ pub async fn reconnect_http(
     ))
 }
 
-/// Get tool capabilities from a directory path.
-pub async fn get_tool_info_from_path(
-    path: &Path,
-    user_config: &BTreeMap<String, String>,
+/// Get tool capabilities from a resolved manifest.
+pub async fn get_tool_info(
+    resolved: &ResolvedMcpbManifest,
+    tool_name: &str,
     verbose: bool,
-) -> ToolResult<(ToolCapabilities, ToolType, std::path::PathBuf)> {
-    let resolved_plugin = load_tool_from_path(path)?;
-
-    // Allocate system config
-    let system_config = allocate_system_config(resolved_plugin.template.system_config.as_ref())?;
-
-    let resolved = resolved_plugin
-        .template
-        .resolve(user_config, &system_config)?;
-
-    let tool_type = get_tool_type(&resolved_plugin.template);
-    let manifest_path = resolved_plugin.path.clone();
-
-    // Get tool name for OAuth
-    let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
-        path.file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
-    });
-
-    let connection = connect_with_oauth(&resolved, &tool_name, verbose).await?;
+) -> ToolResult<ToolCapabilities> {
+    let connection = connect_with_oauth(resolved, tool_name, verbose).await?;
 
     // Get server info
     let server_info = connection
@@ -782,44 +759,23 @@ pub async fn get_tool_info_from_path(
         }
     };
 
-    Ok((
-        ToolCapabilities {
-            server_info,
-            tools: tools_response.tools,
-            prompts,
-            resources,
-        },
-        tool_type,
-        manifest_path,
-    ))
+    Ok(ToolCapabilities {
+        server_info,
+        tools: tools_response.tools,
+        prompts,
+        resources,
+    })
 }
 
-/// Call a tool method from a directory path.
-pub async fn call_tool_from_path(
-    path: &Path,
+/// Call a tool method using a resolved manifest.
+pub async fn call_tool(
+    resolved: &ResolvedMcpbManifest,
+    tool_name: &str,
     method: &str,
     arguments: BTreeMap<String, serde_json::Value>,
-    user_config: &BTreeMap<String, String>,
     verbose: bool,
 ) -> ToolResult<ToolCallResult> {
-    let resolved_plugin = load_tool_from_path(path)?;
-
-    // Allocate system config
-    let system_config = allocate_system_config(resolved_plugin.template.system_config.as_ref())?;
-
-    let resolved = resolved_plugin
-        .template
-        .resolve(user_config, &system_config)?;
-
-    // Get tool name for OAuth
-    let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
-        path.file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
-    });
-
-    let connection = connect_with_oauth(&resolved, &tool_name, verbose).await?;
+    let connection = connect_with_oauth(resolved, tool_name, verbose).await?;
 
     if verbose && let Some(info) = connection.peer_info() {
         eprintln!(
