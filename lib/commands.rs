@@ -369,6 +369,10 @@ pub enum Command {
     #[command(subcommand)]
     Config(ConfigCommand),
 
+    /// Manage MCP host configurations.
+    #[command(subcommand)]
+    Host(HostCommand),
+
     /// Catch-all for dynamic script names (e.g., `tool build`, `tool test`).
     #[command(external_subcommand)]
     External(Vec<OsString>),
@@ -442,5 +446,65 @@ pub enum ConfigCommand {
     Reset {
         /// Tool reference.
         tool: String,
+    },
+}
+
+/// Host subcommands for managing MCP host configurations.
+#[derive(Debug, Subcommand)]
+pub enum HostCommand {
+    /// Register tools with an MCP host.
+    Add {
+        /// Target host (claude-desktop, cursor, claude-code).
+        host: String,
+
+        /// Specific tools to register (default: all installed).
+        tools: Vec<String>,
+
+        /// Preview changes without modifying files.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Overwrite existing entries for these tools.
+        #[arg(long)]
+        overwrite: bool,
+
+        /// Skip confirmation prompt.
+        #[arg(short, long)]
+        yes: bool,
+    },
+
+    /// Remove tools from an MCP host.
+    Remove {
+        /// Target host.
+        host: String,
+
+        /// Specific tools to remove (default: all tool-cli managed).
+        tools: Vec<String>,
+
+        /// Preview changes without modifying files.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Skip confirmation prompt.
+        #[arg(short, long)]
+        yes: bool,
+    },
+
+    /// List supported hosts and their status.
+    List,
+
+    /// Show the MCP config that would be generated.
+    Show {
+        /// Target host.
+        host: String,
+
+        /// Specific tools (default: all installed).
+        tools: Vec<String>,
+    },
+
+    /// Print config file path for a host.
+    Path {
+        /// Target host.
+        host: String,
     },
 }

@@ -218,6 +218,71 @@ Get your first MCP tool published in three steps.
 
 <br />
 
+## Host Integration
+
+Once you've installed some tools, you probably want to use them in your favorite AI app. Instead of manually editing JSON configs, just run:
+
+> ```sh
+> tool host add claude-desktop
+> ```
+>
+> This registers all your installed tools with the host. Works with Claude Desktop, Cursor, VS Code, and Claude Code.
+
+<br />
+
+<div align="center">
+<table>
+<tr>
+<td align="center" width="150">
+<img src="https://avatars.githubusercontent.com/u/76263028?s=200&v=4" width="50" height="50" alt="Anthropic"/>
+<br />
+<strong>Claude Desktop</strong>
+<br />
+<code>claude-desktop</code>
+</td>
+<td align="center" width="150">
+<img src="https://www.cursor.com/brand/icon.svg" width="50" height="50" alt="Cursor"/>
+<br />
+<strong>Cursor</strong>
+<br />
+<code>cursor</code>
+</td>
+<td align="center" width="150">
+<img src="https://upload.wikimedia.org/wikipedia/commons/9/9a/Visual_Studio_Code_1.35_icon.svg" width="50" height="50" alt="VS Code"/>
+<br />
+<strong>VS Code</strong>
+<br />
+<code>vscode</code>
+</td>
+<td align="center" width="150">
+<img src="https://avatars.githubusercontent.com/u/76263028?s=200&v=4" width="50" height="50" alt="Claude Code"/>
+<br />
+<strong>Claude Code</strong>
+<br />
+<code>claude-code</code>
+</td>
+</tr>
+</table>
+</div>
+
+<br />
+
+> ```sh
+> tool host list                    # see all supported hosts
+> tool host add cursor              # add tools to Cursor
+> tool host add vscode my-tool      # add specific tool to VS Code
+> tool host remove claude-desktop   # remove tools from a host
+> tool host show cursor             # preview the generated config
+> ```
+>
+> The command creates backups before modifying anything. If something goes wrong, your original config is safe.
+
+<br />
+
+<div align='center'>• • •</div>
+
+<br />
+
 ## Commands
 
 | Command | What it does |
@@ -236,6 +301,7 @@ Get your first MCP tool published in three steps.
 | `search` | Find tools in the registry |
 | `grep` | Search tool schemas by pattern |
 | `config` | Manage tool configuration |
+| `host` | Register tools with MCP hosts |
 | `login` | Log in to the registry |
 
 Check out the [CLI docs](https://tool.store/docs/cli) for the full details.
