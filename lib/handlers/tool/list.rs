@@ -17,6 +17,14 @@ pub(super) struct ToolListEntry {
     pub path: PathBuf,
 }
 
+/// Result of resolving a tool reference.
+pub struct ResolvedToolPath {
+    /// The resolved path to the tool directory.
+    pub path: PathBuf,
+    /// Whether this was resolved as an installed tool (via FilePluginResolver).
+    pub is_installed: bool,
+}
+
 //--------------------------------------------------------------------------------------------------
 // Functions
 //--------------------------------------------------------------------------------------------------
@@ -180,7 +188,9 @@ pub async fn list_tools(
 /// 1. Explicit path indicators (`.`, `./`, `/`, `..`) - treat as local path
 /// 2. Try to resolve from installed tools
 /// 3. Fallback to relative path if it exists locally
-pub async fn resolve_tool_path(tool: &str) -> ToolResult<PathBuf> {
+///
+/// Returns both the path and whether it was resolved as an installed tool.
+pub async fn resolve_tool_path(tool: &str) -> ToolResult<ResolvedToolPath> {
     // Check for explicit path indicators first
     let is_explicit_path =
         tool == "." || tool.starts_with("./") || tool.starts_with('/') || tool.contains("..");
@@ -192,7 +202,10 @@ pub async fn resolve_tool_path(tool: &str) -> ToolResult<PathBuf> {
         } else {
             std::env::current_dir()?.join(&path)
         };
-        return Ok(abs_path);
+        return Ok(ResolvedToolPath {
+            path: abs_path,
+            is_installed: false,
+        });
     }
 
     // Try to resolve from installed tools first
@@ -200,14 +213,20 @@ pub async fn resolve_tool_path(tool: &str) -> ToolResult<PathBuf> {
     if let Some(resolved) = resolver.resolve_tool(tool).await? {
         // Get the directory containing the manifest
         let dir = resolved.path.parent().unwrap_or(&resolved.path);
-        return Ok(dir.to_path_buf());
+        return Ok(ResolvedToolPath {
+            path: dir.to_path_buf(),
+            is_installed: true,
+        });
     }
 
     // Fallback: check if it exists as a relative path
     let path = PathBuf::from(tool);
     if path.exists() {
         let abs_path = std::env::current_dir()?.join(&path);
-        return Ok(abs_path);
+        return Ok(ResolvedToolPath {
+            path: abs_path,
+            is_installed: false,
+        });
     }
 
     Err(ToolError::Generic(format!(

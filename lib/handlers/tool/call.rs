@@ -244,11 +244,12 @@ pub(super) fn parse_user_config(
     config_file: Option<&str>,
     tool: &str,
     resolved: &crate::resolver::ResolvedPlugin<crate::mcpb::McpbManifest>,
+    is_installed: bool,
 ) -> ToolResult<BTreeMap<String, String>> {
     let mut config = BTreeMap::new();
 
     // 1. Load saved config (lowest priority)
-    if let Ok(plugin_ref) = parse_tool_ref_for_config(tool, resolved)
+    if let Ok(plugin_ref) = parse_tool_ref_for_config(tool, resolved, is_installed)
         && let Ok(saved) = load_tool_config(&plugin_ref)
     {
         config.extend(saved);

@@ -58,15 +58,22 @@ pub struct PrepareToolOptions<'a> {
 /// 6. Extract tool name
 pub async fn prepare_tool(tool: &str, options: PrepareToolOptions<'_>) -> ToolResult<PreparedTool> {
     // Resolve tool path
-    let tool_path = resolve_tool_path(tool).await?;
+    let resolved_path = resolve_tool_path(tool).await?;
+    let tool_path = resolved_path.path;
+    let is_installed = resolved_path.is_installed;
 
     // Load manifest
     let resolved_plugin = load_tool_from_path(&tool_path)?;
     let manifest_schema = resolved_plugin.template.user_config.as_ref();
 
     // Parse user config from saved config, config file, and -k flags
-    let mut user_config =
-        parse_user_config(options.config, options.config_file, tool, &resolved_plugin)?;
+    let mut user_config = parse_user_config(
+        options.config,
+        options.config_file,
+        tool,
+        &resolved_plugin,
+        is_installed,
+    )?;
 
     // Prompt for missing required config values, then apply defaults
     prompt_missing_user_config(manifest_schema, &mut user_config, options.yes)?;
@@ -75,7 +82,7 @@ pub async fn prepare_tool(tool: &str, options: PrepareToolOptions<'_>) -> ToolRe
     // Auto-save config for future use (unless --no-save)
     if !options.no_save
         && !user_config.is_empty()
-        && let Ok(plugin_ref) = parse_tool_ref_for_config(tool, &resolved_plugin)
+        && let Ok(plugin_ref) = parse_tool_ref_for_config(tool, &resolved_plugin, is_installed)
     {
         let _ = save_tool_config_with_schema(&plugin_ref, &user_config, manifest_schema);
     }

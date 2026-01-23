@@ -68,11 +68,12 @@ async fn config_set(
     concise: bool,
 ) -> ToolResult<()> {
     // Resolve tool and load manifest
-    let tool_path = resolve_tool_path(&tool).await?;
-    let resolved_plugin = load_tool_from_path(&tool_path)?;
+    let resolved_path = resolve_tool_path(&tool).await?;
+    let resolved_plugin = load_tool_from_path(&resolved_path.path)?;
 
     // Parse the original tool reference for storage (strip version for config path)
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved_plugin)?;
+    let plugin_ref =
+        parse_tool_ref_for_config(&tool, &resolved_plugin, resolved_path.is_installed)?;
 
     // Clone the schema since we need resolved_plugin later for OAuth
     let schema = resolved_plugin.template.user_config.clone();
@@ -290,11 +291,11 @@ async fn config_get(
     no_header: bool,
 ) -> ToolResult<()> {
     // Resolve tool and load manifest
-    let tool_path = resolve_tool_path(&tool).await?;
-    let resolved = load_tool_from_path(&tool_path)?;
+    let resolved_path = resolve_tool_path(&tool).await?;
+    let resolved = load_tool_from_path(&resolved_path.path)?;
 
     // Parse the original tool reference for storage
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved)?;
+    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved, resolved_path.is_installed)?;
 
     let schema = resolved.template.user_config;
 
@@ -427,11 +428,11 @@ async fn config_list(concise: bool, no_header: bool) -> ToolResult<()> {
 /// Handle `config unset` subcommand.
 async fn config_unset(tool: String, key: String, concise: bool) -> ToolResult<()> {
     // Resolve tool
-    let tool_path = resolve_tool_path(&tool).await?;
-    let resolved = load_tool_from_path(&tool_path)?;
+    let resolved_path = resolve_tool_path(&tool).await?;
+    let resolved = load_tool_from_path(&resolved_path.path)?;
 
     // Parse the original tool reference for storage
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved)?;
+    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved, resolved_path.is_installed)?;
 
     // Get schema for encryption decision
     let schema = resolved.template.user_config.as_ref();
@@ -480,11 +481,11 @@ async fn config_unset(tool: String, key: String, concise: bool) -> ToolResult<()
 /// Handle `config reset` subcommand.
 async fn config_reset(tool: String, concise: bool) -> ToolResult<()> {
     // Resolve tool
-    let tool_path = resolve_tool_path(&tool).await?;
-    let resolved = load_tool_from_path(&tool_path)?;
+    let resolved_path = resolve_tool_path(&tool).await?;
+    let resolved = load_tool_from_path(&resolved_path.path)?;
 
     // Parse the original tool reference for storage
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved)?;
+    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved, resolved_path.is_installed)?;
 
     // Check if config exists
     let config_path = get_config_path(&plugin_ref);
@@ -523,56 +524,27 @@ async fn config_reset(tool: String, concise: bool) -> ToolResult<()> {
 
 /// Parse a tool reference for config storage.
 ///
-/// This handles three cases:
-/// 1. Local path (e.g., ".") - uses manifest name
-/// 2. Plugin reference (e.g., "appcypher/filesystem") - parses directly
-/// 3. Versioned reference (e.g., "appcypher/filesystem@1.0.0") - strips version
+/// Config storage is based on:
+/// 1. For installed tools - use the reference as provided
+/// 2. For local paths or fallback resolution - use the manifest name only
+///
+/// Namespace is ONLY preserved when the tool actually resolves as an installed plugin.
+/// If "appcypher/sensitive" doesn't exist as installed and falls back to a local path,
+/// config uses the manifest name without namespace.
+///
+/// The `is_installed` flag should come from `resolve_tool_path` which uses
+/// `FilePluginResolver` to determine if a tool is installed.
 pub fn parse_tool_ref_for_config(
     tool: &str,
     resolved: &crate::resolver::ResolvedPlugin<crate::mcpb::McpbManifest>,
+    is_installed: bool,
 ) -> ToolResult<PluginRef> {
-    // Check if it's a path-like reference
-    if tool == "." || tool.starts_with("./") || tool.starts_with('/') || tool.contains("..") {
-        // For path references, try to get name from manifest
-        let name = resolved
-            .template
-            .name
-            .as_ref()
-            .ok_or_else(|| ToolError::Generic("Tool manifest has no name".into()))?;
-        return PluginRef::new(name);
-    }
-
-    // Try to parse as plugin reference
-    if let Ok(mut plugin_ref) = PluginRef::parse(tool) {
-        // If parsed but no namespace, check if we can infer from resolved path
-        // ONLY if the tool is in the standard tools directory (~/.tool/tools/)
-        if plugin_ref.namespace().is_none() {
-            let tools_path = crate::constants::DEFAULT_TOOLS_PATH.as_path();
-            if resolved.path.starts_with(tools_path) {
-                // Try to detect namespace from the resolved path
-                // Path pattern: ~/.tool/tools/<namespace>/<name>@<version>/manifest.json
-                if let Some(parent) = resolved.path.parent() {
-                    // parent is the tool directory (e.g., filesystem@0.1.2)
-                    if let Some(namespace_dir) = parent.parent() {
-                        // namespace_dir is the namespace directory
-                        if let Some(ns_name) = namespace_dir.file_name().and_then(|n| n.to_str())
-                            && ns_name != "tools"
-                            && !ns_name.contains('@')
-                            && PluginRef::new(ns_name)
-                                .and_then(|r| r.with_namespace(ns_name))
-                                .is_ok()
-                            && let Ok(ref_with_ns) = plugin_ref.clone().with_namespace(ns_name)
-                        {
-                            plugin_ref = ref_with_ns;
-                        }
-                    }
-                }
-            }
-        }
+    // Only use the reference as-is if it's an installed tool
+    if is_installed && let Ok(plugin_ref) = PluginRef::parse(tool) {
         return Ok(plugin_ref);
     }
 
-    // Fallback: use manifest name
+    // For paths and local fallbacks, use manifest name only
     let name = resolved
         .template
         .name
