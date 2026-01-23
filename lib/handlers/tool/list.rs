@@ -209,8 +209,9 @@ pub async fn resolve_tool_path(tool: &str) -> ToolResult<ResolvedToolPath> {
     }
 
     // Try to resolve from installed tools first
+    // If parsing fails (e.g., invalid ref like "a/b/c"), fall through to path check
     let resolver = FilePluginResolver::default();
-    if let Some(resolved) = resolver.resolve_tool(tool).await? {
+    if let Ok(Some(resolved)) = resolver.resolve_tool(tool).await {
         // Get the directory containing the manifest
         let dir = resolved.path.parent().unwrap_or(&resolved.path);
         return Ok(ResolvedToolPath {
