@@ -43,9 +43,9 @@
 
 ## Install
 
-```sh
-curl -fsSL https://cli.tool.store | sh
-```
+> ```sh
+> curl -fsSL https://cli.tool.store | sh
+> ```
 
 <br />
 
@@ -55,73 +55,74 @@ Get your first MCP tool published in three steps.
 
 <h4>1&nbsp;&nbsp;⏵&nbsp;&nbsp;Create</h4>
 
-```sh
-tool init my_tool
-```
-
-This gives you a working MCP server with a valid `manifest.json`. Just follow the prompts to pick your language and transport.
-
+> ```sh
+> tool init my_tool
+> ```
+>
+> This gives you a working MCP server with a valid `manifest.json`. Just follow the prompts to pick your language and transport.
+>
 > <details>
 > <summary>Already have an MCP server?</summary>
->
+> <blockquote>
 > Run `tool detect` in your project to see what tool-cli finds. Then `tool init` will generate a manifest from your existing code.
 >
 > ```sh
-> cd my-existing-mcp
+> cd my_existing_mcp_project
 > tool detect        # shows detected type, transport, entry point
 > tool init          # generates manifest.json
 > ```
->
+> </blockquote>
 > </details>
 
 ##
 
 <h4>2&nbsp;&nbsp;⏵&nbsp;&nbsp;Test</h4>
 
-```sh
-tool info
-```
-
-Shows you what your server exposes. Tools, prompts, resources. This is what clients will see when they connect.
-
-```sh
-tool call my_tool -m get_weather location="San Francisco"
-```
-
-You can call any method directly. No client needed.
-
+> ```sh
+> tool info
+> ```
+>
+> Shows you what your server exposes. Tools, prompts, resources. This is what clients will see when they connect.
+>
+> ```sh
+> tool call my_tool -m get_weather location="San Francisco"
+> ```
+>
+> You can call any method directly. No client needed.
+>
 > <details>
 > <summary>Method shorthand</summary>
->
+> <blockquote>
 > MCP tools often use `toolname__method` naming. You can use `.` as shorthand.
 >
 > ```sh
 > tool call bash -m .exec command="ls -la"     # expands to bash__exec
 > tool call files -m .fs.read path="/tmp"      # expands to files__fs__read
 > ```
->
+> </blockquote>
 > </details>
 
 ##
 
 <h4>3&nbsp;&nbsp;⏵&nbsp;&nbsp;Share</h4>
 
-```sh
-tool login
-tool publish
-```
-
-Log in once, then publish. Now anyone can install your tool.
-
+> ```sh
+> tool login
+> tool publish
+> ```
+>
+> Log in once, then publish. Now anyone can install your tool.
+>
 > <details>
 > <summary>Just want to bundle it?</summary>
+> <blockquote>
 >
 > ```sh
 > tool pack
 > ```
 >
 > Creates a `.mcpb` file you can distribute yourself.
->
+> </blockquote>
 > </details>
 
 <br />
@@ -134,82 +135,82 @@ Log in once, then publish. Now anyone can install your tool.
 
 ### Find Tools
 
-```sh
-tool search filesystem
-```
-
-Search the registry for tools. You'll see names, descriptions, and download counts.
-
-```sh
-tool grep "file"
-```
-
-Search through tool schemas by pattern. Useful when you're looking for tools with specific capabilities.
+> ```sh
+> tool search filesystem
+> ```
+>
+> Search the registry for tools. You'll see names, descriptions, and download counts.
+>
+> ```sh
+> tool grep "file"
+> ```
+>
+> Search through tool schemas by pattern. Useful when you're looking for tools with specific capabilities.
 
 ##
 
 ### Install Tools
 
-```sh
-tool install appcypher/bash
-```
-
-Installs a tool from the registry. You can also install from a local path.
-
-```sh
-tool list
-```
-
-See what you have installed.
+> ```sh
+> tool install appcypher/bash
+> ```
+>
+> Installs a tool from the registry. You can also install from a local path.
+>
+> ```sh
+> tool list
+> ```
+>
+> See what you have installed.
 
 ##
 
 ### Run Tools
 
-```sh
-tool run appcypher/bash
-```
-
-Starts the tool with its native transport. Connect your MCP client to it.
-
-You can also use `--expose` to bridge between transports.
-
-```sh
-tool run --expose stdio              # HTTP backend to stdio
-tool run --expose http --port 3000   # stdio backend to HTTP
-```
+> ```sh
+> tool run appcypher/bash
+> ```
+>
+> Starts the tool with its native transport. Connect your MCP client to it.
+>
+> You can also use `--expose` to bridge between transports.
+>
+> ```sh
+> tool run --expose stdio              # HTTP backend to stdio
+> tool run --expose http --port 3000   # stdio backend to HTTP
+> ```
 
 ##
 
 ### Configure Tools
 
-```sh
-tool config set appcypher/bash
-```
-
-Some tools need configuration like API keys. This walks you through setting them up interactively.
-
-```sh
-tool config get appcypher/bash
-```
-
-Check what config values are set.
+> ```sh
+> tool config set appcypher/bash
+> ```
+>
+> Some tools need configuration like API keys. This walks you through setting them up interactively.
+>
+> ```sh
+> tool config get appcypher/bash
+> ```
+>
+> Check what config values are set.
 
 ##
 
 ### Use Tools
 
-```sh
-tool info appcypher/bash
-```
-
-See what a tool exposes. Tools, prompts, resources.
-
-```sh
-tool call appcypher/bash -m .exec command="echo hello"
-```
-
-Call a method directly. Great for testing things out.
+> ```sh
+> tool info appcypher/bash
+> ```
+>
+> See what a tool exposes. Tools, prompts, resources.
+>
+> ```sh
+> tool call appcypher/bash -m .exec command="echo hello"
+> ```
+>
+> Call a method directly. Great for testing things out.
 
 <br />
 
