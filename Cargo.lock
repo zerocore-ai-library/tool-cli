@@ -1959,14 +1959,18 @@ source = "git+https://github.com/zerocore-ai/rust-sdk?branch=develop#bdd59e8ca0d
 dependencies = [
  "async-trait",
  "base64",
+ "bytes",
  "chrono",
  "futures",
  "http",
+ "http-body",
+ "http-body-util",
  "libc",
  "oauth2",
  "pastey",
  "pin-project-lite",
  "process-wrap",
+ "rand 0.9.2",
  "reqwest",
  "rmcp-macros",
  "schemars",
@@ -1977,8 +1981,10 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tower-service",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -2643,6 +2649,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-util",
  "toml",
  "tracing",
  "tracing-subscriber",

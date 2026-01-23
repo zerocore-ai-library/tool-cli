@@ -130,7 +130,7 @@ pub enum Command {
         json: bool,
     },
 
-    /// Search tool schemas by pattern.
+    /// Search installed tool schemas by pattern.
     Grep {
         /// Regex pattern to search for.
         pattern: String,
@@ -201,6 +201,10 @@ pub enum Command {
         #[arg(long)]
         no_save: bool,
 
+        /// Skip interactive prompts (error if required config missing).
+        #[arg(short, long)]
+        yes: bool,
+
         /// Show verbose output.
         #[arg(short, long)]
         verbose: bool,
@@ -235,6 +239,10 @@ pub enum Command {
         /// Don't auto-save config values for future use.
         #[arg(long)]
         no_save: bool,
+
+        /// Skip interactive prompts (error if required config missing).
+        #[arg(short = 'y', long)]
+        yes: bool,
 
         /// Show verbose output.
         #[arg(short, long)]
@@ -291,21 +299,43 @@ pub enum Command {
         verbose: bool,
     },
 
-    /// Run a script defined in manifest.json.
+    /// Run an MCP server in proxy mode.
     Run {
-        /// Script name to run (e.g., build, test).
-        script: Option<String>,
+        /// Tool reference or path (default: current directory).
+        #[arg(default_value = ".")]
+        tool: String,
 
-        /// Path to tool directory.
-        path: Option<String>,
+        /// Expose transport type (stdio or http). Uses native transport if not specified.
+        #[arg(long, value_name = "TRANSPORT")]
+        expose: Option<String>,
 
-        /// List available scripts.
+        /// Port for HTTP expose mode.
+        #[arg(short, long, default_value = "3000")]
+        port: u16,
+
+        /// Bind address for HTTP expose mode.
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+
+        /// Configuration values (KEY=VALUE).
+        #[arg(short = 'k', long)]
+        config: Vec<String>,
+
+        /// Path to config file (JSON).
+        #[arg(long)]
+        config_file: Option<String>,
+
+        /// Don't auto-save config values for future use.
+        #[arg(long)]
+        no_save: bool,
+
+        /// Skip interactive prompts (error if required config missing).
         #[arg(short, long)]
-        list: bool,
+        yes: bool,
 
-        /// Additional arguments to pass to the script.
-        #[arg(last = true)]
-        args: Vec<String>,
+        /// Show verbose output.
+        #[arg(short, long)]
+        verbose: bool,
     },
 
     /// Publish a tool to the registry.

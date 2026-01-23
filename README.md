@@ -168,6 +168,37 @@ tool validate
 
 Catches missing fields, type mismatches, invalid paths. Better to find these now than after publishing.
 
+Run your server in proxy mode:
+
+```sh
+tool run
+```
+
+Starts the server with native transport (stdio or HTTP based on manifest). Useful for connecting MCP clients like Claude Desktop.
+
+> <details>
+> <summary>&nbsp;Protocol bridging</summary>
+>
+> Expose a server via a different transport:
+>
+> ```sh
+> # Expose an HTTP backend as stdio (for Claude Desktop)
+> tool run --expose stdio
+>
+> # Expose a stdio backend as HTTP
+> tool run --expose http --port 3000
+>
+> # With custom host binding
+> tool run --expose http --port 8080 --host 0.0.0.0
+> ```
+>
+> This is useful for:
+> - Connecting Claude Desktop (stdio) to remote HTTP MCP servers
+> - Exposing local stdio tools over the network
+> - Testing tools with different clients
+>
+> </details>
+
 ##
 
 <h4>5&nbsp;&nbsp;⏵&nbsp;&nbsp;Pack</h4>
@@ -199,6 +230,30 @@ Authenticate once with tool.store, then publish. Your tool becomes discoverable 
 > ```
 >
 > </details>
+
+##
+
+### All Commands
+
+| Command | Description |
+|---------|-------------|
+| `init` | Scaffold a new tool project |
+| `detect` | Detect existing MCP server type |
+| `validate` | Check manifest against spec |
+| `info` | Display tool capabilities |
+| `call` | Invoke a tool method directly |
+| `run` | Run MCP server in proxy mode |
+| `pack` | Create .mcpb bundle |
+| `publish` | Upload to registry |
+| `install` | Install a tool from registry |
+| `uninstall` | Remove an installed tool |
+| `list` | Show installed tools |
+| `search` | Find tools in registry |
+| `grep` | Search tool schemas by pattern |
+| `config` | Configure tool settings |
+| `login` | Authenticate with registry |
+
+For the full list of commands and detailed usage, check out the [CLI documentation](https://tool.store/docs/cli).
 
 <br />
 
@@ -308,157 +363,6 @@ Not all tools need bundled code. Some point to existing commands or remote serve
 ```
 
 No `entry_point`, no bundled code. The manifest just describes how to connect. Useful for wrapping system-installed MCP servers, connecting to remote endpoints, or creating thin clients over existing infrastructure.
-
-<br />
-
-<div align='center'>• • •</div>
-
-<br />
-
-## MANAGING TOOLS
-
-On the consumer side, `tool-cli` handles discovery, installation, and management of MCP tools.
-
-##
-
-<h4>1&nbsp;&nbsp;⏵&nbsp;&nbsp;Search</h4>
-
-Find tools in the registry:
-
-```sh
-tool search weather
-```
-
-Returns matching tools with their descriptions, authors, and versions.
-
-##
-
-<h4>2&nbsp;&nbsp;⏵&nbsp;&nbsp;Install</h4>
-
-```sh
-tool install acme/weather-tool
-```
-
-Installs a tool from the registry. Tools are referenced by `namespace/name`. Pin a specific version with `@version`:
-
-```sh
-tool install acme/weather-tool@1.2.0
-```
-
-##
-
-<h4>3&nbsp;&nbsp;⏵&nbsp;&nbsp;List</h4>
-
-```sh
-tool list
-```
-
-Shows all installed tools. Filter by name pattern:
-
-```sh
-tool list weather
-```
-
-##
-
-<h4>4&nbsp;&nbsp;⏵&nbsp;&nbsp;Grep</h4>
-
-Search across tool schemas to find capabilities:
-
-```sh
-tool grep "file"
-```
-
-Searches tool names, descriptions, and parameters. Useful when you know what you want to do but not which tool does it.
-
-> <details>
-> <summary>&nbsp;Filter options</summary>
->
-> ```sh
-> tool grep -n "weather"      # Search tool names only
-> tool grep -d "upload"       # Search descriptions only
-> tool grep -p "path"         # Search parameter names only
-> tool grep -i "API"          # Case-insensitive
-> ```
->
-> </details>
-
-##
-
-<h4>5&nbsp;&nbsp;⏵&nbsp;&nbsp;Configure</h4>
-
-Tools that need API keys or other settings can be configured once and used everywhere:
-
-```sh
-tool config set acme/weather-tool
-```
-
-Interactive prompts walk you through each setting. For non-interactive use:
-
-```sh
-tool config set acme/weather-tool -y api_key=xxx
-```
-
-View saved configuration:
-
-```sh
-tool config get acme/weather-tool
-```
-
-Configuration is stored per-tool and automatically loaded by `tool info` and `tool call`. You can still override with `-C` flags when needed.
-
-> <details>
-> <summary>&nbsp;More config commands</summary>
->
-> ```sh
-> tool config list                        # List all configured tools
-> tool config unset acme/weather-tool api_key  # Remove a key
-> tool config reset acme/weather-tool     # Remove all config
-> ```
->
-> </details>
-
-##
-
-<h4>6&nbsp;&nbsp;⏵&nbsp;&nbsp;Uninstall</h4>
-
-```sh
-tool uninstall acme/weather-tool
-```
-
-Removes a tool from your system.
-
-<br />
-
-## COMMANDS
-
-**Create**
-- `init` — Scaffold a new tool project
-- `detect` — Determine if an existing MCP server can be converted to a MCPB package
-
-**Develop**
-- `run <script>` — Execute a manifest script
-- `validate` — Check manifest against spec
-- `info` — Display tool capabilities
-- `call` — Invoke a tool method directly
-
-**Distribute**
-- `pack` — Create .mcpb bundle
-- `publish` — Upload to registry
-
-**Manage**
-- `install` — Install a tool
-- `uninstall` — Uninstall a tool
-- `list` — Show installed tools
-- `search` — Find tools in registry
-- `grep` — Search tool schemas by pattern
-- `download` — Download without installing
-- `config` — Configure tool settings (set, get, list, unset, reset)
-
-**Auth**
-- `login` — Authenticate with registry
-- `logout` — Clear authentication
-- `whoami` — Show authentication status
 
 <br />
 

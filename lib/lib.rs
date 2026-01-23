@@ -11,6 +11,7 @@ pub mod mcpb;
 pub mod oauth;
 pub mod pack;
 pub mod prompt;
+pub mod proxy;
 pub mod references;
 pub mod registry;
 pub mod resolver;

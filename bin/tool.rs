@@ -278,25 +278,29 @@ async fn run() -> ToolResult<()> {
         } => handlers::pack_mcpb(path, output, no_validate, include_dotfiles, verbose).await,
 
         Command::Run {
-            script,
-            path,
-            list,
-            args,
+            tool,
+            expose,
+            port,
+            host,
+            config,
+            config_file,
+            no_save,
+            yes,
+            verbose,
         } => {
-            if list {
-                // When --list is used, script arg (if any) is actually the path
-                let effective_path = script.or(path);
-                handlers::list_scripts(effective_path).await
-            } else if let Some(script) = script {
-                handlers::run_script(&script, path, args).await
-            } else {
-                Err(ToolError::Generic(
-                    "Script name required. Use --list to see available scripts.".into(),
-                ))
-            }
+            handlers::tool_run(
+                tool,
+                expose,
+                port,
+                host,
+                config,
+                config_file,
+                no_save,
+                yes,
+                verbose,
+            )
+            .await
         }
-
-        Command::External(args) => handlers::run_external_script(args).await,
 
         Command::Info {
             tool,
@@ -308,6 +312,7 @@ async fn run() -> ToolResult<()> {
             config,
             config_file,
             no_save,
+            yes,
             verbose,
         } => {
             handlers::tool_info(
@@ -320,6 +325,7 @@ async fn run() -> ToolResult<()> {
                 config,
                 config_file,
                 no_save,
+                yes,
                 verbose,
                 cli.concise,
                 cli.no_header,
@@ -335,6 +341,7 @@ async fn run() -> ToolResult<()> {
             config,
             config_file,
             no_save,
+            yes,
             verbose,
         } => {
             handlers::tool_call(
@@ -345,6 +352,7 @@ async fn run() -> ToolResult<()> {
                 config,
                 config_file,
                 no_save,
+                yes,
                 verbose,
                 cli.concise,
             )
@@ -433,5 +441,7 @@ async fn run() -> ToolResult<()> {
             }
             SelfCommand::Uninstall { yes } => self_update::self_uninstall(yes).await,
         },
+
+        Command::External(args) => handlers::run_external_script(args).await,
     }
 }
