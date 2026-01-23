@@ -26,6 +26,7 @@ pub async fn tool_info(
     config: Vec<String>,
     config_file: Option<String>,
     no_save: bool,
+    yes: bool,
     verbose: bool,
     concise: bool,
     no_header: bool,
@@ -42,7 +43,7 @@ pub async fn tool_info(
         parse_user_config(&config, config_file.as_deref(), &tool, &resolved_plugin)?;
 
     // Prompt for missing required config values, then apply defaults
-    prompt_missing_user_config(manifest_schema, &mut user_config)?;
+    prompt_missing_user_config(manifest_schema, &mut user_config, yes)?;
     apply_user_config_defaults(manifest_schema, &mut user_config);
 
     // Auto-save config for future use (unless --no-save)

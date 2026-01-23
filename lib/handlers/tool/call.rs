@@ -53,6 +53,7 @@ pub async fn tool_call(
     config: Vec<String>,
     config_file: Option<String>,
     no_save: bool,
+    yes: bool,
     verbose: bool,
     concise: bool,
 ) -> ToolResult<()> {
@@ -78,7 +79,7 @@ pub async fn tool_call(
         parse_user_config(&config, config_file.as_deref(), &tool, &resolved_plugin)?;
 
     // Prompt for missing required config values, then apply defaults
-    prompt_missing_user_config(manifest_schema, &mut user_config)?;
+    prompt_missing_user_config(manifest_schema, &mut user_config, yes)?;
     apply_user_config_defaults(manifest_schema, &mut user_config);
 
     // Auto-save config for future use (unless --no-save)
@@ -338,9 +339,13 @@ pub(super) fn apply_user_config_defaults(
 ///
 /// Prompts for all config fields not already provided. Fields with defaults
 /// are shown with the default pre-filled so users can accept or override.
+///
+/// If `skip_interactive` is true, prompting is skipped and an error is returned
+/// if any required fields are missing.
 pub(super) fn prompt_missing_user_config(
     schema: Option<&BTreeMap<String, McpbUserConfigField>>,
     user_config: &mut BTreeMap<String, String>,
+    skip_interactive: bool,
 ) -> ToolResult<()> {
     use std::io::IsTerminal;
 
@@ -358,8 +363,8 @@ pub(super) fn prompt_missing_user_config(
         return Ok(());
     }
 
-    // Check if we have a TTY for interactive prompting
-    if !std::io::stdin().is_terminal() {
+    // Check if we should skip interactive prompting (--yes flag or no TTY)
+    if skip_interactive || !std::io::stdin().is_terminal() {
         // Non-interactive: only error for required fields without defaults
         let required_missing: Vec<String> = to_prompt
             .iter()
@@ -371,16 +376,16 @@ pub(super) fn prompt_missing_user_config(
             .map(|(key, field)| {
                 let desc = field.description.as_deref().unwrap_or("");
                 if desc.is_empty() {
-                    format!("  --config {}=<value>", key)
+                    format!("  -k {}=<value>", key)
                 } else {
-                    format!("  --config {}=<value>  ({})", key, desc)
+                    format!("  -k {}=<value>  ({})", key, desc)
                 }
             })
             .collect();
 
         if !required_missing.is_empty() {
             return Err(ToolError::Generic(format!(
-                "Missing required configuration:\n\n{}\n\nProvide via --config flags or run interactively.",
+                "Missing required configuration:\n\n{}\n\nProvide via -k flags or run interactively (without --yes).",
                 required_missing.join("\n")
             )));
         }

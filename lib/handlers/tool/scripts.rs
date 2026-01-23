@@ -40,7 +40,7 @@ pub async fn run_script(
         .and_then(|v| v.as_str())
         .ok_or_else(|| {
             ToolError::Generic(format!(
-                "Script '{}' not found in manifest.json\nDefine it in _meta.store.tool.mcpb.scripts\nUse `tool run --list` to see available scripts.",
+                "Script '{}' not found in manifest.json\nDefine it in _meta.store.tool.mcpb.scripts or run it directly (e.g., `tool build`, `tool test`).",
                 script_name
             ))
         })?;
