@@ -1,0 +1,24 @@
+{
+  "manifest_version": "0.3",
+  "name": "open-data-mcp",
+  "version": "0.1.0",
+  "description": "An MCP server",
+  "server": {
+    "type": "python",
+    "entry_point": "server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "open-data-mcp"
+      ]
+    }
+  },
+  "_meta": {
+    "store.tool.mcpb": {
+      "scripts": {
+        "build": "uv sync"
+      }
+    }
+  }
+}

@@ -41,4 +41,5 @@ rust-sdk
 # Python
 __pycache__/
 *.pyc
+*.egg-info/
 .venv/

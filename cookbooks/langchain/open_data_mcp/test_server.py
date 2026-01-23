@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for open_data_server.py
+Test script for server.py
 Tests every single tool and reports results.
 """
 
@@ -13,7 +13,7 @@ from rich.table import Table
 from rich.panel import Panel
 
 # Import all tools from the server
-from open_data_server import (
+from server import (
     # Weather
     get_current_weather,
     get_weather_forecast,
