@@ -47,6 +47,14 @@ pub static DEFAULT_TMP_PATH: LazyLock<PathBuf> =
 pub static DEFAULT_CREDENTIALS_PATH: LazyLock<PathBuf> =
     LazyLock::new(|| DEFAULT_HOME_PATH.join("credentials"));
 
+/// Default path for secrets storage (encryption keys).
+pub static DEFAULT_SECRETS_PATH: LazyLock<PathBuf> =
+    LazyLock::new(|| DEFAULT_HOME_PATH.join("secrets"));
+
+/// Path to the auto-generated encryption key file.
+pub static ENCRYPTION_KEY_PATH: LazyLock<PathBuf> =
+    LazyLock::new(|| DEFAULT_SECRETS_PATH.join("encryption.key"));
+
 /// Default path for registry authentication.
 pub static REGISTRY_AUTH_DIR: LazyLock<PathBuf> = LazyLock::new(|| DEFAULT_HOME_PATH.join("auth"));
 

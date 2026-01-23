@@ -66,7 +66,7 @@ pub enum ToolError {
     #[error("OAuth authentication required for tool: {tool_ref}")]
     AuthRequired { tool_ref: String },
 
-    /// OAuth not configured (CREDENTIALS_SECRET_KEY not set).
+    /// OAuth not configured (credential storage unavailable).
     #[error("OAuth not configured")]
     OAuthNotConfigured,
 
