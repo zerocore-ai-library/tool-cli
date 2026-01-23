@@ -484,10 +484,16 @@ async fn wait_for_server_ready(
         // Check if the child process has crashed
         match child.try_wait() {
             Ok(Some(status)) => {
+                // Read stderr to get the actual error message
+                let stderr_output = read_child_stderr(child);
+                let error_detail = if let Some(output) = stderr_output {
+                    format!("\n{}", output.trim())
+                } else {
+                    String::new()
+                };
                 return Err(ToolError::Generic(format!(
-                    "Server process exited unexpectedly with {}\n\
-                     Hint: Run with --verbose to see server error output",
-                    status
+                    "Server process exited unexpectedly with {}{}",
+                    status, error_detail
                 )));
             }
             Ok(None) => {
@@ -507,10 +513,17 @@ async fn wait_for_server_ready(
                 // Final check: ensure our spawned process is still running
                 match child.try_wait() {
                     Ok(Some(status)) => {
+                        // Read stderr to get the actual error message
+                        let stderr_output = read_child_stderr(child);
+                        let error_detail = if let Some(output) = stderr_output {
+                            format!("\n{}", output.trim())
+                        } else {
+                            String::new()
+                        };
                         return Err(ToolError::Generic(format!(
-                            "Server process exited with {} but another server is running on the port.\n\
+                            "Server process exited with {} but another server is running on the port.{}\n\
                              Kill the existing process or use a different port.",
-                            status
+                            status, error_detail
                         )));
                     }
                     Ok(None) => return Ok(()), // Process alive, response is from our server
@@ -533,6 +546,20 @@ async fn wait_for_server_ready(
             }
         }
     }
+}
+
+/// Read stderr from a child process (if available and piped).
+fn read_child_stderr(child: &mut Child) -> Option<String> {
+    use std::io::Read;
+    child.stderr.take().and_then(|mut stderr| {
+        let mut output = String::new();
+        stderr.read_to_string(&mut output).ok()?;
+        if output.is_empty() {
+            None
+        } else {
+            Some(output)
+        }
+    })
 }
 
 /// Get tool type from manifest.

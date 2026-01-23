@@ -201,8 +201,11 @@ const httpServer = createServer(async (req, res) => {{
 const portArg = process.argv.find((a) => a.startsWith("--port="));
 const port = portArg ? parseInt(portArg.split("=")[1]) : 3000;
 
-httpServer.listen(port, "127.0.0.1", () => {{
-  console.error(`{name} running on http://127.0.0.1:${{port}}/mcp`);
+const hostArg = process.argv.find((a) => a.startsWith("--host="));
+const host = hostArg ? hostArg.split("=")[1] : "127.0.0.1";
+
+httpServer.listen(port, host, () => {{
+  console.error(`{name} running on http://${{host}}:${{port}}/mcp`);
 }});
 "#
     );
@@ -349,9 +352,10 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=3000)
+    parser.add_argument("--host", type=str, default="127.0.0.1")
     args = parser.parse_args()
 
-    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port)
 "#
     );
 
@@ -532,6 +536,8 @@ use tracing_subscriber::{{self, EnvFilter}};
 struct Args {{
     #[arg(long, default_value = "3000")]
     port: u16,
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
 }}
 
 #[tokio::main]
@@ -551,7 +557,7 @@ async fn main() -> Result<()> {{
     );
 
     let router = axum::Router::new().nest_service("/mcp", service);
-    let addr = format!("127.0.0.1:{{}}", args.port);
+    let addr = format!("{{}}:{{}}", args.host, args.port);
     let tcp_listener = tokio::net::TcpListener::bind(&addr).await?;
 
     eprintln!("{name} running on http://{{}}/mcp", addr);
