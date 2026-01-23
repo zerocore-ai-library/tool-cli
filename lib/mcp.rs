@@ -690,12 +690,13 @@ async fn try_connect_with_stored_credentials(
         Err(e) => {
             // Check if this is an auth error - if so, return NotAvailable to trigger OAuth flow
             if is_auth_error(&e) {
-                if verbose {
-                    eprintln!("Stored credentials rejected ({}), will re-authenticate", e);
-                }
-                // Note: spawned_server is lost here because we can't recover it after failed connection
-                // The OAuth flow will need to spawn a new server if needed
-                Ok(StoredCredentialsResult::NotAvailable(None))
+                // Always show this message so users understand why re-auth is happening
+                eprintln!(
+                    "  {} Stored credentials expired or rejected, re-authenticating...\n",
+                    "!".bright_yellow()
+                );
+                // Return spawned_server so OAuth flow can use it
+                Ok(StoredCredentialsResult::NotAvailable(spawned_server))
             } else {
                 // Non-auth error - propagate it
                 Err(ToolError::Generic(format!(
@@ -718,7 +719,6 @@ pub async fn connect_with_oauth(
     verbose: bool,
 ) -> ToolResult<McpConnection> {
     use crate::oauth::{OAuthFlowOptions, run_interactive_oauth};
-    use crate::security::{CredentialCrypto, EnvSecretProvider};
 
     // For HTTP transport in reference mode, try stored credentials first (before any connection attempt)
     if resolved.transport == McpbTransport::Http
@@ -755,17 +755,9 @@ pub async fn connect_with_oauth(
             };
 
             // No stored credentials or they were rejected - run OAuth flow
-            // Check if CREDENTIALS_SECRET_KEY is set
-            let provider = EnvSecretProvider::new().map_err(|_| ToolError::AuthRequired {
-                tool_ref: tool_ref.to_string(),
-            })?;
-
-            let key = provider
-                .get_encryption_key("default")
-                .await
-                .map_err(|e| ToolError::Generic(format!("Failed to get encryption key: {}", e)))?;
-
-            let crypto = CredentialCrypto::new(&key);
+            // Get credential crypto (auto-generates encryption key if needed)
+            let crypto =
+                crate::security::get_credential_crypto().ok_or(ToolError::OAuthNotConfigured)?;
 
             eprintln!(
                 "  {} Authenticating with {}...\n",
@@ -773,8 +765,12 @@ pub async fn connect_with_oauth(
                 tool_ref.bold()
             );
 
+            // For spawned servers, always do fresh DCR (server won't remember old client registrations)
+            let is_spawned_server = spawned_server.is_some();
             let options = OAuthFlowOptions::default();
-            let _credentials = run_interactive_oauth(session, tool_ref, crypto, options).await?;
+            let _credentials =
+                run_interactive_oauth(session, tool_ref, crypto, options, is_spawned_server)
+                    .await?;
 
             if verbose {
                 eprintln!("OAuth completed, credentials saved");

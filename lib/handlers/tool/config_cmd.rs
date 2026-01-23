@@ -78,20 +78,13 @@ async fn config_set(
     // Clone the schema since we need resolved_plugin later for OAuth
     let schema = resolved_plugin.template.user_config.clone();
 
-    // Check if tool is an HTTP tool with OAuth (can be configured even without user_config)
-    let is_http_with_oauth = resolved_plugin.template.server.transport == McpbTransport::Http
-        && resolved_plugin
-            .template
-            .server
-            .mcp_config
-            .as_ref()
-            .map(|c| c.oauth_config.is_some())
-            .unwrap_or(false);
+    // Check if tool uses HTTP transport (may need OAuth via MCP-Auth discovery)
+    let is_http_tool = resolved_plugin.template.server.transport == McpbTransport::Http;
 
-    // Check if tool has configurable options (user_config or OAuth)
+    // Check if tool has configurable options (user_config or HTTP transport)
     let has_user_config = schema.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
 
-    if !has_user_config && !is_http_with_oauth {
+    if !has_user_config && !is_http_tool {
         return Err(ToolError::Generic(format!(
             "Tool '{}' has no configurable options",
             plugin_ref

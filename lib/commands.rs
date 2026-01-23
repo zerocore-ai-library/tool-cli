@@ -365,7 +365,7 @@ pub enum Command {
     #[command(name = "self", subcommand)]
     SelfCmd(SelfCommand),
 
-    /// Configure tool user settings.
+    /// Configure tool settings and authentication.
     #[command(subcommand)]
     Config(ConfigCommand),
 
@@ -399,7 +399,7 @@ pub enum SelfCommand {
 /// Config subcommands.
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
-    /// Set configuration values for a tool.
+    /// Set configuration values and authenticate HTTP tools.
     Set {
         /// Tool reference.
         tool: String,
