@@ -269,13 +269,13 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 > ```sh
 > tool host list                    # see all supported hosts
-> tool host add cursor              # add tools to Cursor
-> tool host add vscode my-tool      # add specific tool to VS Code
+> tool host add cursor              # add all installed tools to Cursor
+> tool host add vscode my-tool      # add just one tool to VS Code
 > tool host remove claude-desktop   # remove tools from a host
 > tool host show cursor             # preview the generated config
 > ```
 >
-> The command creates backups before modifying anything. If something goes wrong, your original config is safe.
+> By default, `add` registers all your installed tools. Pass specific tool names to register only those. The command creates backups before modifying anything, so your original config is safe.
 
 <br />
 
