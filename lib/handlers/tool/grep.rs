@@ -69,8 +69,8 @@ pub async fn grep_tool(
     let tools_to_search = match &tool {
         Some(t) => {
             // Single tool specified
-            let tool_path = resolve_tool_path(t).await?;
-            vec![(t.clone(), tool_path)]
+            let resolved = resolve_tool_path(t).await?;
+            vec![(t.clone(), resolved.path)]
         }
         None => {
             // Search all installed tools

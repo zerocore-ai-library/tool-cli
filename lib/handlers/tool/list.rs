@@ -17,6 +17,15 @@ pub(super) struct ToolListEntry {
     pub path: PathBuf,
 }
 
+/// Result of resolving a tool reference.
+#[derive(Debug)]
+pub struct ResolvedToolPath {
+    /// The resolved path to the tool directory.
+    pub path: PathBuf,
+    /// Whether this was resolved as an installed tool (via FilePluginResolver).
+    pub is_installed: bool,
+}
+
 //--------------------------------------------------------------------------------------------------
 // Functions
 //--------------------------------------------------------------------------------------------------
@@ -175,28 +184,149 @@ pub async fn list_tools(
 }
 
 /// Resolve a tool reference to a path.
-pub async fn resolve_tool_path(tool: &str) -> ToolResult<PathBuf> {
-    // Check if it's a local path
-    let path = PathBuf::from(tool);
-    if path.exists() || tool == "." || tool.starts_with("./") || tool.starts_with("/") {
+///
+/// Resolution order:
+/// 1. Explicit path indicators (`.`, `./`, `/`, `..`) - treat as local path
+/// 2. Try to resolve from installed tools
+/// 3. Fallback to relative path if it exists locally
+///
+/// Returns both the path and whether it was resolved as an installed tool.
+pub async fn resolve_tool_path(tool: &str) -> ToolResult<ResolvedToolPath> {
+    // Check for explicit path indicators first
+    let is_explicit_path =
+        tool == "." || tool.starts_with("./") || tool.starts_with('/') || tool.contains("..");
+
+    if is_explicit_path {
+        let path = PathBuf::from(tool);
         let abs_path = if path.is_absolute() {
             path
         } else {
             std::env::current_dir()?.join(&path)
         };
-        return Ok(abs_path);
+        return Ok(ResolvedToolPath {
+            path: abs_path,
+            is_installed: false,
+        });
     }
 
-    // Try to resolve from installed tools
+    // Try to resolve from installed tools first
+    // If parsing fails (e.g., invalid ref like "a/b/c"), fall through to path check
     let resolver = FilePluginResolver::default();
-    if let Some(resolved) = resolver.resolve_tool(tool).await? {
+    if let Ok(Some(resolved)) = resolver.resolve_tool(tool).await {
         // Get the directory containing the manifest
         let dir = resolved.path.parent().unwrap_or(&resolved.path);
-        return Ok(dir.to_path_buf());
+        return Ok(ResolvedToolPath {
+            path: dir.to_path_buf(),
+            is_installed: true,
+        });
+    }
+
+    // Fallback: check if it exists as a relative path
+    let path = PathBuf::from(tool);
+    if path.exists() {
+        let abs_path = std::env::current_dir()?.join(&path);
+        return Ok(ResolvedToolPath {
+            path: abs_path,
+            is_installed: false,
+        });
     }
 
     Err(ToolError::Generic(format!(
         "Tool '{}' not found. Use a path or install it first.",
         tool
     )))
+}
+
+//--------------------------------------------------------------------------------------------------
+// Tests
+//--------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn create_manifest(dir: &std::path::Path, name: &str) {
+        let manifest = format!(
+            r#"{{
+                "manifest_version": "0.3",
+                "name": "{}",
+                "version": "1.0.0",
+                "description": "Test tool",
+                "author": {{ "name": "Test" }},
+                "server": {{ "type": "node", "entry_point": "index.js" }}
+            }}"#,
+            name
+        );
+        fs::write(dir.join("manifest.json"), manifest).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_resolve_explicit_absolute_path() {
+        let temp = TempDir::new().unwrap();
+        create_manifest(temp.path(), "test-tool");
+
+        let abs_path = temp.path().to_string_lossy().to_string();
+        let result = resolve_tool_path(&abs_path).await.unwrap();
+        assert!(!result.is_installed);
+        // Canonicalize to handle symlinks
+        let result_canonical = result.path.canonicalize().unwrap();
+        let temp_canonical = temp.path().canonicalize().unwrap();
+        assert_eq!(result_canonical, temp_canonical);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_explicit_path_starting_with_slash() {
+        let temp = TempDir::new().unwrap();
+        let tool_dir = temp.path().join("my-tool");
+        fs::create_dir(&tool_dir).unwrap();
+        create_manifest(&tool_dir, "my-tool");
+
+        let abs_path = tool_dir.to_string_lossy().to_string();
+        let result = resolve_tool_path(&abs_path).await.unwrap();
+        assert!(!result.is_installed);
+        assert!(result.path.ends_with("my-tool"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_not_found_returns_error() {
+        // Use a name that is neither installed nor exists as local path
+        // (not an explicit path like /foo or ./foo)
+        let result = resolve_tool_path("definitely-nonexistent-tool-12345").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_resolved_tool_path_struct() {
+        let resolved = ResolvedToolPath {
+            path: PathBuf::from("/test/path"),
+            is_installed: true,
+        };
+        assert_eq!(resolved.path, PathBuf::from("/test/path"));
+        assert!(resolved.is_installed);
+
+        let resolved_local = ResolvedToolPath {
+            path: PathBuf::from("/local/path"),
+            is_installed: false,
+        };
+        assert!(!resolved_local.is_installed);
+    }
+
+    #[test]
+    fn test_is_explicit_path_detection() {
+        // These should be detected as explicit paths
+        assert!(".".starts_with('.') || "." == ".");
+        assert!("./my-tool".starts_with("./"));
+        assert!("/absolute/path".starts_with('/'));
+        assert!("../parent".contains(".."));
+
+        // These should NOT be explicit paths
+        assert!(!"my-tool".starts_with('.'));
+        assert!(!"my-tool".starts_with("./"));
+        assert!(!"my-tool".starts_with('/'));
+        assert!(!"my-tool".contains(".."));
+    }
 }

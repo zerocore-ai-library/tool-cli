@@ -570,17 +570,168 @@ pub fn get_tool_type(manifest: &McpbManifest) -> ToolType {
     }
 }
 
+/// Result of attempting to connect with stored credentials.
+enum StoredCredentialsResult {
+    /// Connected successfully with stored credentials.
+    Connected(McpConnection),
+    /// No stored credentials available, or credentials were rejected.
+    /// The spawned server (if any) is returned for use in OAuth flow.
+    NotAvailable(Option<Child>),
+}
+
+/// Try to connect to an HTTP server using stored OAuth credentials.
+///
+/// Returns `Connected(connection)` if credentials exist and connection succeeds,
+/// `NotAvailable(spawned_server)` if no credentials or they were rejected (auth error),
+/// `Err` if credentials exist but connection fails with a non-auth error.
+async fn try_connect_with_stored_credentials(
+    url: &str,
+    tool_ref: &str,
+    spawned_server: Option<Child>,
+    verbose: bool,
+) -> ToolResult<StoredCredentialsResult> {
+    // Check if crypto is configured (should auto-initialize)
+    let crypto = match crate::security::get_credential_crypto() {
+        Some(c) => c,
+        None => {
+            if verbose {
+                eprintln!(
+                    "Could not initialize credential storage, skipping stored credentials check"
+                );
+            }
+            return Ok(StoredCredentialsResult::NotAvailable(spawned_server));
+        }
+    };
+
+    // Check if we have stored credentials
+    let credentials = match crate::oauth::load_credentials(tool_ref).await {
+        Ok(Some(creds)) => creds,
+        Ok(None) => {
+            if verbose {
+                eprintln!("No stored credentials for {}", tool_ref);
+            }
+            return Ok(StoredCredentialsResult::NotAvailable(spawned_server));
+        }
+        Err(e) => {
+            if verbose {
+                eprintln!("Failed to load credentials: {}", e);
+            }
+            return Ok(StoredCredentialsResult::NotAvailable(spawned_server));
+        }
+    };
+
+    if verbose {
+        eprintln!(
+            "Found stored credentials for {}, attempting connection...",
+            tool_ref
+        );
+    }
+
+    // Check if credentials are expired (but still try - server might accept or we have refresh token)
+    if credentials.is_expired() && verbose {
+        eprintln!("Stored credentials may be expired, attempting anyway...");
+    }
+
+    // Set up the credential store for the AuthClient
+    let store = crate::security::FileCredentialStore::new(tool_ref, crypto);
+
+    // Create AuthorizationManager and initialize from store
+    let mut manager = rmcp::transport::auth::AuthorizationManager::new(url)
+        .await
+        .map_err(|e| ToolError::Generic(format!("Failed to initialize OAuth manager: {}", e)))?;
+
+    manager.set_credential_store(store);
+
+    let has_creds = manager
+        .initialize_from_store()
+        .await
+        .map_err(|e| ToolError::Generic(format!("Failed to initialize from store: {}", e)))?;
+
+    if !has_creds {
+        if verbose {
+            eprintln!("Credential store returned no credentials");
+        }
+        return Ok(StoredCredentialsResult::NotAvailable(spawned_server));
+    }
+
+    // Create authenticated transport
+    let auth_client = AuthClient::new(reqwest::Client::default(), manager);
+    let config = StreamableHttpClientTransportConfig::with_uri(url);
+    let transport = StreamableHttpClientTransport::with_client(auth_client, config);
+    let client_info = ClientInfo::default();
+
+    match serve_client(client_info, transport).await {
+        Ok(client) => {
+            if verbose {
+                eprintln!("Connected with stored credentials");
+            }
+
+            // Extract child and pgid from spawned server
+            #[cfg(unix)]
+            let (child, pgid) = if let Some(server) = spawned_server {
+                let pid = server.id() as i32;
+                let pgid = unsafe { libc::getpgid(pid) };
+                let pgid = if pgid > 0 { Some(pgid) } else { None };
+                (Some(server), pgid)
+            } else {
+                (None, None)
+            };
+
+            #[cfg(not(unix))]
+            let child = spawned_server;
+
+            Ok(StoredCredentialsResult::Connected(McpConnection {
+                client,
+                child,
+                #[cfg(unix)]
+                pgid,
+            }))
+        }
+        Err(e) => {
+            // Check if this is an auth error - if so, return NotAvailable to trigger OAuth flow
+            if is_auth_error(&e) {
+                // Always show this message so users understand why re-auth is happening
+                eprintln!(
+                    "  {} Stored credentials expired or rejected, re-authenticating...\n",
+                    "!".bright_yellow()
+                );
+                // Return spawned_server so OAuth flow can use it
+                Ok(StoredCredentialsResult::NotAvailable(spawned_server))
+            } else {
+                // Non-auth error - propagate it
+                Err(ToolError::Generic(format!(
+                    "Connection with stored credentials failed: {}",
+                    e
+                )))
+            }
+        }
+    }
+}
+
 /// Connect with OAuth support.
 ///
 /// This function handles the OAuth flow if authentication is required.
-/// It will open a browser for the user to authenticate and then retry the connection.
+/// It first tries to use stored credentials, and only prompts for OAuth
+/// if no credentials exist or they are invalid.
 pub async fn connect_with_oauth(
     resolved: &ResolvedMcpbManifest,
     tool_ref: &str,
     verbose: bool,
 ) -> ToolResult<McpConnection> {
     use crate::oauth::{OAuthFlowOptions, run_interactive_oauth};
-    use crate::security::{CredentialCrypto, EnvSecretProvider};
+
+    // For HTTP transport in reference mode, try stored credentials first (before any connection attempt)
+    if resolved.transport == McpbTransport::Http
+        && resolved.is_reference
+        && let Some(url) = &resolved.mcp_config.url
+    {
+        match try_connect_with_stored_credentials(url, tool_ref, None, verbose).await? {
+            StoredCredentialsResult::Connected(conn) => return Ok(conn),
+            StoredCredentialsResult::NotAvailable(_) => {
+                // Fall through to normal connect flow
+            }
+        }
+    }
 
     match connect(resolved, verbose).await? {
         ConnectResult::Connected(conn) => Ok(conn),
@@ -588,17 +739,25 @@ pub async fn connect_with_oauth(
             session,
             spawned_server,
         } => {
-            // Check if CREDENTIALS_SECRET_KEY is set
-            let provider = EnvSecretProvider::new().map_err(|_| ToolError::AuthRequired {
-                tool_ref: tool_ref.to_string(),
-            })?;
+            let server_url = session.url().to_string();
 
-            let key = provider
-                .get_encryption_key("default")
-                .await
-                .map_err(|e| ToolError::Generic(format!("Failed to get encryption key: {}", e)))?;
+            // Before running OAuth, try stored credentials (for spawned server case)
+            let spawned_server = match try_connect_with_stored_credentials(
+                &server_url,
+                tool_ref,
+                spawned_server,
+                verbose,
+            )
+            .await?
+            {
+                StoredCredentialsResult::Connected(conn) => return Ok(conn),
+                StoredCredentialsResult::NotAvailable(server) => server,
+            };
 
-            let crypto = CredentialCrypto::new(&key);
+            // No stored credentials or they were rejected - run OAuth flow
+            // Get credential crypto (auto-generates encryption key if needed)
+            let crypto =
+                crate::security::get_credential_crypto().ok_or(ToolError::OAuthNotConfigured)?;
 
             eprintln!(
                 "  {} Authenticating with {}...\n",
@@ -606,11 +765,12 @@ pub async fn connect_with_oauth(
                 tool_ref.bold()
             );
 
-            // Store the server URL before OAuth - we'll need it for the retry
-            let server_url = session.url().to_string();
-
+            // For spawned servers, always do fresh DCR (server won't remember old client registrations)
+            let is_spawned_server = spawned_server.is_some();
             let options = OAuthFlowOptions::default();
-            let _credentials = run_interactive_oauth(session, tool_ref, crypto, options).await?;
+            let _credentials =
+                run_interactive_oauth(session, tool_ref, crypto, options, is_spawned_server)
+                    .await?;
 
             if verbose {
                 eprintln!("OAuth completed, credentials saved");
@@ -662,8 +822,9 @@ pub async fn reconnect_http(
         }
 
         // Create authenticated transport using stored credentials
-        let crypto = crate::security::get_credential_crypto()
-            .ok_or_else(|| ToolError::Generic("CREDENTIALS_SECRET_KEY not set".to_string()))?;
+        let crypto = crate::security::get_credential_crypto().ok_or_else(|| {
+            ToolError::Generic("Could not initialize credential storage".to_string())
+        })?;
         let store = crate::security::FileCredentialStore::new(tool_ref, crypto);
 
         // Create a new AuthorizationManager and initialize from store

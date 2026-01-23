@@ -328,33 +328,48 @@ pub async fn prepare_auth_session(
 }
 
 /// Run interactive OAuth flow.
+///
+/// `is_spawned_server` indicates if this is a spawned (bundle mode) server.
+/// For spawned servers, we always do fresh DCR since the server won't remember
+/// previous client registrations after restart.
 pub async fn run_interactive_oauth(
     mut session: AuthSession,
     tool_ref: &str,
     crypto: CredentialCrypto,
     options: OAuthFlowOptions,
+    is_spawned_server: bool,
 ) -> ToolResult<OAuthCredentials> {
     let redirect_uri = format!("http://127.0.0.1:{}/callback", options.callback_port);
 
-    // Get scopes and client_id from oauth_config
+    // Get scopes from oauth_config
     let scopes: Vec<String> = session
         .oauth_config
         .as_ref()
         .and_then(|c| c.scopes.clone())
         .unwrap_or_else(|| vec!["mcp".to_string()]);
 
-    let client_id = session
-        .oauth_config
-        .as_ref()
-        .and_then(|c| c.client_id.clone());
+    // Get client_id from manifest (pre-registered) or stored credentials (for reference mode)
+    // For spawned servers, skip stored client_id since the new server won't recognize it
+    let stored_client_id = if is_spawned_server {
+        None
+    } else {
+        load_stored_client_id(tool_ref, &crypto).await
+    };
 
-    // Configure client (pre-registered or DCR)
+    let client_id = stored_client_id.or_else(|| {
+        session
+            .oauth_config
+            .as_ref()
+            .and_then(|c| c.client_id.clone())
+    });
+
+    // Configure client (pre-registered/stored or DCR)
     if let Some(ref id) = client_id {
-        tracing::debug!("Using pre-registered client ID: {}", id);
+        tracing::debug!("Using client ID: {}", id);
         session.configure_client(id, &redirect_uri, &scopes)?;
     } else {
         tracing::debug!(
-            "No client_id in manifest, attempting DCR with client_name={}, redirect_uri={}",
+            "Attempting DCR with client_name={}, redirect_uri={}",
             options.client_name,
             redirect_uri
         );
@@ -422,7 +437,15 @@ pub async fn load_credentials(tool_ref: &str) -> ToolResult<Option<OAuthCredenti
         None => return Ok(None),
     };
 
-    let store = FileCredentialStore::new(tool_ref, crypto);
+    load_credentials_with_crypto(tool_ref, &crypto).await
+}
+
+/// Load stored OAuth credentials using provided crypto.
+async fn load_credentials_with_crypto(
+    tool_ref: &str,
+    crypto: &CredentialCrypto,
+) -> ToolResult<Option<OAuthCredentials>> {
+    let store = FileCredentialStore::new(tool_ref, crypto.clone());
 
     use rmcp::transport::auth::CredentialStore;
     match store.load().await {
@@ -437,6 +460,27 @@ pub async fn load_credentials(tool_ref: &str) -> ToolResult<Option<OAuthCredenti
             tracing::debug!("Failed to load credentials for '{}': {}", tool_ref, e);
             Ok(None)
         }
+    }
+}
+
+/// Load just the client_id from stored credentials.
+///
+/// This is used when re-authenticating to reuse the DCR client_id
+/// instead of registering a new client.
+async fn load_stored_client_id(tool_ref: &str, crypto: &CredentialCrypto) -> Option<String> {
+    let store = FileCredentialStore::new(tool_ref, crypto.clone());
+
+    use rmcp::transport::auth::CredentialStore;
+    match store.load().await {
+        Ok(Some(stored)) => {
+            tracing::debug!(
+                "Found stored client_id for '{}': {}",
+                tool_ref,
+                &stored.client_id
+            );
+            Some(stored.client_id)
+        }
+        _ => None,
     }
 }
 

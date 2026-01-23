@@ -3,14 +3,10 @@
 use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
 use crate::mcp::{ToolCapabilities, ToolType, get_tool_info, get_tool_type};
-use crate::resolver::load_tool_from_path;
-use crate::system_config::allocate_system_config;
 use colored::Colorize;
 use std::path::Path;
 
-use super::call::{apply_user_config_defaults, parse_user_config, prompt_missing_user_config};
-use super::config_cmd::{parse_tool_ref_for_config, save_tool_config};
-use super::list::resolve_tool_path;
+use super::common::{PrepareToolOptions, prepare_tool};
 
 //--------------------------------------------------------------------------------------------------
 // Functions
@@ -33,48 +29,23 @@ pub async fn tool_info(
     concise: bool,
     no_header: bool,
 ) -> ToolResult<()> {
-    // Resolve tool path
-    let tool_path = resolve_tool_path(&tool).await?;
-
-    // Load manifest to get user_config schema
-    let resolved_plugin = load_tool_from_path(&tool_path)?;
-    let manifest_schema = resolved_plugin.template.user_config.as_ref();
-
-    // Parse user config from saved config, config file, and -k flags
-    let mut user_config =
-        parse_user_config(&config, config_file.as_deref(), &tool, &resolved_plugin)?;
-
-    // Prompt for missing required config values, then apply defaults
-    prompt_missing_user_config(manifest_schema, &mut user_config, yes)?;
-    apply_user_config_defaults(manifest_schema, &mut user_config);
-
-    // Auto-save config for future use (unless --no-save)
-    if !no_save
-        && !user_config.is_empty()
-        && let Ok(plugin_ref) = parse_tool_ref_for_config(&tool, &resolved_plugin)
-    {
-        let _ = save_tool_config(&plugin_ref, &user_config);
-    }
-
-    // Allocate system config and resolve manifest
-    let system_config = allocate_system_config(resolved_plugin.template.system_config.as_ref())?;
-    let resolved = resolved_plugin
-        .template
-        .resolve(&user_config, &system_config)?;
+    // Prepare the tool (resolve, load config, prompt, save)
+    let prepared = prepare_tool(
+        &tool,
+        PrepareToolOptions {
+            config: &config,
+            config_file: config_file.as_deref(),
+            no_save,
+            yes,
+        },
+    )
+    .await?;
 
     // Get tool metadata
-    let tool_type = get_tool_type(&resolved_plugin.template);
-    let manifest_path = resolved_plugin.path.clone();
-    let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
-        tool_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
-    });
+    let tool_type = get_tool_type(&prepared.plugin.template);
 
     // Get tool info - handle EntryPointNotFound specially
-    let capabilities = match get_tool_info(&resolved, &tool_name, verbose).await {
+    let capabilities = match get_tool_info(&prepared.resolved, &prepared.tool_name, verbose).await {
         Ok(result) => result,
         Err(ToolError::EntryPointNotFound {
             entry_point,
@@ -107,24 +78,10 @@ pub async fn tool_info(
             std::process::exit(1);
         }
         Err(ToolError::OAuthNotConfigured) | Err(ToolError::AuthRequired { tool_ref: _ }) => {
+            println!("  {} OAuth authentication failed\n", "✗".bright_red());
             println!(
-                "  {} This tool requires OAuth authentication\n",
-                "✗".bright_red()
-            );
-            println!(
-                "    To enable OAuth, set the {} environment variable:\n",
-                "CREDENTIALS_SECRET_KEY".bright_cyan()
-            );
-            println!("    {}  Generate a key:", "1.".dimmed());
-            println!("       {}\n", "openssl rand -base64 32".bright_white());
-            println!("    {}  Set it in your shell:", "2.".dimmed());
-            println!(
-                "       {}\n",
-                "export CREDENTIALS_SECRET_KEY=\"<your-key>\"".bright_white()
-            );
-            println!(
-                "    {}  Re-run this command to start OAuth flow",
-                "3.".dimmed()
+                "    Could not initialize credential storage. Check that {} is writable.",
+                "~/.tool/secrets/".bright_cyan()
             );
             std::process::exit(1);
         }
@@ -132,7 +89,7 @@ pub async fn tool_info(
     };
 
     if json_output {
-        output_tool_info_json(&capabilities, tool_type, &manifest_path, concise)?;
+        output_tool_info_json(&capabilities, tool_type, &prepared.manifest_path, concise)?;
         return Ok(());
     }
 
@@ -144,7 +101,7 @@ pub async fn tool_info(
         output_tool_info_concise(
             &capabilities,
             tool_type,
-            &manifest_path,
+            &prepared.manifest_path,
             toolset,
             show_tools,
             show_prompts,
@@ -171,7 +128,7 @@ pub async fn tool_info(
     println!(
         "    {}   {}",
         "Location".dimmed(),
-        manifest_path.display().to_string().dimmed()
+        prepared.manifest_path.display().to_string().dimmed()
     );
     println!();
 

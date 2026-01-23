@@ -1,6 +1,6 @@
 //! Security utilities for credential encryption and storage.
 
-use crate::constants::DEFAULT_CREDENTIALS_PATH;
+use crate::constants::{DEFAULT_CREDENTIALS_PATH, ENCRYPTION_KEY_PATH};
 use aes_gcm::Aes256Gcm;
 use aes_gcm::aead::{AeadInPlace, KeyInit, OsRng};
 use async_trait::async_trait;
@@ -343,16 +343,88 @@ pub fn is_interactive() -> bool {
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
-/// Get credential crypto from environment.
+/// Get credential crypto, auto-generating the encryption key if needed.
 ///
-/// Returns None if CREDENTIALS_SECRET_KEY is not set.
+/// Resolution order:
+/// 1. `CREDENTIALS_SECRET_KEY` env var (if set)
+/// 2. `~/.tool/secrets/encryption.key` file (loaded or auto-generated)
+///
+/// Returns None only if key generation fails (e.g., filesystem error).
 pub fn get_credential_crypto() -> Option<CredentialCrypto> {
-    EnvSecretProvider::new().ok().and_then(|provider| {
-        // EnvSecretProvider stores the key directly
+    // First, try env var (allows user override)
+    if let Ok(provider) = EnvSecretProvider::new() {
         let key = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(provider.get_encryption_key("default"))
         });
-        key.ok().map(|k| CredentialCrypto::new(&k))
+        if let Ok(k) = key {
+            return Some(CredentialCrypto::new(&k));
+        }
+    }
+
+    // Fall back to file-based key (load or generate)
+    match load_or_generate_encryption_key() {
+        Ok(key) => Some(CredentialCrypto::new(&key)),
+        Err(e) => {
+            tracing::warn!("Failed to load/generate encryption key: {}", e);
+            None
+        }
+    }
+}
+
+/// Load the encryption key from file, or generate a new one if it doesn't exist.
+fn load_or_generate_encryption_key() -> Result<SecretKey, SecretProviderError> {
+    let key_path = &*ENCRYPTION_KEY_PATH;
+
+    // Try to load existing key
+    if key_path.exists() {
+        return load_encryption_key_from_file(key_path);
+    }
+
+    // Generate new key
+    generate_and_save_encryption_key(key_path)
+}
+
+/// Load encryption key from file.
+fn load_encryption_key_from_file(path: &PathBuf) -> Result<SecretKey, SecretProviderError> {
+    let contents = std::fs::read_to_string(path)?;
+    let key_material = decode_key_material(&contents)?;
+
+    Ok(SecretKey {
+        key_id: "file".to_string(),
+        key_material,
+    })
+}
+
+/// Generate a new encryption key and save it to file with secure permissions.
+fn generate_and_save_encryption_key(path: &PathBuf) -> Result<SecretKey, SecretProviderError> {
+    // Generate 32 random bytes
+    let mut key_material = [0u8; 32];
+    OsRng.fill_bytes(&mut key_material);
+
+    // Encode as base64 for storage
+    let encoded = BASE64.encode(key_material);
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Write the key file
+    std::fs::write(path, &encoded)?;
+
+    // Set secure permissions (Unix only: owner read/write only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(path, permissions)?;
+    }
+
+    tracing::debug!("Generated new encryption key at {}", path.display());
+
+    Ok(SecretKey {
+        key_id: "file".to_string(),
+        key_material,
     })
 }
 

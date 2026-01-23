@@ -3,16 +3,41 @@
 use crate::commands::ConfigCommand;
 use crate::constants::DEFAULT_CONFIG_PATH;
 use crate::error::{ToolError, ToolResult};
-use crate::mcpb::{McpbUserConfigField, McpbUserConfigType};
+use crate::mcp::connect_with_oauth;
+use crate::mcpb::{McpbTransport, McpbUserConfigField, McpbUserConfigType};
 use crate::prompt::init_theme;
 use crate::references::PluginRef;
 use crate::resolver::load_tool_from_path;
+use crate::security::get_credential_crypto;
+use crate::system_config::allocate_system_config;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use colored::Colorize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use super::list::resolve_tool_path;
+
+//--------------------------------------------------------------------------------------------------
+// Types
+//--------------------------------------------------------------------------------------------------
+
+/// Encrypted config envelope stored on disk.
+///
+/// When a config contains sensitive fields, the entire config is encrypted
+/// and stored in this envelope format.
+#[derive(Debug, Serialize, Deserialize)]
+struct EncryptedConfigEnvelope {
+    /// Marker to identify encrypted configs.
+    encrypted: bool,
+    /// AES-GCM nonce (12 bytes, base64 encoded).
+    nonce: String,
+    /// AES-GCM authentication tag (16 bytes, base64 encoded).
+    auth_tag: String,
+    /// Encrypted config JSON (base64 encoded).
+    ciphertext: String,
+}
 
 //--------------------------------------------------------------------------------------------------
 // Functions
@@ -43,25 +68,31 @@ async fn config_set(
     concise: bool,
 ) -> ToolResult<()> {
     // Resolve tool and load manifest
-    let tool_path = resolve_tool_path(&tool).await?;
-    let resolved = load_tool_from_path(&tool_path)?;
+    let resolved_path = resolve_tool_path(&tool).await?;
+    let resolved_plugin = load_tool_from_path(&resolved_path.path)?;
 
     // Parse the original tool reference for storage (strip version for config path)
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved)?;
+    let plugin_ref =
+        parse_tool_ref_for_config(&tool, &resolved_plugin, resolved_path.is_installed)?;
 
-    let schema = resolved.template.user_config;
+    // Clone the schema since we need resolved_plugin later for OAuth
+    let schema = resolved_plugin.template.user_config.clone();
 
-    // Check if tool has configurable options
-    let schema = schema.ok_or_else(|| {
-        ToolError::Generic(format!("Tool '{}' has no configurable options", plugin_ref))
-    })?;
+    // Check if tool uses HTTP transport (may need OAuth via MCP-Auth discovery)
+    let is_http_tool = resolved_plugin.template.server.transport == McpbTransport::Http;
 
-    if schema.is_empty() {
+    // Check if tool has configurable options (user_config or HTTP transport)
+    let has_user_config = schema.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
+
+    if !has_user_config && !is_http_tool {
         return Err(ToolError::Generic(format!(
             "Tool '{}' has no configurable options",
             plugin_ref
         )));
     }
+
+    // Use empty schema if none defined
+    let schema = schema.unwrap_or_default();
 
     // Parse provided values from both trailing args and -C flags
     let mut provided_config = parse_config_values(&values)?;
@@ -123,8 +154,12 @@ async fn config_set(
         config
     };
 
-    // Save config
-    save_tool_config(&plugin_ref, &final_config)?;
+    // Save config (with encryption if schema has sensitive fields)
+    save_tool_config_with_schema(&plugin_ref, &final_config, Some(&schema))?;
+
+    // For HTTP tools, attempt connection to trigger OAuth flow if needed
+    let oauth_result =
+        try_oauth_for_http_tool(&resolved_plugin, &final_config, &plugin_ref.to_string()).await;
 
     // Output
     if concise {
@@ -149,10 +184,107 @@ async fn config_set(
             };
             println!("    {:<20} {}", key, display_value.dimmed());
         }
+
+        // Show OAuth status
+        match oauth_result {
+            OAuthSetupResult::NotRequired => {}
+            OAuthSetupResult::AlreadyAuthenticated => {
+                println!("    {:<20} {}", "OAuth", "authenticated".bright_green());
+            }
+            OAuthSetupResult::Authenticated => {
+                println!("    {:<20} {}", "OAuth", "authenticated".bright_green());
+            }
+            OAuthSetupResult::Skipped(reason) => {
+                println!("    {:<20} {}", "OAuth", reason.dimmed());
+            }
+            OAuthSetupResult::Failed(err) => {
+                println!(
+                    "    {:<20} {} ({})",
+                    "OAuth",
+                    "failed".bright_red(),
+                    err.dimmed()
+                );
+            }
+        }
         println!();
     }
 
     Ok(())
+}
+
+/// Result of attempting OAuth setup for HTTP tools.
+enum OAuthSetupResult {
+    /// Tool doesn't use HTTP transport, no OAuth needed.
+    NotRequired,
+    /// Already had valid credentials.
+    AlreadyAuthenticated,
+    /// Successfully authenticated via OAuth flow.
+    Authenticated,
+    /// OAuth was skipped (e.g., couldn't initialize credential storage).
+    Skipped(String),
+    /// OAuth failed with an error.
+    Failed(String),
+}
+
+/// Try to set up OAuth for HTTP tools.
+///
+/// This attempts a connection to trigger the OAuth flow if the tool uses HTTP
+/// transport and requires authentication.
+async fn try_oauth_for_http_tool(
+    resolved_plugin: &crate::resolver::ResolvedPlugin<crate::mcpb::McpbManifest>,
+    user_config: &BTreeMap<String, String>,
+    tool_ref: &str,
+) -> OAuthSetupResult {
+    // Check if tool uses HTTP transport
+    if resolved_plugin.template.server.transport != McpbTransport::Http {
+        return OAuthSetupResult::NotRequired;
+    }
+
+    // Check if credential storage is available (should auto-initialize)
+    if crate::security::get_credential_crypto().is_none() {
+        return OAuthSetupResult::Skipped("Could not initialize credential storage".to_string());
+    }
+
+    // Allocate system config and resolve manifest
+    let system_config =
+        match allocate_system_config(resolved_plugin.template.system_config.as_ref()) {
+            Ok(config) => config,
+            Err(e) => {
+                return OAuthSetupResult::Failed(format!(
+                    "Failed to allocate system config: {}",
+                    e
+                ));
+            }
+        };
+
+    let resolved = match resolved_plugin
+        .template
+        .resolve(user_config, &system_config)
+    {
+        Ok(r) => r,
+        Err(e) => return OAuthSetupResult::Failed(format!("Failed to resolve manifest: {}", e)),
+    };
+
+    // Check if we already have credentials
+    if let Ok(Some(_)) = crate::oauth::load_credentials(tool_ref).await {
+        return OAuthSetupResult::AlreadyAuthenticated;
+    }
+
+    // Attempt connection (this will trigger OAuth if needed)
+    match connect_with_oauth(&resolved, tool_ref, false).await {
+        Ok(_conn) => OAuthSetupResult::Authenticated,
+        Err(ToolError::OAuthNotConfigured) => {
+            OAuthSetupResult::Skipped("OAuth not configured".to_string())
+        }
+        Err(ToolError::AuthRequired { .. }) => {
+            OAuthSetupResult::Skipped("OAuth required but not configured".to_string())
+        }
+        Err(e) => {
+            // Connection might fail for reasons other than auth (e.g., server not running)
+            // This is not necessarily an error for config set
+            OAuthSetupResult::Skipped(format!("Could not connect: {}", e))
+        }
+    }
 }
 
 /// Handle `config get` subcommand.
@@ -163,11 +295,11 @@ async fn config_get(
     no_header: bool,
 ) -> ToolResult<()> {
     // Resolve tool and load manifest
-    let tool_path = resolve_tool_path(&tool).await?;
-    let resolved = load_tool_from_path(&tool_path)?;
+    let resolved_path = resolve_tool_path(&tool).await?;
+    let resolved = load_tool_from_path(&resolved_path.path)?;
 
     // Parse the original tool reference for storage
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved)?;
+    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved, resolved_path.is_installed)?;
 
     let schema = resolved.template.user_config;
 
@@ -300,11 +432,14 @@ async fn config_list(concise: bool, no_header: bool) -> ToolResult<()> {
 /// Handle `config unset` subcommand.
 async fn config_unset(tool: String, key: String, concise: bool) -> ToolResult<()> {
     // Resolve tool
-    let tool_path = resolve_tool_path(&tool).await?;
-    let resolved = load_tool_from_path(&tool_path)?;
+    let resolved_path = resolve_tool_path(&tool).await?;
+    let resolved = load_tool_from_path(&resolved_path.path)?;
 
     // Parse the original tool reference for storage
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved)?;
+    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved, resolved_path.is_installed)?;
+
+    // Get schema for encryption decision
+    let schema = resolved.template.user_config.as_ref();
 
     // Load existing config
     let mut config = load_tool_config(&plugin_ref).unwrap_or_default();
@@ -330,7 +465,7 @@ async fn config_unset(tool: String, key: String, concise: bool) -> ToolResult<()
     if config.is_empty() {
         delete_tool_config(&plugin_ref)?;
     } else {
-        save_tool_config(&plugin_ref, &config)?;
+        save_tool_config_with_schema(&plugin_ref, &config, schema)?;
     }
 
     if concise {
@@ -350,11 +485,11 @@ async fn config_unset(tool: String, key: String, concise: bool) -> ToolResult<()
 /// Handle `config reset` subcommand.
 async fn config_reset(tool: String, concise: bool) -> ToolResult<()> {
     // Resolve tool
-    let tool_path = resolve_tool_path(&tool).await?;
-    let resolved = load_tool_from_path(&tool_path)?;
+    let resolved_path = resolve_tool_path(&tool).await?;
+    let resolved = load_tool_from_path(&resolved_path.path)?;
 
     // Parse the original tool reference for storage
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved)?;
+    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved, resolved_path.is_installed)?;
 
     // Check if config exists
     let config_path = get_config_path(&plugin_ref);
@@ -393,52 +528,27 @@ async fn config_reset(tool: String, concise: bool) -> ToolResult<()> {
 
 /// Parse a tool reference for config storage.
 ///
-/// This handles three cases:
-/// 1. Local path (e.g., ".") - uses manifest name
-/// 2. Plugin reference (e.g., "appcypher/filesystem") - parses directly
-/// 3. Versioned reference (e.g., "appcypher/filesystem@1.0.0") - strips version
+/// Config storage is based on:
+/// 1. For installed tools - use the reference as provided
+/// 2. For local paths or fallback resolution - use the manifest name only
+///
+/// Namespace is ONLY preserved when the tool actually resolves as an installed plugin.
+/// If "appcypher/sensitive" doesn't exist as installed and falls back to a local path,
+/// config uses the manifest name without namespace.
+///
+/// The `is_installed` flag should come from `resolve_tool_path` which uses
+/// `FilePluginResolver` to determine if a tool is installed.
 pub fn parse_tool_ref_for_config(
     tool: &str,
     resolved: &crate::resolver::ResolvedPlugin<crate::mcpb::McpbManifest>,
+    is_installed: bool,
 ) -> ToolResult<PluginRef> {
-    // Check if it's a path-like reference
-    if tool == "." || tool.starts_with("./") || tool.starts_with('/') || tool.contains("..") {
-        // For path references, try to get name from manifest
-        let name = resolved
-            .template
-            .name
-            .as_ref()
-            .ok_or_else(|| ToolError::Generic("Tool manifest has no name".into()))?;
-        return PluginRef::new(name);
-    }
-
-    // Try to parse as plugin reference
-    if let Ok(mut plugin_ref) = PluginRef::parse(tool) {
-        // If parsed but no namespace, check if we can infer from resolved path
-        if plugin_ref.namespace().is_none() {
-            // Try to detect namespace from the resolved path
-            // Path pattern: ~/.tool/tools/<namespace>/<name>@<version>/manifest.json
-            if let Some(parent) = resolved.path.parent() {
-                // parent is the tool directory (e.g., filesystem@0.1.2)
-                if let Some(namespace_dir) = parent.parent() {
-                    // namespace_dir might be the namespace or tools root
-                    if let Some(ns_name) = namespace_dir.file_name().and_then(|n| n.to_str())
-                        && ns_name != "tools"
-                        && !ns_name.contains('@')
-                        && PluginRef::new(ns_name)
-                            .and_then(|r| r.with_namespace(ns_name))
-                            .is_ok()
-                        && let Ok(ref_with_ns) = plugin_ref.clone().with_namespace(ns_name)
-                    {
-                        plugin_ref = ref_with_ns;
-                    }
-                }
-            }
-        }
+    // Only use the reference as-is if it's an installed tool
+    if is_installed && let Ok(plugin_ref) = PluginRef::parse(tool) {
         return Ok(plugin_ref);
     }
 
-    // Fallback: use manifest name
+    // For paths and local fallbacks, use manifest name only
     let name = resolved
         .template
         .name
@@ -478,16 +588,28 @@ pub fn load_tool_config(plugin_ref: &PluginRef) -> ToolResult<BTreeMap<String, S
     }
 
     let content = std::fs::read_to_string(&config_path)?;
+
+    // Check if config is encrypted
+    if let Ok(envelope) = serde_json::from_str::<EncryptedConfigEnvelope>(&content)
+        && envelope.encrypted
+    {
+        return decrypt_config(&envelope);
+    }
+
+    // Plain config
     let config: BTreeMap<String, String> = serde_json::from_str(&content)
         .map_err(|e| ToolError::Generic(format!("Failed to parse config file: {}", e)))?;
 
     Ok(config)
 }
 
-/// Save config for a tool.
-pub fn save_tool_config(
+/// Save config for a tool with optional schema for encryption.
+///
+/// If schema contains sensitive fields, the entire config is encrypted.
+pub fn save_tool_config_with_schema(
     plugin_ref: &PluginRef,
     config: &BTreeMap<String, String>,
+    schema: Option<&BTreeMap<String, McpbUserConfigField>>,
 ) -> ToolResult<()> {
     let config_dir = get_config_dir(plugin_ref);
     let config_path = get_config_path(plugin_ref);
@@ -495,11 +617,86 @@ pub fn save_tool_config(
     // Create directory
     std::fs::create_dir_all(&config_dir)?;
 
+    // Check if we need to encrypt (schema has sensitive fields that are in config)
+    let should_encrypt = schema
+        .map(|s| has_sensitive_values(s, config))
+        .unwrap_or(false);
+
+    let content = if should_encrypt {
+        encrypt_config(config)?
+    } else {
+        serde_json::to_string_pretty(config)?
+    };
+
     // Write config
-    let content = serde_json::to_string_pretty(config)?;
-    std::fs::write(&config_path, content)?;
+    std::fs::write(&config_path, &content)?;
+
+    // Set secure permissions (Unix only: owner read/write only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(&config_path, permissions)?;
+    }
 
     Ok(())
+}
+
+/// Check if schema has sensitive fields that are present in config.
+fn has_sensitive_values(
+    schema: &BTreeMap<String, McpbUserConfigField>,
+    config: &BTreeMap<String, String>,
+) -> bool {
+    schema
+        .iter()
+        .any(|(key, field)| field.sensitive.unwrap_or(false) && config.contains_key(key))
+}
+
+/// Encrypt config using AES-256-GCM.
+fn encrypt_config(config: &BTreeMap<String, String>) -> ToolResult<String> {
+    let crypto = get_credential_crypto().ok_or_else(|| {
+        ToolError::Generic("Could not initialize encryption for sensitive config".to_string())
+    })?;
+
+    let payload = serde_json::to_value(config)?;
+    let encrypted = crypto
+        .encrypt(&payload)
+        .map_err(|e| ToolError::Generic(format!("Failed to encrypt config: {}", e)))?;
+
+    let envelope = EncryptedConfigEnvelope {
+        encrypted: true,
+        nonce: BASE64.encode(&encrypted.nonce),
+        auth_tag: BASE64.encode(&encrypted.auth_tag),
+        ciphertext: BASE64.encode(&encrypted.ciphertext),
+    };
+
+    Ok(serde_json::to_string_pretty(&envelope)?)
+}
+
+/// Decrypt config from encrypted envelope.
+fn decrypt_config(envelope: &EncryptedConfigEnvelope) -> ToolResult<BTreeMap<String, String>> {
+    let crypto = get_credential_crypto().ok_or_else(|| {
+        ToolError::Generic("Could not initialize decryption for sensitive config".to_string())
+    })?;
+
+    let nonce = BASE64
+        .decode(&envelope.nonce)
+        .map_err(|e| ToolError::Generic(format!("Invalid nonce encoding: {}", e)))?;
+    let auth_tag = BASE64
+        .decode(&envelope.auth_tag)
+        .map_err(|e| ToolError::Generic(format!("Invalid auth_tag encoding: {}", e)))?;
+    let ciphertext = BASE64
+        .decode(&envelope.ciphertext)
+        .map_err(|e| ToolError::Generic(format!("Invalid ciphertext encoding: {}", e)))?;
+
+    let decrypted = crypto
+        .decrypt(&ciphertext, &nonce, &auth_tag)
+        .map_err(|e| ToolError::Generic(format!("Failed to decrypt config: {}", e)))?;
+
+    let config: BTreeMap<String, String> = serde_json::from_value(decrypted)
+        .map_err(|e| ToolError::Generic(format!("Failed to parse decrypted config: {}", e)))?;
+
+    Ok(config)
 }
 
 /// Delete config for a tool.
@@ -701,7 +898,11 @@ fn prompt_all_user_config(
             _ => {
                 // string, directory, file
                 if is_sensitive {
-                    cliclack::password(&prompt_text).interact()?
+                    let mut password = cliclack::password(&prompt_text);
+                    if !is_required {
+                        password = password.allow_empty();
+                    }
+                    password.interact()?
                 } else if let Some(default) = &default_value {
                     cliclack::input(&prompt_text)
                         .default_input(default)
@@ -792,5 +993,127 @@ fn mask_sensitive(value: &str) -> String {
         "***".to_string()
     } else {
         format!("{}...{}", &value[..3], &value[value.len() - 3..])
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+// Tests
+//--------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mcpb::McpbManifest;
+    use crate::references::PluginRef;
+    use crate::resolver::ResolvedPlugin;
+    use std::path::PathBuf;
+
+    fn create_resolved_plugin(name: &str) -> ResolvedPlugin<McpbManifest> {
+        let json = format!(
+            r#"{{
+                "manifest_version": "0.3",
+                "name": "{}",
+                "version": "1.0.0",
+                "description": "Test tool",
+                "author": {{ "name": "Test" }},
+                "server": {{ "type": "node", "entry_point": "index.js" }}
+            }}"#,
+            name
+        );
+        let manifest: McpbManifest = serde_json::from_str(&json).unwrap();
+        ResolvedPlugin {
+            template: manifest,
+            path: PathBuf::from("/tmp/test/manifest.json"),
+            plugin_ref: PluginRef::new(name).unwrap(),
+        }
+    }
+
+    #[test]
+    fn test_parse_tool_ref_installed_simple_name() {
+        let resolved = create_resolved_plugin("my-tool");
+        let result = parse_tool_ref_for_config("my-tool", &resolved, true).unwrap();
+        assert_eq!(result.name(), "my-tool");
+        assert!(result.namespace().is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_ref_installed_with_namespace() {
+        let resolved = create_resolved_plugin("my-tool");
+        let result = parse_tool_ref_for_config("appcypher/my-tool", &resolved, true).unwrap();
+        assert_eq!(result.name(), "my-tool");
+        assert_eq!(result.namespace(), Some("appcypher"));
+    }
+
+    #[test]
+    fn test_parse_tool_ref_installed_strips_version() {
+        let resolved = create_resolved_plugin("my-tool");
+        let result = parse_tool_ref_for_config("appcypher/my-tool@1.0.0", &resolved, true).unwrap();
+        assert_eq!(result.name(), "my-tool");
+        assert_eq!(result.namespace(), Some("appcypher"));
+    }
+
+    #[test]
+    fn test_parse_tool_ref_not_installed_uses_manifest_name() {
+        let resolved = create_resolved_plugin("manifest-name");
+        // Even though ref has namespace, not installed means use manifest name
+        let result = parse_tool_ref_for_config("appcypher/my-tool", &resolved, false).unwrap();
+        assert_eq!(result.name(), "manifest-name");
+        assert!(result.namespace().is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_ref_local_path_uses_manifest_name() {
+        let resolved = create_resolved_plugin("local-tool");
+        let result = parse_tool_ref_for_config("./my-dir", &resolved, false).unwrap();
+        assert_eq!(result.name(), "local-tool");
+        assert!(result.namespace().is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_ref_dot_path_uses_manifest_name() {
+        let resolved = create_resolved_plugin("current-dir-tool");
+        let result = parse_tool_ref_for_config(".", &resolved, false).unwrap();
+        assert_eq!(result.name(), "current-dir-tool");
+        assert!(result.namespace().is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_ref_invalid_ref_not_installed_uses_manifest() {
+        let resolved = create_resolved_plugin("nested-tool");
+        // "org/team/tool" is invalid plugin ref, not installed → manifest name
+        let result = parse_tool_ref_for_config("org/team/tool", &resolved, false).unwrap();
+        assert_eq!(result.name(), "nested-tool");
+        assert!(result.namespace().is_none());
+    }
+
+    #[test]
+    fn test_get_config_path_no_namespace() {
+        let plugin_ref = PluginRef::new("my-tool").unwrap();
+        let path = get_config_path(&plugin_ref);
+        assert!(path.ends_with("my-tool/config.json"));
+        assert!(!path.to_string_lossy().contains("//"));
+    }
+
+    #[test]
+    fn test_get_config_path_with_namespace() {
+        let plugin_ref = PluginRef::new("my-tool")
+            .unwrap()
+            .with_namespace("appcypher")
+            .unwrap();
+        let path = get_config_path(&plugin_ref);
+        assert!(path.to_string_lossy().contains("appcypher"));
+        assert!(path.ends_with("appcypher/my-tool/config.json"));
+    }
+
+    #[test]
+    fn test_mask_sensitive_short() {
+        assert_eq!(mask_sensitive("secret"), "***");
+        assert_eq!(mask_sensitive("12345678"), "***");
+    }
+
+    #[test]
+    fn test_mask_sensitive_long() {
+        assert_eq!(mask_sensitive("123456789"), "123...789");
+        assert_eq!(mask_sensitive("my-secret-api-key"), "my-...key");
     }
 }

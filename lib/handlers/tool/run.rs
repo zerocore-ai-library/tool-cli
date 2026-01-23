@@ -5,12 +5,8 @@ use colored::Colorize;
 use crate::error::{ToolError, ToolResult};
 use crate::mcp::connect_with_oauth;
 use crate::proxy::{ExposeTransport, HttpExposeConfig, run_proxy};
-use crate::resolver::load_tool_from_path;
-use crate::system_config::allocate_system_config;
 
-use super::call::{apply_user_config_defaults, parse_user_config, prompt_missing_user_config};
-use super::config_cmd::{parse_tool_ref_for_config, save_tool_config};
-use super::list::resolve_tool_path;
+use super::common::{PrepareToolOptions, prepare_tool};
 
 //--------------------------------------------------------------------------------------------------
 // Functions
@@ -35,47 +31,19 @@ pub async fn tool_run(
         None => None,
     };
 
-    // Resolve tool path
-    let tool_path = resolve_tool_path(&tool).await?;
+    // Prepare the tool (resolve, load config, prompt, save)
+    let prepared = prepare_tool(
+        &tool,
+        PrepareToolOptions {
+            config: &config,
+            config_file: config_file.as_deref(),
+            no_save,
+            yes,
+        },
+    )
+    .await?;
 
-    // Load manifest
-    let resolved_plugin = load_tool_from_path(&tool_path)?;
-    let manifest_schema = resolved_plugin.template.user_config.as_ref();
-
-    // Parse user config
-    let mut user_config =
-        parse_user_config(&config, config_file.as_deref(), &tool, &resolved_plugin)?;
-
-    // Prompt for missing required config values, then apply defaults
-    prompt_missing_user_config(manifest_schema, &mut user_config, yes)?;
-    apply_user_config_defaults(manifest_schema, &mut user_config);
-
-    // Auto-save config for future use (unless --no-save)
-    if !no_save
-        && !user_config.is_empty()
-        && let Ok(plugin_ref) = parse_tool_ref_for_config(&tool, &resolved_plugin)
-    {
-        let _ = save_tool_config(&plugin_ref, &user_config);
-    }
-
-    // Allocate system config
-    let system_config = allocate_system_config(resolved_plugin.template.system_config.as_ref())?;
-
-    // Resolve manifest with config
-    let resolved = resolved_plugin
-        .template
-        .resolve(&user_config, &system_config)?;
-
-    let backend_transport = resolved.transport;
-
-    // Get tool name for OAuth
-    let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
-        tool_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
-    });
+    let backend_transport = prepared.transport;
 
     if verbose {
         eprintln!(
@@ -85,7 +53,7 @@ pub async fn tool_run(
     }
 
     // Connect to backend
-    let backend = connect_with_oauth(&resolved, &tool_name, verbose).await?;
+    let backend = connect_with_oauth(&prepared.resolved, &prepared.tool_name, verbose).await?;
 
     // Get server info for display
     let server_info = backend
@@ -111,7 +79,8 @@ pub async fn tool_run(
         "Backend".dimmed(),
         match backend_transport {
             crate::mcpb::McpbTransport::Stdio => "stdio".to_string(),
-            crate::mcpb::McpbTransport::Http => resolved
+            crate::mcpb::McpbTransport::Http => prepared
+                .resolved
                 .mcp_config
                 .url
                 .as_deref()
