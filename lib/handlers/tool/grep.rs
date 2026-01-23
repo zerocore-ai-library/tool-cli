@@ -1,6 +1,7 @@
 //! Tool grep command handlers.
 
 use crate::error::{ToolError, ToolResult};
+use crate::format::format_description;
 use crate::mcp::get_tool_info;
 use crate::resolver::{FilePluginResolver, load_tool_from_path};
 use crate::system_config::allocate_system_config;
@@ -426,12 +427,9 @@ fn output_normal(all_matches: &[GrepMatch]) {
                     _ => ("•".normal(), Some(m.field_name.clone())),
                 };
 
-                // Truncate long text
-                let display_text = if m.matched_text.len() > 60 {
-                    format!("{}...", &m.matched_text[..57])
-                } else {
-                    m.matched_text.clone()
-                };
+                // Normalize and truncate text (handles newlines, trims, truncates to 60 chars)
+                let display_text = format_description(&m.matched_text, false, "")
+                    .unwrap_or_else(|| m.matched_text.clone());
 
                 if let Some(field) = field_display {
                     println!(

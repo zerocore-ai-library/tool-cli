@@ -2,6 +2,7 @@
 
 use crate::constants::MCPB_MANIFEST_FILE;
 use crate::error::{ToolError, ToolResult};
+use crate::format::format_description;
 use crate::mcpb::McpbManifest;
 use crate::references::PluginRef;
 use crate::registry::RegistryClient;
@@ -385,13 +386,17 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
                 .as_ref()
                 .map(|v| format!("@{}", v))
                 .unwrap_or_default();
-            let desc = result.description.as_deref().unwrap_or("");
+            let desc = result
+                .description
+                .as_deref()
+                .and_then(|d| format_description(d, false, ""))
+                .unwrap_or_default();
             println!(
                 "{}/{}{}\t{}\t{}",
                 result.namespace,
                 result.name,
                 version_str,
-                quote(desc),
+                quote(&desc),
                 result.total_downloads
             );
         }
@@ -421,7 +426,11 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
             format!("↓{}", result.total_downloads).dimmed()
         );
 
-        if let Some(desc) = &result.description {
+        if let Some(desc) = result
+            .description
+            .as_deref()
+            .and_then(|d| format_description(d, false, ""))
+        {
             println!("      {}", desc.dimmed());
         }
     }

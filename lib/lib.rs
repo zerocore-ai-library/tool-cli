@@ -5,6 +5,7 @@ pub mod concise;
 pub mod constants;
 pub mod detect;
 pub mod error;
+pub mod format;
 pub mod handlers;
 pub mod mcp;
 pub mod mcpb;
