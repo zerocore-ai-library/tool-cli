@@ -368,6 +368,7 @@ pub(super) fn prompt_missing_user_config(
     }
 
     // Interactive: prompt for each field
+    crate::prompt::init_theme();
     cliclack::intro("Tool configuration")?;
 
     for (key, field) in to_prompt {
