@@ -1,0 +1,17 @@
+[project]
+name = "bash-mcp"
+version = "0.1.0"
+description = "MCP server for bash command execution"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+bash-mcp = "server:main"
+
+[tool.uv]
+package = true
+
+[tool.setuptools]
+py-modules = ["server"]

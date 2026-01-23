@@ -1773,5 +1773,9 @@ async def generate_uuid(count: int = 1) -> dict:
     return {"count": len(uuids), "uuids": uuids}
 
 
-if __name__ == "__main__":
+def main():
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()
