@@ -37,3 +37,8 @@ ignore/
 # Symbolic links
 rig
 rust-sdk
+
+# Python
+__pycache__/
+*.pyc
+.venv/
