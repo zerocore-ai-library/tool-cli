@@ -146,20 +146,7 @@ Get your first MCP tool published in three steps.
 > ```
 >
 > Search across all installed tools - server names, tool names, descriptions, and schema fields. Returns matches with JavaScript accessor paths so you can locate exactly where the match occurred.
->
-> ```sh
-> tool grep random --json
-> ```
->
-> ```json
-> {
->   "pattern": "random",
->   "matches": [
->     {"path": "['steve/system'].tools.system__get_random_integer", "value": "system__get_random_integer"},
->     {"path": "['steve/system'].tools.system__get_random_integer.description", "value": "Generate a random integer..."}
->   ]
-> }
-> ```
+
 
 ##
 
@@ -190,8 +177,8 @@ Get your first MCP tool published in three steps.
 > You can also use `--expose` to bridge between transports.
 >
 > ```sh
-> tool run --expose stdio              # HTTP backend to stdio
-> tool run --expose http --port 3000   # stdio backend to HTTP
+> tool run appcypher/bash --expose stdio              # HTTP backend to stdio
+> tool run appcypher/bash --expose http --port 3000   # stdio backend to HTTP
 > ```
 
 ##
