@@ -314,6 +314,7 @@ async fn run() -> ToolResult<()> {
             no_save,
             yes,
             verbose,
+            level,
         } => {
             handlers::tool_info(
                 tool,
@@ -329,6 +330,7 @@ async fn run() -> ToolResult<()> {
                 verbose,
                 cli.concise,
                 cli.no_header,
+                level,
             )
             .await
         }
@@ -398,6 +400,7 @@ async fn run() -> ToolResult<()> {
             ignore_case,
             list_only,
             json,
+            level,
         } => {
             handlers::grep_tool(
                 &pattern,
@@ -410,6 +413,7 @@ async fn run() -> ToolResult<()> {
                 json,
                 cli.concise,
                 cli.no_header,
+                level,
             )
             .await
         }

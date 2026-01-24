@@ -28,6 +28,7 @@ pub async fn tool_info(
     verbose: bool,
     concise: bool,
     no_header: bool,
+    level: usize,
 ) -> ToolResult<()> {
     // Prepare the tool (resolve, load config, prompt, save)
     let prepared = prepare_tool(
@@ -108,6 +109,7 @@ pub async fn tool_info(
             show_resources,
             show_all,
             no_header,
+            level,
         );
         return Ok(());
     }
@@ -134,7 +136,7 @@ pub async fn tool_info(
 
     // Tools section
     if (show_all || show_tools) && !capabilities.tools.is_empty() {
-        output_tools_section(&capabilities, verbose);
+        output_tools_section(&capabilities, verbose, level);
     }
 
     // Prompts section
@@ -151,7 +153,7 @@ pub async fn tool_info(
 }
 
 /// Output tools section in human-readable format.
-fn output_tools_section(capabilities: &ToolCapabilities, verbose: bool) {
+fn output_tools_section(capabilities: &ToolCapabilities, verbose: bool, level: usize) {
     println!("    {}:", "Tools".dimmed());
     for (idx, tool) in capabilities.tools.iter().enumerate() {
         if verbose {
@@ -185,6 +187,7 @@ fn output_tools_section(capabilities: &ToolCapabilities, verbose: bool) {
         // Show input parameters with tree structure
         if has_input {
             let schema = &tool.input_schema;
+            let defs = schema.get("$defs").and_then(|d| d.as_object());
             let props = schema
                 .get("properties")
                 .and_then(|p| p.as_object())
@@ -203,7 +206,7 @@ fn output_tools_section(capabilities: &ToolCapabilities, verbose: bool) {
                 let is_last = i == prop_count - 1;
                 let prefix = if has_output { "│" } else { " " };
                 let branch = if is_last { "└──" } else { "├──" };
-                let type_str = prop.get("type").and_then(|t| t.as_str()).unwrap_or("any");
+                let type_str = format_schema_type(prop, defs, level);
                 let req_marker = if required.contains(&name.as_str()) {
                     "*"
                 } else {
@@ -230,18 +233,16 @@ fn output_tools_section(capabilities: &ToolCapabilities, verbose: bool) {
         if let Some(output_schema) = &tool.output_schema {
             println!("      {} {}", "└──".dimmed(), "Output".dimmed());
 
-            if let Some(props) = output_schema.get("properties").and_then(|p| p.as_object()) {
-                let required: Vec<&str> = output_schema
-                    .get("required")
-                    .and_then(|r| r.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-                    .unwrap_or_default();
-
+            // Resolve the actual output schema (handles FastMCP's wrapped format with $defs)
+            let defs = output_schema.get("$defs").and_then(|d| d.as_object());
+            if let Some((resolved, required)) = resolve_output_schema(output_schema)
+                && let Some(props) = resolved.get("properties").and_then(|p| p.as_object())
+            {
                 let prop_count = props.len();
                 for (i, (name, prop)) in props.iter().enumerate() {
                     let is_last = i == prop_count - 1;
                     let branch = if is_last { "└──" } else { "├──" };
-                    let type_str = prop.get("type").and_then(|t| t.as_str()).unwrap_or("any");
+                    let type_str = format_schema_type(prop, defs, level);
                     let req_marker = if required.contains(&name.as_str()) {
                         "*"
                     } else {
@@ -390,6 +391,7 @@ fn output_tool_info_concise(
     show_resources: bool,
     show_all: bool,
     no_header: bool,
+    level: usize,
 ) {
     use crate::concise::quote;
     // Determine what to show
@@ -411,20 +413,17 @@ fn output_tool_info_concise(
             println!("#tool");
         }
         for tool_item in &capabilities.tools {
-            let params = format_schema_params_concise(&tool_item.input_schema, true);
+            let params = format_schema_params_concise(&tool_item.input_schema, true, level);
             let outputs = tool_item
                 .output_schema
                 .as_ref()
-                .map(|s| format_schema_params_concise(s, false))
+                .map(|s| format_schema_params_concise(s, false, level))
                 .unwrap_or_default();
 
             if outputs.is_empty() {
                 println!("{}:{}({})", toolset, tool_item.name, params);
             } else {
-                println!(
-                    "{}:{}({}) -> {{{}}}",
-                    toolset, tool_item.name, params, outputs
-                );
+                println!("{}:{}({}) -> {}", toolset, tool_item.name, params, outputs);
             }
         }
     }
@@ -472,11 +471,194 @@ fn output_tool_info_concise(
     }
 }
 
+/// Resolve a JSON schema, handling $ref and $defs.
+/// For output schemas with union types (anyOf), extract the primary (non-Error) type.
+fn resolve_output_schema(
+    schema: &serde_json::Map<String, serde_json::Value>,
+) -> Option<(&serde_json::Map<String, serde_json::Value>, Vec<&str>)> {
+    let defs = schema.get("$defs").and_then(|d| d.as_object());
+
+    // Check if this is a wrapped result schema (FastMCP style)
+    if let Some(props) = schema.get("properties").and_then(|p| p.as_object())
+        && let Some(result_prop) = props.get("result")
+    {
+        // Handle anyOf (union types like Output | ErrorOutput)
+        if let Some(any_of) = result_prop.get("anyOf").and_then(|a| a.as_array()) {
+            // Find the first non-Error type
+            for variant in any_of {
+                if let Some(ref_path) = variant.get("$ref").and_then(|r| r.as_str()) {
+                    // Extract type name from "#/$defs/TypeName"
+                    let type_name = ref_path.rsplit('/').next()?;
+                    // Skip error types
+                    if type_name.contains("Error") {
+                        continue;
+                    }
+                    // Resolve the reference
+                    if let Some(resolved) = defs
+                        .and_then(|d| d.get(type_name))
+                        .and_then(|t| t.as_object())
+                    {
+                        let required: Vec<&str> = resolved
+                            .get("required")
+                            .and_then(|r| r.as_array())
+                            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                            .unwrap_or_default();
+                        return Some((resolved, required));
+                    }
+                }
+            }
+        }
+        // Handle single $ref
+        if let Some(ref_path) = result_prop.get("$ref").and_then(|r| r.as_str()) {
+            let type_name = ref_path.rsplit('/').next()?;
+            if let Some(resolved) = defs
+                .and_then(|d| d.get(type_name))
+                .and_then(|t| t.as_object())
+            {
+                let required: Vec<&str> = resolved
+                    .get("required")
+                    .and_then(|r| r.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+                return Some((resolved, required));
+            }
+        }
+    }
+
+    // Fallback: use the schema directly
+    let required: Vec<&str> = schema
+        .get("required")
+        .and_then(|r| r.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    Some((schema, required))
+}
+
+/// Get the type string for a schema property, resolving $ref and expanding nested objects.
+fn format_schema_type(
+    prop: &serde_json::Value,
+    defs: Option<&serde_json::Map<String, serde_json::Value>>,
+    max_depth: usize,
+) -> String {
+    format_schema_type_recursive(prop, defs, 0, max_depth, &mut Vec::new())
+}
+
+/// Recursive helper with depth limit and cycle detection.
+fn format_schema_type_recursive(
+    prop: &serde_json::Value,
+    defs: Option<&serde_json::Map<String, serde_json::Value>>,
+    depth: usize,
+    max_depth: usize,
+    seen: &mut Vec<String>,
+) -> String {
+    // Handle $ref - resolve and expand
+    if let Some(ref_path) = prop.get("$ref").and_then(|r| r.as_str()) {
+        let type_name = ref_path.rsplit('/').next().unwrap_or("object");
+
+        // Cycle detection
+        if seen.contains(&type_name.to_string()) {
+            return type_name.to_string();
+        }
+
+        // Resolve the reference
+        if let Some(resolved) = defs
+            .and_then(|d| d.get(type_name))
+            .and_then(|t| t.as_object())
+        {
+            seen.push(type_name.to_string());
+            let result = format_schema_type_recursive(
+                &serde_json::Value::Object(resolved.clone()),
+                defs,
+                depth,
+                max_depth,
+                seen,
+            );
+            seen.pop();
+            return result;
+        }
+        return type_name.to_string();
+    }
+
+    // Handle direct type
+    if let Some(type_str) = prop.get("type").and_then(|t| t.as_str()) {
+        // Handle array types
+        if type_str == "array" {
+            if let Some(items) = prop.get("items") {
+                let item_type = format_schema_type_recursive(items, defs, depth, max_depth, seen);
+                return format!("{}[]", item_type);
+            }
+            return "array".to_string();
+        }
+
+        // Handle object types - expand properties
+        if type_str == "object" {
+            if depth >= max_depth {
+                return "object".to_string();
+            }
+            if let Some(props) = prop.get("properties").and_then(|p| p.as_object()) {
+                let required: Vec<&str> = prop
+                    .get("required")
+                    .and_then(|r| r.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+
+                let fields: Vec<String> = props
+                    .iter()
+                    .map(|(name, p)| {
+                        let field_type =
+                            format_schema_type_recursive(p, defs, depth + 1, max_depth, seen);
+                        let marker = if required.contains(&name.as_str()) {
+                            "*"
+                        } else {
+                            "?"
+                        };
+                        format!("{}{}: {}", name, marker, field_type)
+                    })
+                    .collect();
+
+                if fields.is_empty() {
+                    return "object".to_string();
+                }
+                return format!("{{{}}}", fields.join(", "));
+            }
+        }
+
+        return type_str.to_string();
+    }
+
+    // Handle anyOf
+    if let Some(any_of) = prop.get("anyOf").and_then(|a| a.as_array()) {
+        // Find first non-null type
+        for variant in any_of {
+            let t = format_schema_type_recursive(variant, defs, depth, max_depth, seen);
+            if t != "null" {
+                return t;
+            }
+        }
+    }
+
+    "any".to_string()
+}
+
 /// Format schema properties as param list for concise output.
 pub(super) fn format_schema_params_concise(
     schema: &std::sync::Arc<serde_json::Map<String, serde_json::Value>>,
     is_input: bool,
+    level: usize,
 ) -> String {
+    let defs = schema.get("$defs").and_then(|d| d.as_object());
+
+    // For output schemas, resolve the actual type and use format_schema_type for consistent depth handling
+    if !is_input {
+        let resolved_schema = match resolve_output_schema(schema) {
+            Some((s, _)) => s,
+            None => return String::new(),
+        };
+        let schema_value = serde_json::Value::Object(resolved_schema.clone());
+        return format_schema_type(&schema_value, defs, level);
+    }
+
+    // For input schemas, always show parameter names (level only affects nested type expansion)
     let props = match schema.get("properties").and_then(|p| p.as_object()) {
         Some(p) => p,
         None => return String::new(),
@@ -491,17 +673,13 @@ pub(super) fn format_schema_params_concise(
     let params: Vec<String> = props
         .iter()
         .map(|(name, prop)| {
-            let type_str = prop.get("type").and_then(|t| t.as_str()).unwrap_or("any");
+            let type_str = format_schema_type(prop, defs, level);
             let marker = if required.contains(&name.as_str()) {
                 "*"
             } else {
                 "?"
             };
-            if is_input {
-                format!("{}{}: {}", name, marker, type_str)
-            } else {
-                format!("{}: {}", name, type_str)
-            }
+            format!("{}{}: {}", name, marker, type_str)
         })
         .collect();
 
@@ -527,6 +705,7 @@ fn output_tool_info_json(
                 "name": t.name,
                 "description": t.description,
                 "input_schema": t.input_schema,
+                "output_schema": t.output_schema,
             })
         }).collect::<Vec<_>>(),
         "prompts": capabilities.prompts.iter().map(|p| {
