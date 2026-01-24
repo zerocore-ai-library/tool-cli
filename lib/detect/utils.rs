@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 // Types
 //--------------------------------------------------------------------------------------------------
 
-/// A match found by grep.
+/// A match found by grep in a file.
 #[derive(Debug, Clone)]
-pub struct GrepMatch {
+pub struct FileGrepMatch {
     /// Path to the file containing the match.
     pub path: PathBuf,
     /// Line number (1-based).
@@ -50,7 +50,7 @@ impl Default for GrepOptions {
 //--------------------------------------------------------------------------------------------------
 
 /// Search for a regex pattern in files under a directory.
-pub fn grep_dir(dir: &Path, pattern: &str, options: &GrepOptions) -> Vec<GrepMatch> {
+pub fn grep_dir(dir: &Path, pattern: &str, options: &GrepOptions) -> Vec<FileGrepMatch> {
     let matcher = match RegexMatcher::new(pattern) {
         Ok(m) => m,
         Err(_) => return vec![],
@@ -88,7 +88,7 @@ pub fn grep_dir(dir: &Path, pattern: &str, options: &GrepOptions) -> Vec<GrepMat
             &matcher,
             path,
             UTF8(|line_number, line| {
-                file_matches.push(GrepMatch {
+                file_matches.push(FileGrepMatch {
                     path: path_buf.clone(),
                     line_number,
                     line: line.trim_end().to_string(),

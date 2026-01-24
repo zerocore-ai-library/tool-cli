@@ -3,6 +3,7 @@
 use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
 use crate::mcp::{ToolCapabilities, ToolType, get_tool_info, get_tool_type};
+use crate::output::ToolInfoOutput;
 use colored::Colorize;
 use std::path::Path;
 
@@ -693,39 +694,12 @@ fn output_tool_info_json(
     manifest_path: &Path,
     concise: bool,
 ) -> ToolResult<()> {
-    let output = serde_json::json!({
-        "server": {
-            "name": capabilities.server_info.name,
-            "version": capabilities.server_info.version,
-        },
-        "type": tool_type.to_string(),
-        "manifest_path": manifest_path.display().to_string(),
-        "tools": capabilities.tools.iter().map(|t| {
-            serde_json::json!({
-                "name": t.name,
-                "description": t.description,
-                "input_schema": t.input_schema,
-                "output_schema": t.output_schema,
-            })
-        }).collect::<Vec<_>>(),
-        "prompts": capabilities.prompts.iter().map(|p| {
-            serde_json::json!({
-                "name": p.name,
-                "description": p.description,
-            })
-        }).collect::<Vec<_>>(),
-        "resources": capabilities.resources.iter().map(|r| {
-            serde_json::json!({
-                "name": r.name,
-                "description": r.description,
-                "uri": r.uri,
-            })
-        }).collect::<Vec<_>>(),
-    });
+    let output =
+        ToolInfoOutput::from_capabilities(capabilities, tool_type.to_string(), manifest_path);
     if concise {
-        println!("{}", serde_json::to_string(&output)?);
+        println!("{}", output.to_json()?);
     } else {
-        println!("{}", serde_json::to_string_pretty(&output)?);
+        println!("{}", output.to_json_pretty()?);
     }
     Ok(())
 }

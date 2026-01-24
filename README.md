@@ -145,7 +145,21 @@ Get your first MCP tool published in three steps.
 > tool grep "file"
 > ```
 >
-> Search through tool schemas by pattern. Useful when you're looking for tools with specific capabilities.
+> Search across all installed tools - server names, tool names, descriptions, and schema fields. Returns matches with JavaScript accessor paths so you can locate exactly where the match occurred.
+>
+> ```sh
+> tool grep random --json
+> ```
+>
+> ```json
+> {
+>   "pattern": "random",
+>   "matches": [
+>     {"path": "['steve/system'].tools.system__get_random_integer", "value": "system__get_random_integer"},
+>     {"path": "['steve/system'].tools.system__get_random_integer.description", "value": "Generate a random integer..."}
+>   ]
+> }
+> ```
 
 ##
 
