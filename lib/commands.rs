@@ -161,6 +161,10 @@ pub enum Command {
         /// Output as JSON.
         #[arg(long)]
         json: bool,
+
+        /// Max depth for expanding nested types in output schemas (default: 3).
+        #[arg(short = 'L', long, default_value = "3")]
+        level: usize,
     },
 
     /// Inspect a tool's capabilities.
@@ -208,6 +212,10 @@ pub enum Command {
         /// Show verbose output.
         #[arg(short, long)]
         verbose: bool,
+
+        /// Max depth for expanding nested types in output schemas (default: 3).
+        #[arg(short = 'L', long, default_value = "3")]
+        level: usize,
     },
 
     /// Call a tool.

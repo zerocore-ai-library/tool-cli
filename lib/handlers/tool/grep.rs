@@ -49,6 +49,7 @@ pub async fn grep_tool(
     json_output: bool,
     concise: bool,
     no_header: bool,
+    level: usize,
 ) -> ToolResult<()> {
     use regex::RegexBuilder;
 
@@ -276,7 +277,7 @@ pub async fn grep_tool(
 
     // -l mode: show function signatures
     if list_only {
-        output_list_only(&tool_signatures, concise, no_header);
+        output_list_only(&tool_signatures, concise, no_header, level);
         return Ok(());
     }
 
@@ -320,16 +321,21 @@ fn output_json(all_matches: &[GrepMatch], concise: bool) {
 }
 
 /// Output grep results in list-only mode (function signatures).
-fn output_list_only(tool_signatures: &[ToolSignatureInfo], concise: bool, no_header: bool) {
+fn output_list_only(
+    tool_signatures: &[ToolSignatureInfo],
+    concise: bool,
+    no_header: bool,
+    level: usize,
+) {
     if concise && !no_header {
         println!("#tool");
     }
     for sig in tool_signatures {
-        let params = format_schema_params_concise(&sig.input_schema, true);
+        let params = format_schema_params_concise(&sig.input_schema, true, level);
         let outputs = sig
             .output_schema
             .as_ref()
-            .map(|s| format_schema_params_concise(s, false))
+            .map(|s| format_schema_params_concise(s, false, level))
             .unwrap_or_default();
 
         let signature = if outputs.is_empty() {

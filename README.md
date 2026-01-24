@@ -223,7 +223,7 @@ Get your first MCP tool published in three steps.
 Once you've installed some tools, you probably want to use them in your favorite AI app. Instead of manually editing JSON configs, just run:
 
 > ```sh
-> tool host add claude-desktop acme/weather
+> tool host add claude-desktop appcypher/weather
 > ```
 >
 > This registers the tool with the host. Works with Claude Desktop, Cursor, VS Code, and Claude Code.
@@ -268,11 +268,11 @@ Once you've installed some tools, you probably want to use them in your favorite
 <br />
 
 > ```sh
-> tool host list                         # see all supported hosts
-> tool host add cursor acme/weather      # add a tool to Cursor
-> tool host add vscode                   # add all installed tools
-> tool host remove claude-desktop        # remove tools from a host
-> tool host show cursor                  # preview the generated config
+> tool host list                             # see all supported hosts
+> tool host add cursor appcypher/weather     # add a tool to Cursor
+> tool host add vscode                       # add all installed tools
+> tool host remove claude-desktop            # remove tools from a host
+> tool host show cursor                      # preview the generated config
 > ```
 >
 > You can specify individual tools or omit them to register all installed tools. The command creates backups before modifying anything, so your original config is safe.
