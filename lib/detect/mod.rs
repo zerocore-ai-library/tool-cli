@@ -16,7 +16,7 @@ pub use node::NodeDetector;
 pub use python::PythonDetector;
 pub use rust::RustDetector;
 pub use utils::{
-    GrepMatch, GrepOptions, grep_dir, has_any_pattern, has_pattern, parse_env_example,
+    FileGrepMatch, GrepOptions, grep_dir, has_any_pattern, has_pattern, parse_env_example,
 };
 
 //--------------------------------------------------------------------------------------------------

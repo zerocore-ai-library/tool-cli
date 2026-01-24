@@ -365,8 +365,8 @@ async fn run() -> ToolResult<()> {
 
         Command::Host(cmd) => handlers::handle_host_command(cmd, cli.concise, cli.no_header).await,
 
-        Command::List { filter, json } => {
-            handlers::list_tools(filter.as_deref(), json, cli.concise, cli.no_header).await
+        Command::List { filter, json, full } => {
+            handlers::list_tools(filter.as_deref(), json, full, cli.concise, cli.no_header).await
         }
 
         Command::Download { name, output } => {

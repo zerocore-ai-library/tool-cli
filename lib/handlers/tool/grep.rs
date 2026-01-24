@@ -1,35 +1,34 @@
 //! Tool grep command handlers.
+//!
+//! Searches the unified JSON structure from `tool list --json --full`
+//! and returns matches with JavaScript accessor paths.
 
 use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
 use crate::mcp::get_tool_info;
+use crate::output::{
+    GrepOutput, js_path_schema_field, js_path_schema_field_prop, js_path_server,
+    js_path_server_prop, js_path_tool, js_path_tool_prop,
+};
 use crate::resolver::{FilePluginResolver, load_tool_from_path};
 use crate::system_config::allocate_system_config;
 use colored::Colorize;
 use std::collections::BTreeMap;
 
-use super::info::format_schema_params_concise;
 use super::list::resolve_tool_path;
 
 //--------------------------------------------------------------------------------------------------
 // Types
 //--------------------------------------------------------------------------------------------------
 
-/// A grep match result.
+/// Internal grep match with path and value.
 struct GrepMatch {
-    toolset: String,
-    tool_name: String,
-    field_type: String, // "name", "desc", "in", "out"
-    field_name: String, // field name or empty for desc
-    matched_text: String,
-}
-
-/// Tool info for signature generation in -l mode.
-struct ToolSignatureInfo {
-    toolset: String,
-    tool_name: String,
-    input_schema: std::sync::Arc<serde_json::Map<String, serde_json::Value>>,
-    output_schema: Option<std::sync::Arc<serde_json::Map<String, serde_json::Value>>>,
+    /// JavaScript accessor path (e.g., "['server/name'].tools.tool_name")
+    path: String,
+    /// The matched value
+    value: String,
+    /// The server name (for grouping)
+    server: String,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -49,7 +48,7 @@ pub async fn grep_tool(
     json_output: bool,
     concise: bool,
     no_header: bool,
-    level: usize,
+    _level: usize,
 ) -> ToolResult<()> {
     use regex::RegexBuilder;
 
@@ -62,9 +61,8 @@ pub async fn grep_tool(
     // Determine search scope - all search types if none specified
     let search_all = !name_only && !description_only && !params_only;
 
-    // Collect matches and tool signatures (for -l mode)
+    // Collect matches
     let mut all_matches: Vec<GrepMatch> = Vec::new();
-    let mut tool_signatures: Vec<ToolSignatureInfo> = Vec::new();
 
     // Get list of tools to search
     let tools_to_search = match &tool {
@@ -137,123 +135,167 @@ pub async fn grep_tool(
             Err(_) => continue, // Skip tools that can't be connected
         };
 
-        // Extract toolset name from tool_ref (e.g., "appcypher/filesystem" -> "appcypher/filesystem")
-        let toolset = tool_ref.split('@').next().unwrap_or(tool_ref);
+        // Extract server name from tool_ref (e.g., "appcypher/filesystem@1.0" -> "appcypher/filesystem")
+        let server_name = tool_ref.split('@').next().unwrap_or(tool_ref);
 
-        // Search each tool in this toolset
+        // Search server name (key match)
+        if (search_all || name_only) && regex.is_match(server_name) {
+            all_matches.push(GrepMatch {
+                path: js_path_server(server_name),
+                value: server_name.to_string(),
+                server: server_name.to_string(),
+            });
+        }
+
+        // Search server description (value match)
+        if (search_all || description_only)
+            && let Some(desc) = &resolved_plugin.template.description
+            && regex.is_match(desc)
+        {
+            all_matches.push(GrepMatch {
+                path: js_path_server_prop(server_name, "description"),
+                value: desc.to_string(),
+                server: server_name.to_string(),
+            });
+        }
+
+        // Search each tool in this server
         for tool_info in &capabilities.tools {
-            let tool_name = &tool_info.name;
+            let mcp_tool_name = &tool_info.name;
 
-            // Search tool name
-            if (search_all || name_only) && regex.is_match(tool_name) {
+            // Search tool name (key match)
+            if (search_all || name_only) && regex.is_match(mcp_tool_name) {
                 all_matches.push(GrepMatch {
-                    toolset: toolset.to_string(),
-                    tool_name: tool_name.to_string(),
-                    field_type: "name".to_string(),
-                    field_name: tool_name.to_string(),
-                    matched_text: tool_name.to_string(),
+                    path: js_path_tool(server_name, mcp_tool_name),
+                    value: mcp_tool_name.to_string(),
+                    server: server_name.to_string(),
                 });
             }
 
-            // Search description
+            // Search tool description (value match)
             if (search_all || description_only)
                 && let Some(desc) = &tool_info.description
                 && regex.is_match(desc)
             {
                 all_matches.push(GrepMatch {
-                    toolset: toolset.to_string(),
-                    tool_name: tool_name.to_string(),
-                    field_type: "desc".to_string(),
-                    field_name: String::new(),
-                    matched_text: desc.to_string(),
+                    path: js_path_tool_prop(server_name, mcp_tool_name, "description"),
+                    value: desc.to_string(),
+                    server: server_name.to_string(),
                 });
             }
 
-            // Search input parameters
+            // Search input schema properties
             if (search_all || params_only)
                 && let Some(props) = tool_info
                     .input_schema
                     .get("properties")
                     .and_then(|p| p.as_object())
             {
-                for (param_name, param_schema) in props {
-                    // Search param name
-                    if regex.is_match(param_name) {
-                        let desc = param_schema
-                            .get("description")
-                            .and_then(|d| d.as_str())
-                            .unwrap_or("");
+                for (field_name, field_schema) in props {
+                    // Search field name (key match)
+                    if regex.is_match(field_name) {
                         all_matches.push(GrepMatch {
-                            toolset: toolset.to_string(),
-                            tool_name: tool_name.to_string(),
-                            field_type: "in".to_string(),
-                            field_name: param_name.clone(),
-                            matched_text: desc.to_string(),
+                            path: js_path_schema_field(
+                                server_name,
+                                mcp_tool_name,
+                                "input_schema",
+                                field_name,
+                            ),
+                            value: field_name.clone(),
+                            server: server_name.to_string(),
                         });
                     }
-                    // Also search param description
-                    if let Some(desc) = param_schema.get("description").and_then(|d| d.as_str())
+
+                    // Search field description (value match)
+                    if let Some(desc) = field_schema.get("description").and_then(|d| d.as_str())
                         && regex.is_match(desc)
                     {
-                        // Avoid duplicate if param name already matched
-                        let tool_name_str = tool_name.to_string();
-                        let already_matched = all_matches.iter().any(|m| {
-                            m.toolset == toolset
-                                && m.tool_name == tool_name_str
-                                && m.field_type == "in"
-                                && m.field_name == *param_name
+                        all_matches.push(GrepMatch {
+                            path: js_path_schema_field_prop(
+                                server_name,
+                                mcp_tool_name,
+                                "input_schema",
+                                field_name,
+                                "description",
+                            ),
+                            value: desc.to_string(),
+                            server: server_name.to_string(),
                         });
-                        if !already_matched {
-                            all_matches.push(GrepMatch {
-                                toolset: toolset.to_string(),
-                                tool_name: tool_name.to_string(),
-                                field_type: "in".to_string(),
-                                field_name: param_name.clone(),
-                                matched_text: desc.to_string(),
-                            });
-                        }
+                    }
+
+                    // Search field type (value match)
+                    if let Some(type_str) = field_schema.get("type").and_then(|t| t.as_str())
+                        && regex.is_match(type_str)
+                    {
+                        all_matches.push(GrepMatch {
+                            path: js_path_schema_field_prop(
+                                server_name,
+                                mcp_tool_name,
+                                "input_schema",
+                                field_name,
+                                "type",
+                            ),
+                            value: type_str.to_string(),
+                            server: server_name.to_string(),
+                        });
                     }
                 }
             }
 
-            // Search output schema parameters
+            // Search output schema properties
             if (search_all || params_only)
                 && let Some(output_schema) = &tool_info.output_schema
                 && let Some(props) = output_schema.get("properties").and_then(|p| p.as_object())
             {
-                for (param_name, param_schema) in props {
-                    if regex.is_match(param_name) {
-                        let desc = param_schema
-                            .get("description")
-                            .and_then(|d| d.as_str())
-                            .unwrap_or("");
+                for (field_name, field_schema) in props {
+                    // Search field name (key match)
+                    if regex.is_match(field_name) {
                         all_matches.push(GrepMatch {
-                            toolset: toolset.to_string(),
-                            tool_name: tool_name.to_string(),
-                            field_type: "out".to_string(),
-                            field_name: param_name.clone(),
-                            matched_text: desc.to_string(),
+                            path: js_path_schema_field(
+                                server_name,
+                                mcp_tool_name,
+                                "output_schema",
+                                field_name,
+                            ),
+                            value: field_name.clone(),
+                            server: server_name.to_string(),
+                        });
+                    }
+
+                    // Search field description (value match)
+                    if let Some(desc) = field_schema.get("description").and_then(|d| d.as_str())
+                        && regex.is_match(desc)
+                    {
+                        all_matches.push(GrepMatch {
+                            path: js_path_schema_field_prop(
+                                server_name,
+                                mcp_tool_name,
+                                "output_schema",
+                                field_name,
+                                "description",
+                            ),
+                            value: desc.to_string(),
+                            server: server_name.to_string(),
+                        });
+                    }
+
+                    // Search field type (value match)
+                    if let Some(type_str) = field_schema.get("type").and_then(|t| t.as_str())
+                        && regex.is_match(type_str)
+                    {
+                        all_matches.push(GrepMatch {
+                            path: js_path_schema_field_prop(
+                                server_name,
+                                mcp_tool_name,
+                                "output_schema",
+                                field_name,
+                                "type",
+                            ),
+                            value: type_str.to_string(),
+                            server: server_name.to_string(),
                         });
                     }
                 }
-            }
-
-            // Store tool signature info for -l mode (if this tool has any matches)
-            let tool_key = format!("{}:{}", toolset, tool_name);
-            let has_match = all_matches
-                .iter()
-                .any(|m| m.toolset == toolset && m.tool_name == *tool_name);
-            if has_match
-                && !tool_signatures
-                    .iter()
-                    .any(|s| format!("{}:{}", s.toolset, s.tool_name) == tool_key)
-            {
-                tool_signatures.push(ToolSignatureInfo {
-                    toolset: toolset.to_string(),
-                    tool_name: tool_name.to_string(),
-                    input_schema: tool_info.input_schema.clone(),
-                    output_schema: tool_info.output_schema.clone(),
-                });
             }
         }
     }
@@ -271,199 +313,177 @@ pub async fn grep_tool(
 
     // Output results
     if json_output {
-        output_json(&all_matches, concise);
+        output_json(pattern, &all_matches, concise);
         return Ok(());
     }
 
-    // -l mode: show function signatures
+    // -l mode: show unique paths only
     if list_only {
-        output_list_only(&tool_signatures, concise, no_header, level);
+        output_list_only(&all_matches, concise, no_header);
         return Ok(());
     }
 
-    // Concise mode: grouped by toolset with TSV format
+    // Concise mode: TSV format
     if concise {
         output_concise(&all_matches, no_header);
         return Ok(());
     }
 
-    // Normal output: Design B - grouped by tool with symbols
-    output_normal(&all_matches);
+    // Normal human-readable output
+    output_normal(pattern, &all_matches);
 
     Ok(())
 }
 
-/// Output grep results as JSON.
-fn output_json(all_matches: &[GrepMatch], concise: bool) {
-    let output: Vec<_> = all_matches
-        .iter()
-        .map(|m| {
-            serde_json::json!({
-                "toolset": m.toolset,
-                "tool": m.tool_name,
-                "type": m.field_type,
-                "field": if m.field_name.is_empty() { None } else { Some(&m.field_name) },
-                "text": m.matched_text,
-            })
-        })
-        .collect();
+/// Output grep results as JSON using GrepOutput structure.
+fn output_json(pattern: &str, matches: &[GrepMatch], concise: bool) {
+    let mut output = GrepOutput::new(pattern);
+    for m in matches {
+        output.add_match(&m.path, &m.value);
+    }
     if concise {
-        println!(
-            "{}",
-            serde_json::to_string(&output).expect("Failed to serialize JSON")
-        );
+        println!("{}", output.to_json().expect("Failed to serialize JSON"));
     } else {
         println!(
             "{}",
-            serde_json::to_string_pretty(&output).expect("Failed to serialize JSON")
+            output.to_json_pretty().expect("Failed to serialize JSON")
         );
     }
 }
 
-/// Output grep results in list-only mode (function signatures).
-fn output_list_only(
-    tool_signatures: &[ToolSignatureInfo],
-    concise: bool,
-    no_header: bool,
-    level: usize,
-) {
+/// Output unique paths only (-l mode).
+fn output_list_only(matches: &[GrepMatch], concise: bool, no_header: bool) {
+    // Collect unique paths
+    let mut paths: Vec<&str> = matches.iter().map(|m| m.path.as_str()).collect();
+    paths.sort();
+    paths.dedup();
+
     if concise && !no_header {
-        println!("#tool");
+        println!("#path");
     }
-    for sig in tool_signatures {
-        let params = format_schema_params_concise(&sig.input_schema, true, level);
-        let outputs = sig
-            .output_schema
-            .as_ref()
-            .map(|s| format_schema_params_concise(s, false, level))
-            .unwrap_or_default();
 
-        let signature = if outputs.is_empty() {
-            format!("{}:{}({})", sig.toolset, sig.tool_name, params)
-        } else {
-            format!(
-                "{}:{}({}) -> {{{}}}",
-                sig.toolset, sig.tool_name, params, outputs
-            )
-        };
-
+    for path in paths {
         if concise {
-            println!("{}", signature);
+            println!("{}", path);
         } else {
-            println!("{}", signature.bright_cyan());
+            println!("{}", path.bright_cyan());
         }
     }
 }
 
 /// Output grep results in concise TSV format.
-fn output_concise(all_matches: &[GrepMatch], no_header: bool) {
+fn output_concise(matches: &[GrepMatch], no_header: bool) {
     use crate::concise::quote;
-    use std::collections::BTreeMap;
 
-    // Group matches by toolset
-    let mut by_toolset: BTreeMap<String, Vec<&GrepMatch>> = BTreeMap::new();
-    for m in all_matches {
-        // Skip name matches - tool name is already visible, redundant
-        if m.field_type == "name" {
-            continue;
-        }
-        by_toolset.entry(m.toolset.clone()).or_default().push(m);
+    if !no_header {
+        println!("#path\tvalue");
     }
-
-    // Output each toolset group
-    for (toolset, matches) in &by_toolset {
-        if !no_header {
-            println!("#toolset\t{}", toolset);
-            println!("#tool\ttype\tfield\ttext");
-        }
-        for m in matches {
-            let field = if m.field_name.is_empty() {
-                "-"
-            } else {
-                &m.field_name
-            };
-            println!(
-                "{}\t{}\t{}\t{}",
-                m.tool_name,
-                m.field_type,
-                field,
-                quote(&m.matched_text)
-            );
-        }
+    for m in matches {
+        println!("{}\t{}", m.path, quote(&m.value));
     }
 }
 
-/// Output grep results in normal human-readable format.
-fn output_normal(all_matches: &[GrepMatch]) {
-    use std::collections::BTreeMap;
+/// Output grep results in human-readable format with hierarchical grouping.
+fn output_normal(pattern: &str, matches: &[GrepMatch]) {
+    let match_count = matches.len();
+    let label = if match_count == 1 { "match" } else { "matches" };
+    println!(
+        "  {} Found {} {} for pattern: {}\n",
+        "✓".bright_green(),
+        match_count.to_string().bold(),
+        label,
+        pattern.bright_white().bold()
+    );
 
-    // Group matches by toolset, then by tool_name
-    let mut by_toolset: BTreeMap<String, BTreeMap<String, Vec<&GrepMatch>>> = BTreeMap::new();
-    for m in all_matches {
-        by_toolset
-            .entry(m.toolset.clone())
-            .or_default()
-            .entry(m.tool_name.clone())
-            .or_default()
-            .push(m);
+    // Parse each match into (server, parent_path, leaf, value)
+    // parent_path is the entity being matched (server, tool, or field)
+    // leaf is either "[key]" or ".property"
+    struct ParsedMatch<'a> {
+        server: &'a str,
+        parent_path: String, // relative to server, e.g., "" or ".tools.tool_name"
+        leaf: String,        // "[key]" or ".description"
+        value: &'a str,
     }
 
-    let match_count = all_matches.len();
-    let label = if match_count == 1 { "match" } else { "matches" };
+    let mut parsed: Vec<ParsedMatch> = Vec::new();
+    for m in matches {
+        let server = &m.server;
+        let relative_path = m
+            .path
+            .strip_prefix(&format!("['{}']", server))
+            .unwrap_or(&m.path);
 
-    // Print header with count per toolset
-    for (toolset, tools) in &by_toolset {
-        let toolset_matches: usize = tools.values().map(|v| v.len()).sum();
-        println!(
-            "{} {} in {}:\n",
-            toolset_matches.to_string().bold(),
-            label,
-            toolset.bright_blue()
-        );
+        // Determine if this is a key match or value match
+        // Value matches end with known properties: .description, .type
+        let (parent_path, leaf) = if relative_path.is_empty() {
+            // Server key match
+            (String::new(), "[key]".to_string())
+        } else if let Some(idx) = relative_path.rfind(".description") {
+            if relative_path.ends_with(".description") {
+                (relative_path[..idx].to_string(), ".description".to_string())
+            } else {
+                // Key match (path doesn't end with a property)
+                (relative_path.to_string(), "[key]".to_string())
+            }
+        } else if let Some(idx) = relative_path.rfind(".type") {
+            if relative_path.ends_with(".type") {
+                (relative_path[..idx].to_string(), ".type".to_string())
+            } else {
+                (relative_path.to_string(), "[key]".to_string())
+            }
+        } else {
+            // Key match (tool name, field name, etc.)
+            (relative_path.to_string(), "[key]".to_string())
+        };
 
-        for (tool_name, matches) in tools {
-            println!("  {}", tool_name.bright_white().bold());
+        parsed.push(ParsedMatch {
+            server,
+            parent_path,
+            leaf,
+            value: &m.value,
+        });
+    }
 
-            for m in matches {
-                let (symbol, field_display) = match m.field_type.as_str() {
-                    "name" => continue, // Don't show name matches as separate lines
-                    "desc" => ("◆".bright_magenta(), None),
-                    "in" => ("→".bright_yellow(), Some(m.field_name.clone())),
-                    "out" => ("←".bright_green(), Some(m.field_name.clone())),
-                    _ => ("•".normal(), Some(m.field_name.clone())),
+    // Group by server, then by parent_path
+    let mut by_server: BTreeMap<&str, BTreeMap<&str, Vec<&ParsedMatch>>> = BTreeMap::new();
+    for pm in &parsed {
+        by_server
+            .entry(pm.server)
+            .or_default()
+            .entry(&pm.parent_path)
+            .or_default()
+            .push(pm);
+    }
+
+    for (server, by_parent) in &by_server {
+        println!("  {}", server.bright_cyan().bold());
+
+        for (parent_path, group) in by_parent {
+            // Print parent path (if not empty)
+            if !parent_path.is_empty() {
+                println!("    {}", parent_path.bright_white());
+            }
+
+            // Print each leaf under this parent
+            for pm in group {
+                let display_value =
+                    format_description(pm.value, false, "").unwrap_or_else(|| pm.value.to_string());
+
+                let indent = if parent_path.is_empty() {
+                    "    "
+                } else {
+                    "      "
                 };
 
-                // Normalize and truncate text (handles newlines, trims, truncates to 60 chars)
-                let display_text = format_description(&m.matched_text, false, "")
-                    .unwrap_or_else(|| m.matched_text.clone());
-
-                if let Some(field) = field_display {
-                    println!(
-                        "    {} {}: {}",
-                        symbol,
-                        field.bright_white(),
-                        format!("\"{}\"", display_text).dimmed()
-                    );
+                if pm.leaf == "[key]" {
+                    println!("{}{}", indent, "[key]".dimmed());
+                    println!("{}  \"{}\"", indent, display_value.dimmed());
                 } else {
-                    println!(
-                        "    {} {}",
-                        symbol,
-                        format!("\"{}\"", display_text).dimmed()
-                    );
+                    println!("{}{}", indent, pm.leaf.bright_white());
+                    println!("{}  \"{}\"", indent, display_value.dimmed());
                 }
             }
-            println!();
         }
+        println!();
     }
-
-    // Print legend
-    println!(
-        "{} {}  {} {}  {} {}",
-        "◆".bright_magenta(),
-        "desc".dimmed(),
-        "→".bright_yellow(),
-        "input field".dimmed(),
-        "←".bright_green(),
-        "output field".dimmed()
-    );
 }

@@ -128,6 +128,10 @@ pub enum Command {
         /// Output as JSON.
         #[arg(long)]
         json: bool,
+
+        /// Include full tool info (tools, prompts, resources) for each server.
+        #[arg(long)]
+        full: bool,
     },
 
     /// Search installed tool schemas by pattern.

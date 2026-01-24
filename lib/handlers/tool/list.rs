@@ -2,8 +2,15 @@
 
 use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
-use crate::resolver::FilePluginResolver;
+use crate::mcp::get_tool_info;
+use crate::output::{
+    FullServerOutput, ServerOutput, ToolServerInfo, full_list_to_json, full_list_to_json_pretty,
+    list_to_json, list_to_json_pretty,
+};
+use crate::resolver::{FilePluginResolver, load_tool_from_path};
+use crate::system_config::allocate_system_config;
 use colored::Colorize;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 //--------------------------------------------------------------------------------------------------
@@ -34,6 +41,7 @@ pub struct ResolvedToolPath {
 pub async fn list_tools(
     filter: Option<&str>,
     json_output: bool,
+    full: bool,
     concise: bool,
     no_header: bool,
 ) -> ToolResult<()> {
@@ -110,29 +118,166 @@ pub async fn list_tools(
         tool_entries.push(entry);
     }
 
-    // JSON output
+    // JSON output (object-keyed by server name)
     if json_output {
-        let output: Vec<_> = tool_entries
-            .iter()
-            .map(|e| {
-                serde_json::json!({
-                    "name": e.name,
-                    "type": e.tool_type,
-                    "description": e.description,
-                    "location": e.path.display().to_string(),
-                })
-            })
-            .collect();
-        if concise {
-            println!(
-                "{}",
-                serde_json::to_string(&output).expect("Failed to serialize JSON output")
-            );
+        if full {
+            // Full output: include tools, prompts, resources for each server
+            let mut output: BTreeMap<String, FullServerOutput> = BTreeMap::new();
+
+            for entry in &tool_entries {
+                // Load the tool manifest and resolve it
+                let resolved_plugin = match load_tool_from_path(&entry.path) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        // Can't load manifest, include basic info
+                        output.insert(
+                            entry.name.clone(),
+                            FullServerOutput {
+                                server_type: entry.tool_type.clone(),
+                                description: entry.description.clone(),
+                                location: entry.path.display().to_string(),
+                                server: ToolServerInfo {
+                                    name: entry.name.clone(),
+                                    version: "unknown".to_string(),
+                                },
+                                tools: BTreeMap::new(),
+                                prompts: BTreeMap::new(),
+                                resources: BTreeMap::new(),
+                            },
+                        );
+                        continue;
+                    }
+                };
+
+                let user_config = BTreeMap::new();
+                let system_config =
+                    match allocate_system_config(resolved_plugin.template.system_config.as_ref()) {
+                        Ok(c) => c,
+                        Err(_) => {
+                            output.insert(
+                                entry.name.clone(),
+                                FullServerOutput {
+                                    server_type: entry.tool_type.clone(),
+                                    description: entry.description.clone(),
+                                    location: entry.path.display().to_string(),
+                                    server: ToolServerInfo {
+                                        name: entry.name.clone(),
+                                        version: "unknown".to_string(),
+                                    },
+                                    tools: BTreeMap::new(),
+                                    prompts: BTreeMap::new(),
+                                    resources: BTreeMap::new(),
+                                },
+                            );
+                            continue;
+                        }
+                    };
+
+                let resolved = match resolved_plugin
+                    .template
+                    .resolve(&user_config, &system_config)
+                {
+                    Ok(r) => r,
+                    Err(_) => {
+                        output.insert(
+                            entry.name.clone(),
+                            FullServerOutput {
+                                server_type: entry.tool_type.clone(),
+                                description: entry.description.clone(),
+                                location: entry.path.display().to_string(),
+                                server: ToolServerInfo {
+                                    name: entry.name.clone(),
+                                    version: "unknown".to_string(),
+                                },
+                                tools: BTreeMap::new(),
+                                prompts: BTreeMap::new(),
+                                resources: BTreeMap::new(),
+                            },
+                        );
+                        continue;
+                    }
+                };
+
+                let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
+                    entry
+                        .path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string()
+                });
+
+                // Try to get tool info (may fail if server can't start)
+                match get_tool_info(&resolved, &tool_name, false).await {
+                    Ok(capabilities) => {
+                        output.insert(
+                            entry.name.clone(),
+                            FullServerOutput::from_capabilities(
+                                &entry.tool_type,
+                                entry.description.clone(),
+                                entry.path.display().to_string(),
+                                &capabilities,
+                            ),
+                        );
+                    }
+                    Err(_) => {
+                        // Server couldn't start, include basic info with empty collections
+                        output.insert(
+                            entry.name.clone(),
+                            FullServerOutput {
+                                server_type: entry.tool_type.clone(),
+                                description: entry.description.clone(),
+                                location: entry.path.display().to_string(),
+                                server: ToolServerInfo {
+                                    name: entry.name.clone(),
+                                    version: "unknown".to_string(),
+                                },
+                                tools: BTreeMap::new(),
+                                prompts: BTreeMap::new(),
+                                resources: BTreeMap::new(),
+                            },
+                        );
+                    }
+                }
+            }
+
+            if concise {
+                println!(
+                    "{}",
+                    full_list_to_json(&output).expect("Failed to serialize JSON output")
+                );
+            } else {
+                println!(
+                    "{}",
+                    full_list_to_json_pretty(&output).expect("Failed to serialize JSON output")
+                );
+            }
         } else {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&output).expect("Failed to serialize JSON output")
-            );
+            // Basic output: just server metadata
+            let output: BTreeMap<String, ServerOutput> = tool_entries
+                .iter()
+                .map(|e| {
+                    (
+                        e.name.clone(),
+                        ServerOutput::new(
+                            &e.tool_type,
+                            e.description.clone(),
+                            e.path.display().to_string(),
+                        ),
+                    )
+                })
+                .collect();
+            if concise {
+                println!(
+                    "{}",
+                    list_to_json(&output).expect("Failed to serialize JSON output")
+                );
+            } else {
+                println!(
+                    "{}",
+                    list_to_json_pretty(&output).expect("Failed to serialize JSON output")
+                );
+            }
         }
         return Ok(());
     }
@@ -164,20 +309,142 @@ pub async fn list_tools(
         label
     );
 
-    for entry in &tool_entries {
-        let desc = entry
-            .description
-            .as_ref()
-            .and_then(|d| format_description(d, false, ""))
-            .map(|d| format!("  {}", d.dimmed()))
-            .unwrap_or_default();
-        println!("    {}{}", entry.name.bright_cyan(), desc);
-        println!(
-            "    └── {}  {}",
-            entry.tool_type.dimmed(),
-            entry.path.display().to_string().dimmed()
-        );
-        println!();
+    if full {
+        // Full human-readable output: show tools, prompts, resources for each server
+        for entry in &tool_entries {
+            let desc = entry
+                .description
+                .as_ref()
+                .and_then(|d| format_description(d, false, ""))
+                .map(|d| format!("  {}", d.dimmed()))
+                .unwrap_or_default();
+            println!("    {}{}", entry.name.bright_cyan().bold(), desc);
+            println!(
+                "    {}  {}",
+                entry.tool_type.dimmed(),
+                entry.path.display().to_string().dimmed()
+            );
+
+            // Try to get full tool info
+            let resolved_plugin = match load_tool_from_path(&entry.path) {
+                Ok(p) => p,
+                Err(_) => {
+                    println!("    {} Could not load manifest\n", "✗".bright_red());
+                    continue;
+                }
+            };
+
+            let user_config = BTreeMap::new();
+            let system_config =
+                match allocate_system_config(resolved_plugin.template.system_config.as_ref()) {
+                    Ok(c) => c,
+                    Err(_) => {
+                        println!(
+                            "    {} Could not allocate system config\n",
+                            "✗".bright_red()
+                        );
+                        continue;
+                    }
+                };
+
+            let resolved = match resolved_plugin
+                .template
+                .resolve(&user_config, &system_config)
+            {
+                Ok(r) => r,
+                Err(_) => {
+                    println!("    {} Could not resolve manifest\n", "✗".bright_red());
+                    continue;
+                }
+            };
+
+            let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
+                entry
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            });
+
+            match get_tool_info(&resolved, &tool_name, false).await {
+                Ok(capabilities) => {
+                    // Show tools
+                    if !capabilities.tools.is_empty() {
+                        println!();
+                        println!("    {}:", "Tools".dimmed());
+                        for tool_info in &capabilities.tools {
+                            let tool_desc = tool_info
+                                .description
+                                .as_ref()
+                                .and_then(|d| format_description(d, false, ""))
+                                .map(|d| format!("  {}", d.dimmed()))
+                                .unwrap_or_default();
+                            println!("      {}{}", tool_info.name.bright_white(), tool_desc);
+                        }
+                    }
+
+                    // Show prompts
+                    if !capabilities.prompts.is_empty() {
+                        println!();
+                        println!("    {}:", "Prompts".dimmed());
+                        for prompt in &capabilities.prompts {
+                            let prompt_desc = prompt
+                                .description
+                                .as_ref()
+                                .and_then(|d| format_description(d, false, ""))
+                                .map(|d| format!("  {}", d.dimmed()))
+                                .unwrap_or_default();
+                            println!(
+                                "      {}{}",
+                                prompt.name.to_string().bright_magenta(),
+                                prompt_desc
+                            );
+                        }
+                    }
+
+                    // Show resources
+                    if !capabilities.resources.is_empty() {
+                        println!();
+                        println!("    {}:", "Resources".dimmed());
+                        for resource in &capabilities.resources {
+                            let resource_desc = resource
+                                .description
+                                .as_ref()
+                                .and_then(|d| format_description(d, false, ""))
+                                .map(|d| format!("  {}", d.dimmed()))
+                                .unwrap_or_default();
+                            println!(
+                                "      {}{}",
+                                resource.uri.to_string().bright_yellow(),
+                                resource_desc
+                            );
+                        }
+                    }
+                }
+                Err(_) => {
+                    println!("    {} Could not connect to server", "✗".bright_red());
+                }
+            }
+            println!();
+        }
+    } else {
+        // Basic human-readable output
+        for entry in &tool_entries {
+            let desc = entry
+                .description
+                .as_ref()
+                .and_then(|d| format_description(d, false, ""))
+                .map(|d| format!("  {}", d.dimmed()))
+                .unwrap_or_default();
+            println!("    {}{}", entry.name.bright_cyan(), desc);
+            println!(
+                "    └── {}  {}",
+                entry.tool_type.dimmed(),
+                entry.path.display().to_string().dimmed()
+            );
+            println!();
+        }
     }
 
     Ok(())
