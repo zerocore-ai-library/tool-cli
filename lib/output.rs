@@ -96,10 +96,10 @@ pub struct FullServerOutput {
 // Types: Grep Output
 //--------------------------------------------------------------------------------------------------
 
-/// Grep match result with JavaScript accessor path.
+/// Grep match result with path as array of keys.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrepMatch {
-    pub path: String,
+    pub path: Vec<String>,
     pub value: String,
 }
 
@@ -265,9 +265,9 @@ impl GrepOutput {
     }
 
     /// Add a match.
-    pub fn add_match(&mut self, path: impl Into<String>, value: impl Into<String>) {
+    pub fn add_match(&mut self, path: Vec<String>, value: impl Into<String>) {
         self.matches.push(GrepMatch {
-            path: path.into(),
+            path,
             value: value.into(),
         });
     }
@@ -313,72 +313,108 @@ pub fn full_list_to_json_pretty(
 // Functions: Path Building
 //--------------------------------------------------------------------------------------------------
 
-/// Build a JavaScript accessor path segment for a key.
-/// Uses bracket notation with single quotes for keys with special characters.
-pub fn js_path_key(key: &str) -> String {
-    // Check if key needs bracket notation (contains special chars)
-    if key.contains('/') || key.contains('-') || key.contains('.') || key.contains(' ') {
-        format!("['{}']", key)
-    } else {
-        format!(".{}", key)
+/// Convert a path array to a display string using JavaScript accessor notation.
+/// The first element always uses bracket notation (for root-level keys like server names).
+pub fn path_to_string(path: &[String]) -> String {
+    if path.is_empty() {
+        return String::new();
     }
+
+    let mut result = String::new();
+    for (i, key) in path.iter().enumerate() {
+        if i == 0
+            || key.contains('/')
+            || key.contains('-')
+            || key.contains('.')
+            || key.contains(' ')
+        {
+            result.push_str(&format!("['{}']", key));
+        } else {
+            result.push_str(&format!(".{}", key));
+        }
+    }
+    result
 }
 
-/// Build a JavaScript accessor path for a server.
-pub fn js_path_server(server_name: &str) -> String {
-    format!("['{}']", server_name)
+/// Convert a path array to a relative display string (no bracket notation for first element).
+/// Used for displaying paths relative to a parent context.
+pub fn path_to_string_relative(path: &[String]) -> String {
+    if path.is_empty() {
+        return String::new();
+    }
+
+    let mut result = String::new();
+    for key in path.iter() {
+        if key.contains('/') || key.contains('-') || key.contains('.') || key.contains(' ') {
+            result.push_str(&format!("['{}']", key));
+        } else {
+            result.push_str(&format!(".{}", key));
+        }
+    }
+    result
 }
 
-/// Build a JavaScript accessor path for a server property.
-pub fn js_path_server_prop(server_name: &str, prop: &str) -> String {
-    format!("['{}'].{}", server_name, prop)
+/// Build a path for a server.
+pub fn path_server(server_name: &str) -> Vec<String> {
+    vec![server_name.to_string()]
 }
 
-/// Build a JavaScript accessor path for a tool.
-pub fn js_path_tool(server_name: &str, tool_name: &str) -> String {
-    format!("['{}'].tools{}", server_name, js_path_key(tool_name))
+/// Build a path for a server property.
+pub fn path_server_prop(server_name: &str, prop: &str) -> Vec<String> {
+    vec![server_name.to_string(), prop.to_string()]
 }
 
-/// Build a JavaScript accessor path for a tool property.
-pub fn js_path_tool_prop(server_name: &str, tool_name: &str, prop: &str) -> String {
-    format!(
-        "['{}'].tools{}.{}",
-        server_name,
-        js_path_key(tool_name),
-        prop
-    )
+/// Build a path for a tool.
+pub fn path_tool(server_name: &str, tool_name: &str) -> Vec<String> {
+    vec![
+        server_name.to_string(),
+        "tools".to_string(),
+        tool_name.to_string(),
+    ]
 }
 
-/// Build a JavaScript accessor path for a schema field.
-pub fn js_path_schema_field(
-    server_name: &str,
-    tool_name: &str,
-    schema_type: &str, // "input_schema" or "output_schema"
-    field_path: &str,
-) -> String {
-    format!(
-        "['{}'].tools{}.{}.properties{}",
-        server_name,
-        js_path_key(tool_name),
-        schema_type,
-        js_path_key(field_path)
-    )
+/// Build a path for a tool property.
+pub fn path_tool_prop(server_name: &str, tool_name: &str, prop: &str) -> Vec<String> {
+    vec![
+        server_name.to_string(),
+        "tools".to_string(),
+        tool_name.to_string(),
+        prop.to_string(),
+    ]
 }
 
-/// Build a JavaScript accessor path for a schema field property.
-pub fn js_path_schema_field_prop(
+/// Build a path for a schema field.
+pub fn path_schema_field(
     server_name: &str,
     tool_name: &str,
     schema_type: &str,
-    field_path: &str,
+    field_name: &str,
+) -> Vec<String> {
+    vec![
+        server_name.to_string(),
+        "tools".to_string(),
+        tool_name.to_string(),
+        schema_type.to_string(),
+        "properties".to_string(),
+        field_name.to_string(),
+    ]
+}
+
+/// Build a path for a schema field property.
+pub fn path_schema_field_prop(
+    server_name: &str,
+    tool_name: &str,
+    schema_type: &str,
+    field_name: &str,
     prop: &str,
-) -> String {
-    format!(
-        "['{}'].tools{}.{}.properties{}.{}",
-        server_name,
-        js_path_key(tool_name),
-        schema_type,
-        js_path_key(field_path),
-        prop
-    )
+) -> Vec<String> {
+    vec![
+        server_name.to_string(),
+        "tools".to_string(),
+        tool_name.to_string(),
+        schema_type.to_string(),
+        "properties".to_string(),
+        field_name.to_string(),
+        prop.to_string(),
+    ]
 }
