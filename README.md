@@ -177,7 +177,7 @@ Get your first MCP tool published in three steps.
 > You can also use `--expose` to bridge between transports.
 >
 > ```sh
-> tool run appcypher/bash --expose stdio              # HTTP backend to stdio
+> tool run appcypher/asana --expose stdio             # HTTP backend to stdio
 > tool run appcypher/bash --expose http --port 3000   # stdio backend to HTTP
 > ```
 

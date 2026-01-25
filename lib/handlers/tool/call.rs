@@ -53,7 +53,7 @@ pub async fn tool_call(
     config_file: Option<String>,
     no_save: bool,
     yes: bool,
-    verbose: bool,
+    _verbose: bool,
     concise: bool,
 ) -> ToolResult<()> {
     // Merge -p flags and trailing args
@@ -79,12 +79,13 @@ pub async fn tool_call(
     .await?;
 
     // Call the tool - handle EntryPointNotFound specially
+    // Never pass verbose to connection - verbose only affects output formatting
     let result = match call_tool(
         &prepared.resolved,
         &prepared.tool_name,
         &method,
         arguments,
-        verbose,
+        false,
     )
     .await
     {

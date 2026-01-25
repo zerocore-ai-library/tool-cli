@@ -53,7 +53,8 @@ pub async fn tool_run(
     }
 
     // Connect to backend
-    let backend = connect_with_oauth(&prepared.resolved, &prepared.tool_name, verbose).await?;
+    // Never pass verbose to connection - verbose only affects output formatting
+    let backend = connect_with_oauth(&prepared.resolved, &prepared.tool_name, false).await?;
 
     // Get server info for display
     let server_info = backend

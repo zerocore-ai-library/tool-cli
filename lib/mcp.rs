@@ -66,8 +66,8 @@ pub enum ToolType {
 impl std::fmt::Display for ToolType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ToolType::Stdio => write!(f, "manifest.json (stdio)"),
-            ToolType::Http => write!(f, "manifest.json (http)"),
+            ToolType::Stdio => write!(f, "stdio"),
+            ToolType::Http => write!(f, "http"),
         }
     }
 }

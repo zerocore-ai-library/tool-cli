@@ -304,6 +304,10 @@ async fn run() -> ToolResult<()> {
 
         Command::Info {
             tool,
+            method,
+            input_only,
+            output_only,
+            description_only,
             tools,
             prompts,
             resources,
@@ -318,6 +322,10 @@ async fn run() -> ToolResult<()> {
         } => {
             handlers::tool_info(
                 tool,
+                method,
+                input_only,
+                output_only,
+                description_only,
                 tools,
                 prompts,
                 resources,
@@ -394,9 +402,11 @@ async fn run() -> ToolResult<()> {
         Command::Grep {
             pattern,
             tool,
+            method,
+            input_only,
+            output_only,
             name_only,
             description_only,
-            params_only,
             ignore_case,
             list_only,
             json,
@@ -405,9 +415,11 @@ async fn run() -> ToolResult<()> {
             handlers::grep_tool(
                 &pattern,
                 tool,
+                method,
+                input_only,
+                output_only,
                 name_only,
                 description_only,
-                params_only,
                 ignore_case,
                 list_only,
                 json,
