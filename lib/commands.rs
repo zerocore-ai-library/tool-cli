@@ -142,7 +142,19 @@ pub enum Command {
         /// Tool reference or path (default: search all installed tools).
         tool: Option<String>,
 
-        /// Search tool names only.
+        /// Search within a specific method only.
+        #[arg(short = 'm', long = "method")]
+        method: Option<String>,
+
+        /// Search only in input schemas.
+        #[arg(long = "input")]
+        input_only: bool,
+
+        /// Search only in output schemas.
+        #[arg(long = "output")]
+        output_only: bool,
+
+        /// Search names/keys only.
         #[arg(short = 'n', long = "name")]
         name_only: bool,
 
@@ -150,15 +162,11 @@ pub enum Command {
         #[arg(short = 'd', long = "description")]
         description_only: bool,
 
-        /// Search parameter names only.
-        #[arg(short = 'p', long = "params")]
-        params_only: bool,
-
         /// Case-insensitive search.
         #[arg(short = 'i', long = "ignore-case")]
         ignore_case: bool,
 
-        /// List matching tool names only (no details).
+        /// List matching paths only (no values).
         #[arg(short = 'l', long = "list")]
         list_only: bool,
 
@@ -176,6 +184,22 @@ pub enum Command {
         /// Tool reference or path (default: current directory).
         #[arg(default_value = ".")]
         tool: String,
+
+        /// Focus on a specific method by name.
+        #[arg(short = 'm', long = "method")]
+        method: Option<String>,
+
+        /// Show only input schema (requires -m).
+        #[arg(long = "input")]
+        input_only: bool,
+
+        /// Show only output schema (requires -m).
+        #[arg(long = "output")]
+        output_only: bool,
+
+        /// Show only description.
+        #[arg(short = 'd', long = "description")]
+        description_only: bool,
 
         /// Show only tools.
         #[arg(long)]

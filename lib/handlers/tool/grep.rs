@@ -40,9 +40,11 @@ struct GrepMatch {
 pub async fn grep_tool(
     pattern: &str,
     tool: Option<String>,
+    method: Option<String>,
+    input_only: bool,
+    output_only: bool,
     name_only: bool,
     description_only: bool,
-    params_only: bool,
     ignore_case: bool,
     list_only: bool,
     json_output: bool,
@@ -58,8 +60,10 @@ pub async fn grep_tool(
         .build()
         .map_err(|e| ToolError::Generic(format!("Invalid regex pattern: {}", e)))?;
 
-    // Determine search scope - all search types if none specified
-    let search_all = !name_only && !description_only && !params_only;
+    // Focus flags determine what to search
+    // If none specified, search all
+    let schema_all = !input_only && !output_only;
+    let field_all = !name_only && !description_only;
 
     // Collect matches
     let mut all_matches: Vec<GrepMatch> = Vec::new();
@@ -138,54 +142,68 @@ pub async fn grep_tool(
         // Extract server name from tool_ref (e.g., "appcypher/filesystem@1.0" -> "appcypher/filesystem")
         let server_name = tool_ref.split('@').next().unwrap_or(tool_ref);
 
-        // Search server name (key match)
-        if (search_all || name_only) && regex.is_match(server_name) {
-            all_matches.push(GrepMatch {
-                path: js_path_server(server_name),
-                value: server_name.to_string(),
-                server: server_name.to_string(),
-            });
-        }
+        // Server-level searches only happen if not filtering by --input/--output
+        // (servers don't have input/output schemas)
+        if schema_all {
+            // Search server name (key match)
+            if (field_all || name_only) && regex.is_match(server_name) {
+                all_matches.push(GrepMatch {
+                    path: js_path_server(server_name),
+                    value: server_name.to_string(),
+                    server: server_name.to_string(),
+                });
+            }
 
-        // Search server description (value match)
-        if (search_all || description_only)
-            && let Some(desc) = &resolved_plugin.template.description
-            && regex.is_match(desc)
-        {
-            all_matches.push(GrepMatch {
-                path: js_path_server_prop(server_name, "description"),
-                value: desc.to_string(),
-                server: server_name.to_string(),
-            });
+            // Search server description (value match)
+            if (field_all || description_only)
+                && let Some(desc) = &resolved_plugin.template.description
+                && regex.is_match(desc)
+            {
+                all_matches.push(GrepMatch {
+                    path: js_path_server_prop(server_name, "description"),
+                    value: desc.to_string(),
+                    server: server_name.to_string(),
+                });
+            }
         }
 
         // Search each tool in this server
         for tool_info in &capabilities.tools {
             let mcp_tool_name = &tool_info.name;
 
-            // Search tool name (key match)
-            if (search_all || name_only) && regex.is_match(mcp_tool_name) {
-                all_matches.push(GrepMatch {
-                    path: js_path_tool(server_name, mcp_tool_name),
-                    value: mcp_tool_name.to_string(),
-                    server: server_name.to_string(),
-                });
+            // If -m specified, skip tools that don't match
+            if let Some(ref method_filter) = method
+                && mcp_tool_name != method_filter
+            {
+                continue;
             }
 
-            // Search tool description (value match)
-            if (search_all || description_only)
-                && let Some(desc) = &tool_info.description
-                && regex.is_match(desc)
-            {
-                all_matches.push(GrepMatch {
-                    path: js_path_tool_prop(server_name, mcp_tool_name, "description"),
-                    value: desc.to_string(),
-                    server: server_name.to_string(),
-                });
+            // Tool-level searches only happen if not filtering by --input/--output
+            if schema_all {
+                // Search tool name (key match)
+                if (field_all || name_only) && regex.is_match(mcp_tool_name) {
+                    all_matches.push(GrepMatch {
+                        path: js_path_tool(server_name, mcp_tool_name),
+                        value: mcp_tool_name.to_string(),
+                        server: server_name.to_string(),
+                    });
+                }
+
+                // Search tool description (value match)
+                if (field_all || description_only)
+                    && let Some(desc) = &tool_info.description
+                    && regex.is_match(desc)
+                {
+                    all_matches.push(GrepMatch {
+                        path: js_path_tool_prop(server_name, mcp_tool_name, "description"),
+                        value: desc.to_string(),
+                        server: server_name.to_string(),
+                    });
+                }
             }
 
             // Search input schema properties
-            if (search_all || params_only)
+            if (schema_all || input_only)
                 && let Some(props) = tool_info
                     .input_schema
                     .get("properties")
@@ -193,7 +211,7 @@ pub async fn grep_tool(
             {
                 for (field_name, field_schema) in props {
                     // Search field name (key match)
-                    if regex.is_match(field_name) {
+                    if (field_all || name_only) && regex.is_match(field_name) {
                         all_matches.push(GrepMatch {
                             path: js_path_schema_field(
                                 server_name,
@@ -207,7 +225,8 @@ pub async fn grep_tool(
                     }
 
                     // Search field description (value match)
-                    if let Some(desc) = field_schema.get("description").and_then(|d| d.as_str())
+                    if (field_all || description_only)
+                        && let Some(desc) = field_schema.get("description").and_then(|d| d.as_str())
                         && regex.is_match(desc)
                     {
                         all_matches.push(GrepMatch {
@@ -223,8 +242,9 @@ pub async fn grep_tool(
                         });
                     }
 
-                    // Search field type (value match)
-                    if let Some(type_str) = field_schema.get("type").and_then(|t| t.as_str())
+                    // Search field type (value match) - only if searching all fields
+                    if field_all
+                        && let Some(type_str) = field_schema.get("type").and_then(|t| t.as_str())
                         && regex.is_match(type_str)
                     {
                         all_matches.push(GrepMatch {
@@ -243,13 +263,13 @@ pub async fn grep_tool(
             }
 
             // Search output schema properties
-            if (search_all || params_only)
+            if (schema_all || output_only)
                 && let Some(output_schema) = &tool_info.output_schema
                 && let Some(props) = output_schema.get("properties").and_then(|p| p.as_object())
             {
                 for (field_name, field_schema) in props {
                     // Search field name (key match)
-                    if regex.is_match(field_name) {
+                    if (field_all || name_only) && regex.is_match(field_name) {
                         all_matches.push(GrepMatch {
                             path: js_path_schema_field(
                                 server_name,
@@ -263,7 +283,8 @@ pub async fn grep_tool(
                     }
 
                     // Search field description (value match)
-                    if let Some(desc) = field_schema.get("description").and_then(|d| d.as_str())
+                    if (field_all || description_only)
+                        && let Some(desc) = field_schema.get("description").and_then(|d| d.as_str())
                         && regex.is_match(desc)
                     {
                         all_matches.push(GrepMatch {
@@ -279,8 +300,9 @@ pub async fn grep_tool(
                         });
                     }
 
-                    // Search field type (value match)
-                    if let Some(type_str) = field_schema.get("type").and_then(|t| t.as_str())
+                    // Search field type (value match) - only if searching all fields
+                    if field_all
+                        && let Some(type_str) = field_schema.get("type").and_then(|t| t.as_str())
                         && regex.is_match(type_str)
                     {
                         all_matches.push(GrepMatch {

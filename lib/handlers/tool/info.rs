@@ -5,6 +5,7 @@ use crate::format::format_description;
 use crate::mcp::{ToolCapabilities, ToolType, get_tool_info, get_tool_type};
 use crate::output::ToolInfoOutput;
 use colored::Colorize;
+use rmcp::model::Tool;
 use std::path::Path;
 
 use super::common::{PrepareToolOptions, prepare_tool};
@@ -17,6 +18,10 @@ use super::common::{PrepareToolOptions, prepare_tool};
 #[allow(clippy::too_many_arguments)]
 pub async fn tool_info(
     tool: String,
+    method: Option<String>,
+    input_only: bool,
+    output_only: bool,
+    description_only: bool,
     show_tools: bool,
     show_prompts: bool,
     show_resources: bool,
@@ -47,7 +52,8 @@ pub async fn tool_info(
     let tool_type = get_tool_type(&prepared.plugin.template);
 
     // Get tool info - handle EntryPointNotFound specially
-    let capabilities = match get_tool_info(&prepared.resolved, &prepared.tool_name, verbose).await {
+    // Never pass verbose to connection - verbose only affects output formatting, not debug logging
+    let capabilities = match get_tool_info(&prepared.resolved, &prepared.tool_name, false).await {
         Ok(result) => result,
         Err(ToolError::EntryPointNotFound {
             entry_point,
@@ -90,13 +96,58 @@ pub async fn tool_info(
         Err(e) => return Err(e),
     };
 
+    // Extract toolset name from the tool reference
+    let toolset = tool.split('@').next().unwrap_or(&tool);
+
+    // If -m is specified, we're drilling down to a specific method
+    if let Some(ref method_name) = method {
+        // Find the matching tool
+        let matching_tool = capabilities.tools.iter().find(|t| t.name == *method_name);
+
+        let tool_item = match matching_tool {
+            Some(t) => t,
+            None => {
+                if !concise {
+                    println!(
+                        "  {} Method not found: {}",
+                        "✗".bright_red(),
+                        method_name.bright_white()
+                    );
+                }
+                std::process::exit(1);
+            }
+        };
+
+        // Handle method-specific output
+        if json_output {
+            output_method_json(tool_item, concise)?;
+        } else if concise {
+            output_method_concise(
+                toolset,
+                tool_item,
+                input_only,
+                output_only,
+                description_only,
+                no_header,
+                level,
+            );
+        } else {
+            output_method_normal(
+                tool_item,
+                input_only,
+                output_only,
+                description_only,
+                verbose,
+                level,
+            );
+        }
+        return Ok(());
+    }
+
     if json_output {
         output_tool_info_json(&capabilities, tool_type, &prepared.manifest_path, concise)?;
         return Ok(());
     }
-
-    // Extract toolset name from the tool reference
-    let toolset = tool.split('@').next().unwrap_or(&tool);
 
     // Concise output (Header + TSV format)
     if concise {
@@ -118,13 +169,15 @@ pub async fn tool_info(
     // Determine what to show
     let show_all = show_all || (!show_tools && !show_prompts && !show_resources);
 
-    // Header - matching rad tool format
-    println!(
-        "  {} Connected to {} v{}\n",
-        "✓".bright_green(),
-        capabilities.server_info.name.bold(),
-        capabilities.server_info.version
-    );
+    // Header - skip in verbose mode since connection debug info was already shown
+    if !verbose {
+        println!(
+            "  {} Connected to {} v{}\n",
+            "✓".bright_green(),
+            capabilities.server_info.name.bold(),
+            capabilities.server_info.version
+        );
+    }
 
     // Show server metadata
     println!("    {}       {}", "Type".dimmed(), tool_type);
@@ -702,4 +755,261 @@ fn output_tool_info_json(
         println!("{}", output.to_json_pretty()?);
     }
     Ok(())
+}
+
+/// Output a single method as JSON.
+fn output_method_json(tool: &Tool, concise: bool) -> ToolResult<()> {
+    let json = serde_json::json!({
+        "name": tool.name,
+        "description": tool.description,
+        "input_schema": tool.input_schema,
+        "output_schema": tool.output_schema,
+    });
+    if concise {
+        println!("{}", serde_json::to_string(&json)?);
+    } else {
+        println!("{}", serde_json::to_string_pretty(&json)?);
+    }
+    Ok(())
+}
+
+/// Output a single method in concise TSV format.
+#[allow(clippy::too_many_arguments)]
+fn output_method_concise(
+    toolset: &str,
+    tool: &Tool,
+    input_only: bool,
+    output_only: bool,
+    description_only: bool,
+    no_header: bool,
+    level: usize,
+) {
+    use crate::concise::quote;
+
+    // If description only, just print description
+    if description_only {
+        if let Some(desc) = &tool.description {
+            println!("{}", desc);
+        }
+        return;
+    }
+
+    // If input only, show input schema parameters
+    if input_only {
+        if !no_header {
+            println!("#param\ttype\trequired\tdescription");
+        }
+        if let Some(props) = tool
+            .input_schema
+            .get("properties")
+            .and_then(|p| p.as_object())
+        {
+            let required: Vec<&str> = tool
+                .input_schema
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+            let defs = tool.input_schema.get("$defs").and_then(|d| d.as_object());
+
+            for (name, prop) in props {
+                let is_required = required.contains(&name.as_str());
+                let type_str = format_schema_type(prop, defs, level);
+                let desc = prop
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("");
+                println!("{}\t{}\t{}\t{}", name, type_str, is_required, quote(desc));
+            }
+        }
+        return;
+    }
+
+    // If output only, show output schema parameters
+    if output_only {
+        if !no_header {
+            println!("#param\ttype\trequired\tdescription");
+        }
+        if let Some(output_schema) = &tool.output_schema {
+            let defs = output_schema.get("$defs").and_then(|d| d.as_object());
+            if let Some((resolved, required)) = resolve_output_schema(output_schema)
+                && let Some(props) = resolved.get("properties").and_then(|p| p.as_object())
+            {
+                for (name, prop) in props {
+                    let is_required = required.contains(&name.as_str());
+                    let type_str = format_schema_type(prop, defs, level);
+                    let desc = prop
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("");
+                    println!("{}\t{}\t{}\t{}", name, type_str, is_required, quote(desc));
+                }
+            }
+        }
+        return;
+    }
+
+    // Default: show function signature
+    let params = format_schema_params_concise(&tool.input_schema, true, level);
+    let outputs = tool
+        .output_schema
+        .as_ref()
+        .map(|s| format_schema_params_concise(s, false, level))
+        .unwrap_or_default();
+
+    if outputs.is_empty() {
+        println!("{}:{}({})", toolset, tool.name, params);
+    } else {
+        println!("{}:{}({}) -> {}", toolset, tool.name, params, outputs);
+    }
+}
+
+/// Output a single method in human-readable format.
+fn output_method_normal(
+    tool: &Tool,
+    input_only: bool,
+    output_only: bool,
+    description_only: bool,
+    verbose: bool,
+    level: usize,
+) {
+    // If description only, just print description
+    if description_only {
+        if let Some(desc) = &tool.description {
+            if verbose {
+                // Verbose: show full description
+                if let Some(formatted) = format_description(desc, true, "") {
+                    println!("{}", formatted);
+                }
+            } else {
+                // Non-verbose: show first line only
+                if let Some(first_line) = format_description(desc, false, "") {
+                    println!("{}", first_line);
+                }
+            }
+        }
+        return;
+    }
+
+    // Determine what to show
+    let show_all = !input_only && !output_only;
+
+    if verbose {
+        // Verbose: name on its own line, description block below
+        println!("      {}", tool.name.bright_cyan());
+        if show_all
+            && let Some(desc) = &tool.description
+            && let Some(formatted) = format_description(desc, true, "        ")
+        {
+            println!("{}\n", formatted.dimmed());
+        }
+    } else {
+        // Non-verbose: name + first line description inline
+        let desc = tool
+            .description
+            .as_ref()
+            .and_then(|d| format_description(d, false, ""))
+            .map(|d| format!("  {}", d.dimmed()))
+            .unwrap_or_default();
+        if show_all {
+            println!("      {}{}", tool.name.bright_cyan(), desc);
+        } else {
+            println!("      {}", tool.name.bright_cyan());
+        }
+    }
+
+    let has_input = tool
+        .input_schema
+        .get("properties")
+        .and_then(|p| p.as_object())
+        .is_some_and(|p| !p.is_empty());
+    let has_output = tool.output_schema.is_some();
+
+    // Input schema
+    if (show_all || input_only) && has_input {
+        let schema = &tool.input_schema;
+        let defs = schema.get("$defs").and_then(|d| d.as_object());
+        let props = schema
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .unwrap();
+        let required: Vec<&str> = schema
+            .get("required")
+            .and_then(|r| r.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+
+        let input_branch = if has_output && show_all {
+            "├──"
+        } else {
+            "└──"
+        };
+        println!("      {} {}", input_branch.dimmed(), "Input".dimmed());
+
+        let prop_count = props.len();
+        for (i, (name, prop)) in props.iter().enumerate() {
+            let is_last = i == prop_count - 1;
+            let prefix = if has_output && show_all { "│" } else { " " };
+            let branch = if is_last { "└──" } else { "├──" };
+            let type_str = format_schema_type(prop, defs, level);
+            let req_marker = if required.contains(&name.as_str()) {
+                "*"
+            } else {
+                ""
+            };
+            let param_desc = prop
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("");
+
+            let param_name = format!("{}{}", name, req_marker);
+            println!(
+                "      {}   {} {:<20} {:<10} {}",
+                prefix.dimmed(),
+                branch.dimmed(),
+                param_name,
+                type_str.dimmed(),
+                param_desc.dimmed()
+            );
+        }
+    }
+
+    // Output schema
+    if (show_all || output_only)
+        && has_output
+        && let Some(output_schema) = &tool.output_schema
+    {
+        println!("      {} {}", "└──".dimmed(), "Output".dimmed());
+
+        let defs = output_schema.get("$defs").and_then(|d| d.as_object());
+        if let Some((resolved, required)) = resolve_output_schema(output_schema)
+            && let Some(props) = resolved.get("properties").and_then(|p| p.as_object())
+        {
+            let prop_count = props.len();
+            for (i, (name, prop)) in props.iter().enumerate() {
+                let is_last = i == prop_count - 1;
+                let branch = if is_last { "└──" } else { "├──" };
+                let type_str = format_schema_type(prop, defs, level);
+                let req_marker = if required.contains(&name.as_str()) {
+                    "*"
+                } else {
+                    ""
+                };
+                let param_desc = prop
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("");
+
+                let param_name = format!("{}{}", name, req_marker);
+                println!(
+                    "          {} {:<20} {:<10} {}",
+                    branch.dimmed(),
+                    param_name,
+                    type_str.dimmed(),
+                    param_desc.dimmed()
+                );
+            }
+        }
+    }
+    println!();
 }
