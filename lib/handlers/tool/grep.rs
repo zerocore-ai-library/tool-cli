@@ -7,8 +7,8 @@ use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
 use crate::mcp::get_tool_info;
 use crate::output::{
-    GrepOutput, js_path_schema_field, js_path_schema_field_prop, js_path_server,
-    js_path_server_prop, js_path_tool, js_path_tool_prop,
+    GrepOutput, path_schema_field, path_schema_field_prop, path_server, path_server_prop,
+    path_to_string, path_to_string_relative, path_tool, path_tool_prop,
 };
 use crate::resolver::{FilePluginResolver, load_tool_from_path};
 use crate::system_config::allocate_system_config;
@@ -23,8 +23,8 @@ use super::list::resolve_tool_path;
 
 /// Internal grep match with path and value.
 struct GrepMatch {
-    /// JavaScript accessor path (e.g., "['server/name'].tools.tool_name")
-    path: String,
+    /// Path as array of keys (e.g., ["server/name", "tools", "tool_name"])
+    path: Vec<String>,
     /// The matched value
     value: String,
     /// The server name (for grouping)
@@ -148,7 +148,7 @@ pub async fn grep_tool(
             // Search server name (key match)
             if (field_all || name_only) && regex.is_match(server_name) {
                 all_matches.push(GrepMatch {
-                    path: js_path_server(server_name),
+                    path: path_server(server_name),
                     value: server_name.to_string(),
                     server: server_name.to_string(),
                 });
@@ -160,7 +160,7 @@ pub async fn grep_tool(
                 && regex.is_match(desc)
             {
                 all_matches.push(GrepMatch {
-                    path: js_path_server_prop(server_name, "description"),
+                    path: path_server_prop(server_name, "description"),
                     value: desc.to_string(),
                     server: server_name.to_string(),
                 });
@@ -183,7 +183,7 @@ pub async fn grep_tool(
                 // Search tool name (key match)
                 if (field_all || name_only) && regex.is_match(mcp_tool_name) {
                     all_matches.push(GrepMatch {
-                        path: js_path_tool(server_name, mcp_tool_name),
+                        path: path_tool(server_name, mcp_tool_name),
                         value: mcp_tool_name.to_string(),
                         server: server_name.to_string(),
                     });
@@ -195,7 +195,7 @@ pub async fn grep_tool(
                     && regex.is_match(desc)
                 {
                     all_matches.push(GrepMatch {
-                        path: js_path_tool_prop(server_name, mcp_tool_name, "description"),
+                        path: path_tool_prop(server_name, mcp_tool_name, "description"),
                         value: desc.to_string(),
                         server: server_name.to_string(),
                     });
@@ -213,7 +213,7 @@ pub async fn grep_tool(
                     // Search field name (key match)
                     if (field_all || name_only) && regex.is_match(field_name) {
                         all_matches.push(GrepMatch {
-                            path: js_path_schema_field(
+                            path: path_schema_field(
                                 server_name,
                                 mcp_tool_name,
                                 "input_schema",
@@ -230,7 +230,7 @@ pub async fn grep_tool(
                         && regex.is_match(desc)
                     {
                         all_matches.push(GrepMatch {
-                            path: js_path_schema_field_prop(
+                            path: path_schema_field_prop(
                                 server_name,
                                 mcp_tool_name,
                                 "input_schema",
@@ -248,7 +248,7 @@ pub async fn grep_tool(
                         && regex.is_match(type_str)
                     {
                         all_matches.push(GrepMatch {
-                            path: js_path_schema_field_prop(
+                            path: path_schema_field_prop(
                                 server_name,
                                 mcp_tool_name,
                                 "input_schema",
@@ -271,7 +271,7 @@ pub async fn grep_tool(
                     // Search field name (key match)
                     if (field_all || name_only) && regex.is_match(field_name) {
                         all_matches.push(GrepMatch {
-                            path: js_path_schema_field(
+                            path: path_schema_field(
                                 server_name,
                                 mcp_tool_name,
                                 "output_schema",
@@ -288,7 +288,7 @@ pub async fn grep_tool(
                         && regex.is_match(desc)
                     {
                         all_matches.push(GrepMatch {
-                            path: js_path_schema_field_prop(
+                            path: path_schema_field_prop(
                                 server_name,
                                 mcp_tool_name,
                                 "output_schema",
@@ -306,7 +306,7 @@ pub async fn grep_tool(
                         && regex.is_match(type_str)
                     {
                         all_matches.push(GrepMatch {
-                            path: js_path_schema_field_prop(
+                            path: path_schema_field_prop(
                                 server_name,
                                 mcp_tool_name,
                                 "output_schema",
@@ -361,7 +361,7 @@ pub async fn grep_tool(
 fn output_json(pattern: &str, matches: &[GrepMatch], concise: bool) {
     let mut output = GrepOutput::new(pattern);
     for m in matches {
-        output.add_match(&m.path, &m.value);
+        output.add_match(m.path.clone(), &m.value);
     }
     if concise {
         println!("{}", output.to_json().expect("Failed to serialize JSON"));
@@ -375,8 +375,8 @@ fn output_json(pattern: &str, matches: &[GrepMatch], concise: bool) {
 
 /// Output unique paths only (-l mode).
 fn output_list_only(matches: &[GrepMatch], concise: bool, no_header: bool) {
-    // Collect unique paths
-    let mut paths: Vec<&str> = matches.iter().map(|m| m.path.as_str()).collect();
+    // Collect unique paths as strings for display
+    let mut paths: Vec<String> = matches.iter().map(|m| path_to_string(&m.path)).collect();
     paths.sort();
     paths.dedup();
 
@@ -401,7 +401,7 @@ fn output_concise(matches: &[GrepMatch], no_header: bool) {
         println!("#path\tvalue");
     }
     for m in matches {
-        println!("{}\t{}", m.path, quote(&m.value));
+        println!("{}\t{}", path_to_string(&m.path), quote(&m.value));
     }
 }
 
@@ -418,44 +418,45 @@ fn output_normal(pattern: &str, matches: &[GrepMatch]) {
     );
 
     // Parse each match into (server, parent_path, leaf, value)
-    // parent_path is the entity being matched (server, tool, or field)
-    // leaf is either "[key]" or ".property"
+    // With array paths, this is now direct indexing instead of string parsing
     struct ParsedMatch<'a> {
         server: &'a str,
-        parent_path: String, // relative to server, e.g., "" or ".tools.tool_name"
-        leaf: String,        // "[key]" or ".description"
+        parent_path: String,
+        leaf: String,
         value: &'a str,
     }
 
     let mut parsed: Vec<ParsedMatch> = Vec::new();
     for m in matches {
         let server = &m.server;
-        let relative_path = m
-            .path
-            .strip_prefix(&format!("['{}']", server))
-            .unwrap_or(&m.path);
+        let path = &m.path;
 
-        // Determine if this is a key match or value match
-        // Value matches end with known properties: .description, .type
-        let (parent_path, leaf) = if relative_path.is_empty() {
-            // Server key match
+        // Determine parent_path and leaf based on path structure
+        // Value matches end with "description" or "type"
+        let (parent_path, leaf) = if path.len() == 1 {
+            // Server key match: ["server"]
             (String::new(), "[key]".to_string())
-        } else if let Some(idx) = relative_path.rfind(".description") {
-            if relative_path.ends_with(".description") {
-                (relative_path[..idx].to_string(), ".description".to_string())
-            } else {
-                // Key match (path doesn't end with a property)
-                (relative_path.to_string(), "[key]".to_string())
-            }
-        } else if let Some(idx) = relative_path.rfind(".type") {
-            if relative_path.ends_with(".type") {
-                (relative_path[..idx].to_string(), ".type".to_string())
-            } else {
-                (relative_path.to_string(), "[key]".to_string())
-            }
         } else {
-            // Key match (tool name, field name, etc.)
-            (relative_path.to_string(), "[key]".to_string())
+            let last = path.last().map(|s| s.as_str()).unwrap_or("");
+            if last == "description" || last == "type" {
+                // Value match - parent is path[1..len-1], leaf is the property
+                let parent = &path[1..path.len() - 1];
+                let parent_str = if parent.is_empty() {
+                    String::new()
+                } else {
+                    path_to_string_relative(parent)
+                };
+                (parent_str, format!(".{}", last))
+            } else {
+                // Key match - parent is path[1..], leaf is [key]
+                let parent = &path[1..];
+                let parent_str = if parent.is_empty() {
+                    String::new()
+                } else {
+                    path_to_string_relative(parent)
+                };
+                (parent_str, "[key]".to_string())
+            }
         };
 
         parsed.push(ParsedMatch {
