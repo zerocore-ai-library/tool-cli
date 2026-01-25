@@ -7,10 +7,15 @@ Usage:
     export ANTHROPIC_API_KEY=<your_key>
 
     uv run agent.py
+    uv run agent.py --code  # Only bash tool, use `tool call` for MCP tools
 """
 
+import argparse
 import asyncio
 import os
+import platform
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -27,7 +32,7 @@ import logging
 # Set up our logger only
 log = logging.getLogger("agent")
 log.setLevel(logging.INFO)
-log.addHandler(RichHandler(rich_tracebacks=True, show_path=False, omit_repeated_times=False))
+log.addHandler(RichHandler(rich_tracebacks=True, show_path=False, omit_repeated_times=False, markup=True))
 
 # Suppress noisy loggers
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -37,6 +42,135 @@ logging.getLogger("anthropic").setLevel(logging.WARNING)
 logging.getLogger("mcp").setLevel(logging.WARNING)
 
 console = Console()
+
+CODE_MODE_TEMPLATE = """\
+You are a CODE MODE agent with ONLY bash access. Use the `tool` CLI to discover and call MCP tools.
+
+## Environment
+- OS: {os_info}
+- CPU: {cpu_info}
+- Time: {current_time}
+- Available commands: {available_commands}
+
+## Quick Reference
+
+```bash
+tool grep <pattern> -c              # Find tools/methods matching pattern (includes descriptions!)
+tool info <tool> -m <method> -c     # Get ONE method's signature
+tool info <tool> --tools -c         # List ALL method signatures for a tool
+tool call <tool> -m <method> -p key=value -c
+```
+
+## Output Formats
+
+### tool grep output
+```
+#path    value
+['open-data-mcp'].tools.search_movies    search_movies
+['open-data-mcp'].tools.search_movies.description    "Search for movies by title..."
+['open-data-mcp'].tools.get_movie    get_movie
+['open-data-mcp'].tools.get_movie.description    "Get detailed movie information. Args: imdb_id..."
+```
+Descriptions tell you what parameters are needed. Often NO `tool info` call required.
+
+### tool info -m output
+```
+open-data-mcp:search_movies(query*: string) -> {{query*: string, count*: integer, results*: {{imdb_id*: string, title*: string, year*: string}}[]}}
+```
+Shows exact input params and output fields. Use this to understand what to extract with jq.
+
+### tool call output
+Returns JSON. Use jq to extract fields for chaining:
+```bash
+tool call open-data-mcp -m search_movies -p query="Inception" -c | jq -r '.results[0].imdb_id'
+```
+
+## Workflow
+
+### 1. DISCOVER with grep (often sufficient)
+```bash
+tool grep <keyword> -c
+```
+Descriptions usually tell you parameter names. If clear, skip to EXECUTE.
+
+### 2. CLARIFY with info (only if needed)
+```bash
+tool info <tool> -m <method> -c    # Get ONE method signature - NOT the whole tool
+```
+Only use this if grep descriptions are unclear about parameters or output structure.
+
+### 3. EXECUTE (REQUIRED: chain when possible)
+
+When calls can be chained (output of one feeds into another), you MUST combine them in ONE script:
+
+**BAD** (2 tool calls - wasteful):
+```bash
+# Call 1
+tool call open-data-mcp -m search_movies -p query="Inception" -c | jq -r '.results[0].imdb_id'
+# Returns: tt1375666
+
+# Call 2
+tool call open-data-mcp -m get_movie -p imdb_id="tt1375666" -c
+```
+
+**GOOD** (1 tool call - efficient):
+```bash
+ID=$(tool call open-data-mcp -m search_movies -p query="Inception" -c | jq -r '.results[0].imdb_id')
+tool call open-data-mcp -m get_movie -p imdb_id="$ID" -c
+```
+
+Only use separate calls when you genuinely cannot predict what the next step will be.
+
+## Rules
+
+1. `tool grep` descriptions often have enough info - don't over-discover
+2. NEVER run `tool info <tool> -c` without `-m <method>` - it dumps everything
+3. Use jq to extract fields: `.field`, `.results[0].id`, `.items[] | .name`
+
+## Anti-patterns (AVOID)
+
+- `tool list -c` then `tool grep` then `tool info <tool> -c` then `tool call` (over-discovery)
+- `tool info open-data-mcp -c` (dumps 40+ method signatures)
+"""
+
+
+def get_available_commands() -> list[str]:
+    """Check which useful commands are available on the system."""
+    commands_to_check = [
+        ("jq", "JSON processor"),
+        ("rg", "ripgrep (fast search)"),
+        ("grep", "text search"),
+        ("awk", "text processing"),
+        ("sed", "stream editor"),
+        ("cut", "column extraction"),
+        ("sort", "sorting"),
+        ("uniq", "deduplication"),
+        ("xargs", "argument builder"),
+        ("curl", "HTTP client"),
+        ("head", "first lines"),
+        ("tail", "last lines"),
+        ("wc", "word/line count"),
+    ]
+    available = []
+    for cmd, desc in commands_to_check:
+        if shutil.which(cmd):
+            available.append(f"{cmd} ({desc})")
+    return available
+
+
+def build_code_mode_prompt() -> str:
+    """Build the code mode system prompt with environment info."""
+    os_info = f"{platform.system()} {platform.release()}"
+    cpu_info = platform.processor() or platform.machine()
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M %Z")
+    available_commands = ", ".join(get_available_commands())
+
+    return CODE_MODE_TEMPLATE.format(
+        os_info=os_info,
+        cpu_info=cpu_info,
+        current_time=current_time,
+        available_commands=available_commands,
+    )
 
 
 class TokenTracker:
@@ -142,7 +276,7 @@ def print_token_summary(tracker: TokenTracker):
     console.print(table)
 
 
-async def run():
+async def run(code_mode: bool = False):
     model, model_name, provider, model_id = get_model()
 
     # MCP server paths - relative to this file's parent directory (agent/)
@@ -153,29 +287,41 @@ async def run():
 
     log.info("Starting MCP servers...")
 
-    client = MultiServerMCPClient(
-        {
-            "bash": {
-                "command": "uv",
-                "args": ["run", "--directory", str(bash_server_path.parent), str(bash_server_path)],
-                "transport": "stdio",
-            },
-            "open_data": {
-                "command": "uv",
-                "args": ["run", "--directory", str(open_data_server_path.parent), str(open_data_server_path)],
-                "transport": "stdio",
-            },
+    # Configure MCP servers based on mode
+    servers = {
+        "bash": {
+            "command": "uv",
+            "args": ["run", "--directory", str(bash_server_path.parent), str(bash_server_path)],
+            "transport": "stdio",
+        },
+    }
+
+    # In code mode, only bash tool is loaded - agent uses `tool call` CLI for other tools
+    if not code_mode:
+        servers["open_data"] = {
+            "command": "uv",
+            "args": ["run", "--directory", str(open_data_server_path.parent), str(open_data_server_path)],
+            "transport": "stdio",
         }
-    )
+
+    client = MultiServerMCPClient(servers)
 
     tools = await client.get_tools()
     tool_names = ", ".join(t.name for t in tools)
     agent = create_agent(model, tools)
 
     tools_tokens = await count_tools_tokens(agent, tools, provider, model_id)
-    log.info(f"Model: {model_name} | Tools: {len(tools)} ({tools_tokens:,} tokens)")
+    mode_label = " | [bold yellow]Code Mode[/]" if code_mode else ""
+    log.info(f"Model: {model_name} | Tools: {len(tools)} | System + schemas: {tools_tokens:,} tokens{mode_label}")
     log.info(f"Tools: {tool_names}")
-    messages = []
+
+    # Initialize messages with system prompt for code mode
+    if code_mode:
+        system_prompt = build_code_mode_prompt()
+        messages = [{"role": "system", "content": system_prompt}]
+    else:
+        messages = []
+
     tracker = TokenTracker(system_tokens=tools_tokens)
 
     while True:
@@ -194,7 +340,11 @@ async def run():
             break
 
         if cmd == "clear":
-            messages = []
+            # Preserve system message in code mode
+            if code_mode:
+                messages = [{"role": "system", "content": build_code_mode_prompt()}]
+            else:
+                messages = []
             tracker.reset()
             console.print("[green]Cleared[/]\n")
             continue
@@ -334,7 +484,15 @@ async def run():
 
 
 def main():
-    asyncio.run(run())
+    parser = argparse.ArgumentParser(description="LangChain ReAct agent with MCP tools")
+    parser.add_argument(
+        "--code",
+        action="store_true",
+        help="Code mode: only load bash tool, use `tool call` CLI for MCP tools",
+    )
+    args = parser.parse_args()
+
+    asyncio.run(run(code_mode=args.code))
 
 
 if __name__ == "__main__":

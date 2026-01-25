@@ -13,21 +13,25 @@ logging.disable(logging.INFO)
 
 
 @mcp.tool()
-def exec(command: str, timeout: int = 120) -> str:
+def exec(script: str, timeout: int = 120) -> str:
     """
-    Execute a bash command and return its output.
+    Execute a bash script. Supports multiple commands, pipes, variable assignments,
+    and control flow. Combine related operations into a single script to minimize calls.
+
+    Example:
+        ID=$(tool call api -m search -p q="test" -c | jq -r '.id')
+        tool call api -m get -p id="$ID" -c
 
     Args:
-        command: The shell command to execute
+        script: The shell script to execute (can be multi-line)
         timeout: Timeout in seconds (default 120)
 
     Returns:
-        Command output (stdout + stderr)
+        Script output (stdout + stderr)
     """
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            ["bash", "-c", script],
             capture_output=True,
             text=True,
             timeout=timeout,
