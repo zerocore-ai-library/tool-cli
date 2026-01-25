@@ -1,8 +1,223 @@
 //! CLI command definitions.
 
 use crate::styles::styles;
+use crate::{examples, examples_section};
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
+
+//--------------------------------------------------------------------------------------------------
+// Constants
+//--------------------------------------------------------------------------------------------------
+
+const INIT_EXAMPLES: &str = examples![
+    "tool init                         " # "Interactive mode in current directory",
+    "tool init my-tool -t node         " # "Create Node.js MCP server",
+    "tool init my-tool -t python       " # "Create Python MCP server",
+    "tool init my-tool -t node -y      " # "Skip prompts, use defaults",
+    "tool init . --http                " # "Use HTTP transport instead of stdio",
+    "tool init existing-project        " # "Detect and migrate existing MCP server",
+    "tool init . --reference           " # "Create manifest only (no scaffolding)",
+    "tool init . --pm pnpm             " # "Use pnpm as package manager",
+];
+
+const DETECT_EXAMPLES: &str = examples![
+    "tool detect                       " # "Analyze current directory",
+    "tool detect ./my-server           " # "Analyze specific project",
+    "tool detect -e src/main.py        " # "Override detected entry point",
+    "tool detect --transport http      " # "Override detected transport",
+    "tool detect -n custom-name        " # "Override detected package name",
+];
+
+const SEARCH_EXAMPLES: &str = examples![
+    "tool search filesystem            " # "Find file-related tools",
+    "tool search weather               " # "Find weather tools",
+    "tool search \"database sql\"        " # "Multi-word search",
+    "tool search bash -c               " # "Concise output for scripts",
+];
+
+const INSTALL_EXAMPLES: &str = examples![
+    "tool install appcypher/bash       " # "Install from registry (latest)",
+    "tool install appcypher/bash@1.0.0 " # "Install specific version",
+    "tool install ./my-local-tool      " # "Install from local directory",
+    "tool install ~/tools/custom       " # "Install from home directory",
+];
+
+const UNINSTALL_EXAMPLES: &str = examples![
+    "tool uninstall appcypher/bash     " # "Remove installed tool",
+    "tool uninstall my-local-tool      " # "Remove local tool",
+];
+
+const LIST_EXAMPLES: &str = examples![
+    "tool list                         " # "List all installed tools",
+    "tool list bash                    " # "Filter by name pattern",
+    "tool list -c                      " # "Concise output for scripts",
+    "tool list --full                  " # "Include tools, prompts, resources",
+    "tool list --json                  " # "JSON output for parsing",
+];
+
+const GREP_EXAMPLES: &str = examples![
+    "tool grep file                    " # "Search \"file\" across all tools",
+    "tool grep temperature -c          " # "Concise output",
+    "tool grep \"read|write\" bash       " # "Regex search in specific tool",
+    "tool grep api_key -d              " # "Search descriptions only",
+    "tool grep path -n                 " # "Search names/keys only",
+    "tool grep config --input          " # "Search input schemas only",
+    "tool grep result --output         " # "Search output schemas only",
+    "tool grep database -m query       " # "Search within specific method",
+    "tool grep \"^get_\" -i              " # "Case-insensitive regex",
+    "tool grep file -l                 " # "List matching paths only",
+];
+
+const INFO_EXAMPLES: &str = examples![
+    "tool info                         " # "Inspect tool in current directory",
+    "tool info appcypher/bash          " # "Inspect installed tool",
+    "tool info appcypher/bash -c       " # "Concise output",
+    "tool info . -m exec               " # "Show specific method details",
+    "tool info . -m exec --input       " # "Show only input schema",
+    "tool info . -m exec --output      " # "Show only output schema",
+    "tool info . -m exec -d            " # "Show only description",
+    "tool info . --tools               " # "List tools only",
+    "tool info . --prompts             " # "List prompts only",
+    "tool info . --resources           " # "List resources only",
+    "tool info . -a                    " # "Show all capabilities",
+    "tool info . --json                " # "JSON output for parsing",
+    "tool info . -k API_KEY=xxx        " # "Pass config value",
+    "tool info . -L 5                  " # "Expand nested types to depth 5",
+];
+
+const CALL_EXAMPLES: &str = examples![
+    "tool call . -m exec command=\"ls\" " # "Call method in current dir",
+    "tool call bash -m .exec cmd=\"pwd\"" # "Shorthand: .exec -> bash__exec",
+    "tool call bash -m .exec -p cmd=ls " # "Use -p flag for params",
+    "tool call weather -m get loc=NYC  " # "Trailing args as params",
+    "tool call api -m query -k KEY=xxx " # "Pass config inline",
+    "tool call . -m test --config-file " # "Config from file",
+    "tool call . -m run -y             " # "Skip interactive prompts",
+    "tool call . -m debug -v           " # "Verbose output",
+];
+
+const DOWNLOAD_EXAMPLES: &str = examples![
+    "tool download appcypher/bash      " # "Download to current dir",
+    "tool download appcypher/bash@1.0.0" # "Download specific version",
+    "tool download bash -o my-tool.mcpb" # "Custom output filename",
+];
+
+const VALIDATE_EXAMPLES: &str = examples![
+    "tool validate                     " # "Validate current directory",
+    "tool validate ./my-tool           " # "Validate specific path",
+    "tool validate --strict            " # "Treat warnings as errors",
+    "tool validate --json              " # "JSON output for CI/CD",
+    "tool validate -q                  " # "Quiet mode (errors only)",
+];
+
+const PACK_EXAMPLES: &str = examples![
+    "tool pack                         " # "Pack current directory",
+    "tool pack ./my-tool               " # "Pack specific directory",
+    "tool pack -o release.mcpb         " # "Custom output filename",
+    "tool pack --no-validate           " # "Skip validation step",
+    "tool pack --include-dotfiles      " # "Include dotfiles (except .git)",
+    "tool pack -v                      " # "Show files being added",
+];
+
+const RUN_EXAMPLES: &str = examples![
+    "tool run                          " # "Run tool in current directory",
+    "tool run appcypher/bash           " # "Run installed tool",
+    "tool run . --expose http          " # "Expose stdio tool via HTTP",
+    "tool run . --expose http -p 8080  " # "Custom port",
+    "tool run . --expose http --host 0 " # "Bind to all interfaces",
+    "tool run . -k API_KEY=xxx         " # "Pass config value",
+    "tool run . --config-file creds.json" # "Config from file",
+    "tool run . -v                     " # "Verbose output",
+];
+
+const PUBLISH_EXAMPLES: &str = examples![
+    "tool publish                      " # "Publish current directory",
+    "tool publish ./my-tool            " # "Publish specific directory",
+    "tool publish --dry-run            " # "Preview without uploading",
+];
+
+const LOGIN_EXAMPLES: &str = examples![
+    "tool login                        " # "Interactive login (prompts for token)",
+    "tool login --token \"your-token\"   " # "Non-interactive login",
+];
+
+const SELF_UPDATE_EXAMPLES: &str = examples![
+    "tool self update                  " # "Update to latest version",
+    "tool self update --check          " # "Check for updates only",
+    "tool self update --version 0.2.0  " # "Install specific version",
+];
+
+const SELF_UNINSTALL_EXAMPLES: &str = examples![
+    "tool self uninstall               " # "Uninstall (with confirmation)",
+    "tool self uninstall -y            " # "Uninstall without confirmation",
+];
+
+const CONFIG_SET_EXAMPLES: &str = examples![
+    "tool config set bash API_KEY=xxx  " # "Set single value",
+    "tool config set weather k=a u=m   " # "Set multiple values",
+    "tool config set api -k TOKEN=xxx  " # "Use -k flag",
+    "tool config set service           " # "Interactive prompts",
+    "tool config set api -y key=xxx    " # "Non-interactive",
+];
+
+const CONFIG_GET_EXAMPLES: &str = examples![
+    "tool config get bash              " # "Show all config for tool",
+    "tool config get bash API_KEY      " # "Show specific key",
+];
+
+const CONFIG_UNSET_EXAMPLES: &str = examples![
+    "tool config unset bash API_KEY    " # "Remove specific key",
+];
+
+const CONFIG_RESET_EXAMPLES: &str = examples![
+    "tool config reset bash            " # "Remove all config for tool",
+];
+
+const HOST_ADD_EXAMPLES: &str = examples![
+    "tool host add claude-desktop      " # "Add all tools",
+    "tool host add claude-desktop bash " # "Add specific tools",
+    "tool host add cursor appcypher/bash" # "Add to Cursor",
+    "tool host add vscode --dry-run    " # "Preview changes",
+    "tool host add claude-code --overwrite" # "Overwrite existing",
+    "tool host add claude-desktop -y   " # "Skip confirmation",
+];
+
+const HOST_REMOVE_EXAMPLES: &str = examples![
+    "tool host remove claude-desktop   " # "Remove all managed tools",
+    "tool host remove claude-desktop bash" # "Remove specific tool",
+    "tool host remove cursor --dry-run " # "Preview changes",
+    "tool host remove vscode -y        " # "Skip confirmation",
+];
+
+const HOST_SHOW_EXAMPLES: &str = examples![
+    "tool host show claude-desktop     " # "Preview config for all tools",
+    "tool host show cursor bash        " # "Preview config for specific tool",
+];
+
+const HOST_PATH_EXAMPLES: &str = examples![
+    "tool host path claude-desktop     " # "Print config file location",
+    "tool host path cursor             " # "Print Cursor config path",
+];
+
+const CLI_EXAMPLES: &str = concat!(
+    examples![
+        "tool init                         " # "Create a new MCP server (interactive)",
+        "tool install appcypher/bash       " # "Install a tool from the registry",
+        "tool list                         " # "List installed tools",
+        "tool info appcypher/bash          " # "Inspect a tool's capabilities",
+        "tool call bash -m .exec cmd=\"ls\"  " # "Call a tool method",
+        "tool grep file                    " # "Search tool schemas",
+        "tool host add claude-desktop      " # "Register tools with Claude Desktop",
+        "tool run . --expose http          " # "Run tool as HTTP server",
+    ],
+    "\n\n",
+    examples_section!["Getting started:";
+        "tool init                         " # "1. Create new tool (interactive)",
+        "tool build                        " # "2. Build the tool",
+        "tool info                         " # "3. Verify it works",
+        "tool call . -m hello              " # "4. Call a method",
+    ],
+);
 
 //--------------------------------------------------------------------------------------------------
 // Types
@@ -11,7 +226,7 @@ use std::ffi::OsString;
 /// Tool CLI - Manage MCP tools.
 #[derive(Debug, Parser)]
 #[command(name = "tool", author, styles=styles())]
-#[command(about = "Manage MCP tools and packages")]
+#[command(about = "Manage MCP tools and packages", after_help = CLI_EXAMPLES)]
 pub struct Cli {
     /// Concise output for AI agents (minimal formatting, machine-parseable).
     #[arg(short, long, global = true)]
@@ -30,6 +245,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Initialize a new MCPB package.
+    #[command(after_help = INIT_EXAMPLES)]
     Init {
         /// Directory path to initialize (defaults to current directory).
         path: Option<String>,
@@ -84,6 +300,7 @@ pub enum Command {
     },
 
     /// Determine if an existing MCP server can be converted to a MCPB package.
+    #[command(after_help = DETECT_EXAMPLES)]
     Detect {
         /// Path to project directory (defaults to current directory).
         #[arg(default_value = ".")]
@@ -103,24 +320,28 @@ pub enum Command {
     },
 
     /// Search for tools in the registry.
+    #[command(after_help = SEARCH_EXAMPLES)]
     Search {
         /// Search query.
         query: String,
     },
 
     /// Install a tool from the registry or a local path.
+    #[command(after_help = INSTALL_EXAMPLES)]
     Install {
         /// Tool reference (`namespace/name[@version]`) or local path.
         name: String,
     },
 
     /// Uninstall an installed tool.
+    #[command(after_help = UNINSTALL_EXAMPLES)]
     Uninstall {
         /// Tool reference.
         name: String,
     },
 
     /// List installed tools.
+    #[command(after_help = LIST_EXAMPLES)]
     List {
         /// Filter by name pattern.
         filter: Option<String>,
@@ -135,6 +356,7 @@ pub enum Command {
     },
 
     /// Search installed tool schemas by pattern.
+    #[command(after_help = GREP_EXAMPLES)]
     Grep {
         /// Regex pattern to search for.
         pattern: String,
@@ -180,6 +402,7 @@ pub enum Command {
     },
 
     /// Inspect a tool's capabilities.
+    #[command(after_help = INFO_EXAMPLES)]
     Info {
         /// Tool reference or path (default: current directory).
         #[arg(default_value = ".")]
@@ -247,6 +470,7 @@ pub enum Command {
     },
 
     /// Call a tool.
+    #[command(after_help = CALL_EXAMPLES)]
     Call {
         /// Tool reference or path (default: current directory).
         #[arg(default_value = ".")]
@@ -286,6 +510,7 @@ pub enum Command {
     },
 
     /// Download a tool from the registry.
+    #[command(after_help = DOWNLOAD_EXAMPLES)]
     Download {
         /// Tool reference (`namespace/name[@version]`).
         name: String,
@@ -296,6 +521,7 @@ pub enum Command {
     },
 
     /// Validate an MCPB package.
+    #[command(after_help = VALIDATE_EXAMPLES)]
     Validate {
         /// Path to tool directory (defaults to current directory).
         path: Option<String>,
@@ -314,6 +540,7 @@ pub enum Command {
     },
 
     /// Pack a tool into an .mcpb bundle.
+    #[command(after_help = PACK_EXAMPLES)]
     Pack {
         /// Path to tool directory (defaults to current directory).
         path: Option<String>,
@@ -336,6 +563,7 @@ pub enum Command {
     },
 
     /// Run an MCP server in proxy mode.
+    #[command(after_help = RUN_EXAMPLES)]
     Run {
         /// Tool reference or path (default: current directory).
         #[arg(default_value = ".")]
@@ -375,6 +603,7 @@ pub enum Command {
     },
 
     /// Publish a tool to the registry.
+    #[command(after_help = PUBLISH_EXAMPLES)]
     Publish {
         /// Path to tool directory.
         path: Option<String>,
@@ -385,6 +614,7 @@ pub enum Command {
     },
 
     /// Login to the registry.
+    #[command(after_help = LOGIN_EXAMPLES)]
     Login {
         /// API token (prompts if not provided).
         #[arg(long)]
@@ -418,6 +648,7 @@ pub enum Command {
 #[derive(Debug, Subcommand)]
 pub enum SelfCommand {
     /// Update tool-cli to the latest version.
+    #[command(after_help = SELF_UPDATE_EXAMPLES)]
     Update {
         /// Only check for updates, don't install.
         #[arg(long)]
@@ -429,6 +660,7 @@ pub enum SelfCommand {
     },
 
     /// Uninstall tool-cli from this system.
+    #[command(after_help = SELF_UNINSTALL_EXAMPLES)]
     Uninstall {
         /// Skip confirmation prompt.
         #[arg(short, long)]
@@ -440,6 +672,7 @@ pub enum SelfCommand {
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
     /// Set configuration values and authenticate HTTP tools.
+    #[command(after_help = CONFIG_SET_EXAMPLES)]
     Set {
         /// Tool reference.
         tool: String,
@@ -458,6 +691,7 @@ pub enum ConfigCommand {
     },
 
     /// Show configuration for a tool.
+    #[command(after_help = CONFIG_GET_EXAMPLES)]
     Get {
         /// Tool reference.
         tool: String,
@@ -470,6 +704,7 @@ pub enum ConfigCommand {
     List,
 
     /// Remove a specific configuration key.
+    #[command(after_help = CONFIG_UNSET_EXAMPLES)]
     Unset {
         /// Tool reference.
         tool: String,
@@ -479,6 +714,7 @@ pub enum ConfigCommand {
     },
 
     /// Remove all configuration for a tool.
+    #[command(after_help = CONFIG_RESET_EXAMPLES)]
     Reset {
         /// Tool reference.
         tool: String,
@@ -489,6 +725,7 @@ pub enum ConfigCommand {
 #[derive(Debug, Subcommand)]
 pub enum HostCommand {
     /// Register tools with an MCP host.
+    #[command(after_help = HOST_ADD_EXAMPLES)]
     Add {
         /// Target host (claude-desktop, cursor, claude-code).
         host: String,
@@ -510,6 +747,7 @@ pub enum HostCommand {
     },
 
     /// Remove tools from an MCP host.
+    #[command(after_help = HOST_REMOVE_EXAMPLES)]
     Remove {
         /// Target host.
         host: String,
@@ -530,6 +768,7 @@ pub enum HostCommand {
     List,
 
     /// Show the MCP config that would be generated.
+    #[command(after_help = HOST_SHOW_EXAMPLES)]
     Show {
         /// Target host.
         host: String,
@@ -539,6 +778,7 @@ pub enum HostCommand {
     },
 
     /// Print config file path for a host.
+    #[command(after_help = HOST_PATH_EXAMPLES)]
     Path {
         /// Target host.
         host: String,
