@@ -14,7 +14,7 @@ Categories:
 """
 
 import logging
-from typing import Optional
+from typing import Optional, TypedDict
 from datetime import datetime, timedelta
 
 import httpx
@@ -22,6 +22,643 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("OpenData")
 logging.disable(logging.INFO)
+
+
+#--------------------------------------------------------------------------------------------------
+# Types: Weather
+#--------------------------------------------------------------------------------------------------
+
+
+class LocationCoords(TypedDict):
+    latitude: float
+    longitude: float
+
+
+class CurrentWeatherOutput(TypedDict):
+    location: LocationCoords
+    temperature_c: float
+    feels_like_c: float
+    humidity_percent: int
+    precipitation_mm: float
+    wind_speed_kmh: float
+    wind_direction_deg: int
+    weather_code: int
+    time: str
+
+
+class ForecastDay(TypedDict):
+    date: str
+    temp_max_c: float
+    temp_min_c: float
+    precipitation_mm: float
+    wind_max_kmh: float
+    weather_code: int
+
+
+class WeatherForecastOutput(TypedDict):
+    location: LocationCoords
+    forecast: list[ForecastDay]
+
+
+class HistoricalWeatherOutput(TypedDict):
+    location: LocationCoords
+    date: str
+    temp_max_c: float
+    temp_min_c: float
+    precipitation_mm: float
+    wind_max_kmh: float
+
+
+#--------------------------------------------------------------------------------------------------
+# Types: Geographic
+#--------------------------------------------------------------------------------------------------
+
+
+class GeocodeOutput(TypedDict):
+    latitude: float
+    longitude: float
+    display_name: str
+    type: str
+
+
+class ReverseGeocodeOutput(TypedDict):
+    display_name: str
+    country: str
+    state: str
+    city: str
+    postcode: str
+
+
+class Currency(TypedDict):
+    code: str
+    name: str
+    symbol: str
+
+
+class CountryOutput(TypedDict):
+    name: str
+    official_name: str
+    capital: str
+    region: str
+    subregion: str
+    population: int
+    area_km2: float
+    currencies: list[Currency]
+    languages: list[str]
+    timezones: list[str]
+    flag_emoji: str
+    maps: str
+
+
+class CountryBasic(TypedDict):
+    name: str
+    code: str
+    capital: str
+    population: int
+    region: str
+
+
+class ListCountriesOutput(TypedDict):
+    count: int
+    countries: list[CountryBasic]
+
+
+class IpLocationOutput(TypedDict):
+    ip: str
+    country: str
+    country_code: str
+    region: str
+    city: str
+    zip: str
+    latitude: float
+    longitude: float
+    timezone: str
+    isp: str
+
+
+#--------------------------------------------------------------------------------------------------
+# Types: Knowledge
+#--------------------------------------------------------------------------------------------------
+
+
+class WikiSummaryOutput(TypedDict):
+    title: str
+    description: str
+    extract: str
+    url: str
+
+
+class WikiArticle(TypedDict):
+    title: str
+    snippet: str
+    word_count: int
+    url: str
+
+
+class WikiSearchOutput(TypedDict):
+    query: str
+    count: int
+    results: list[WikiArticle]
+
+
+class Definition(TypedDict):
+    definition: str
+    example: str
+
+
+class Meaning(TypedDict):
+    part_of_speech: str
+    definitions: list[Definition]
+    synonyms: list[str]
+
+
+class DefineWordOutput(TypedDict):
+    word: str
+    phonetic: str
+    meanings: list[Meaning]
+
+
+class BookOutput(TypedDict):
+    title: str
+    authors: list[str]
+    first_publish_year: int
+    subjects: list[str]
+    isbn: str | None
+    publishers: list[str]
+    languages: list[str]
+    cover_url: str | None
+
+
+class BookBasic(TypedDict):
+    title: str
+    authors: list[str]
+    first_publish_year: int
+    isbn: str | None
+    cover_url: str | None
+
+
+class SearchBooksOutput(TypedDict):
+    query: str
+    count: int
+    results: list[BookBasic]
+
+
+#--------------------------------------------------------------------------------------------------
+# Types: Finance
+#--------------------------------------------------------------------------------------------------
+
+
+class CryptoPriceOutput(TypedDict):
+    id: str
+    symbol: str
+    name: str
+    price_usd: float
+    market_cap_usd: float
+    volume_24h_usd: float
+    change_24h_percent: float
+    change_7d_percent: float
+    ath_usd: float
+    ath_date: str
+
+
+class CryptoBasic(TypedDict):
+    rank: int
+    id: str
+    symbol: str
+    name: str
+    price_usd: float
+    market_cap_usd: float
+    change_24h_percent: float
+
+
+class ListCryptoOutput(TypedDict):
+    count: int
+    coins: list[CryptoBasic]
+
+
+class CurrencyAmount(TypedDict):
+    currency: str
+    amount: float
+
+
+class ConvertCurrencyOutput(TypedDict):
+    from_: CurrencyAmount
+    to: CurrencyAmount
+    rate: float
+    date: str
+
+
+class ExchangeRatesOutput(TypedDict):
+    base: str
+    date: str
+    rates: dict[str, float]
+
+
+#--------------------------------------------------------------------------------------------------
+# Types: News
+#--------------------------------------------------------------------------------------------------
+
+
+class HNStoryBasic(TypedDict):
+    id: int
+    title: str
+    url: str
+    score: int
+    by: str
+    comments: int
+    hn_url: str
+
+
+class HNTopStoriesOutput(TypedDict):
+    count: int
+    stories: list[HNStoryBasic]
+
+
+class HNComment(TypedDict):
+    id: int
+    by: str
+    text: str
+
+
+class HNStoryOutput(TypedDict):
+    id: int
+    title: str
+    url: str
+    text: str
+    score: int
+    by: str
+    time: int
+    comment_count: int
+    top_comments: list[HNComment]
+
+
+class RedditPostBasic(TypedDict):
+    id: str
+    title: str
+    author: str
+    score: int
+    upvote_ratio: float
+    comments: int
+    url: str
+    permalink: str
+    selftext: str | None
+
+
+class RedditPostsOutput(TypedDict):
+    subreddit: str
+    sort: str
+    count: int
+    posts: list[RedditPostBasic]
+
+
+class RedditComment(TypedDict):
+    author: str
+    score: int
+    body: str
+
+
+class RedditPostOutput(TypedDict):
+    id: str
+    title: str
+    author: str
+    score: int
+    upvote_ratio: float
+    selftext: str | None
+    url: str
+    created_utc: float
+    comment_count: int
+    top_comments: list[RedditComment]
+
+
+#--------------------------------------------------------------------------------------------------
+# Types: Entertainment
+#--------------------------------------------------------------------------------------------------
+
+
+class MovieBasic(TypedDict):
+    imdb_id: str
+    title: str
+    year: str
+    type: str
+    poster: str | None
+
+
+class SearchMoviesOutput(TypedDict):
+    query: str
+    count: int
+    results: list[MovieBasic]
+
+
+class MovieOutput(TypedDict):
+    imdb_id: str
+    title: str
+    year: str
+    rated: str
+    released: str
+    runtime: str
+    genres: list[str]
+    director: str
+    writers: list[str]
+    actors: list[str]
+    plot: str
+    language: str
+    country: str
+    awards: str
+    imdb_rating: str
+    imdb_votes: str
+    box_office: str
+
+
+class TVShowBasic(TypedDict):
+    id: int
+    name: str
+    type: str
+    language: str
+    genres: list[str]
+    status: str
+    premiered: str
+    rating: float
+    url: str
+
+
+class SearchTVOutput(TypedDict):
+    query: str
+    count: int
+    results: list[TVShowBasic]
+
+
+class CastMember(TypedDict):
+    name: str
+    character: str
+
+
+class TVShowOutput(TypedDict):
+    id: int
+    name: str
+    type: str
+    language: str
+    genres: list[str]
+    status: str
+    premiered: str
+    ended: str
+    runtime: int
+    rating: float
+    summary: str
+    seasons: int
+    total_episodes: int
+    cast: list[CastMember]
+    url: str
+
+
+class TriviaQuestion(TypedDict):
+    category: str
+    difficulty: str
+    question: str
+    correct_answer: str
+    incorrect_answers: list[str]
+
+
+class TriviaOutput(TypedDict):
+    count: int
+    questions: list[TriviaQuestion]
+
+
+class PokemonOutput(TypedDict):
+    id: int
+    name: str
+    height_dm: int
+    weight_hg: int
+    types: list[str]
+    abilities: list[str]
+    stats: dict[str, int]
+    base_experience: int
+
+
+class GameBasic(TypedDict):
+    game_id: str
+    name: str
+    cheapest_price: str
+    cheapest_deal_id: str
+    thumb: str
+
+
+class SearchGamesOutput(TypedDict):
+    query: str
+    count: int
+    results: list[GameBasic]
+
+
+#--------------------------------------------------------------------------------------------------
+# Types: Science
+#--------------------------------------------------------------------------------------------------
+
+
+class NasaApodOutput(TypedDict):
+    title: str
+    date: str
+    explanation: str
+    media_type: str
+    url: str
+    hdurl: str
+    copyright: str
+
+
+class Asteroid(TypedDict):
+    id: str
+    name: str
+    diameter_km_min: float
+    diameter_km_max: float
+    is_potentially_hazardous: bool
+    close_approach_date: str
+    miss_distance_km: str
+    velocity_kmh: str
+
+
+class AsteroidsOutput(TypedDict):
+    start_date: str
+    end_date: str
+    count: int
+    asteroids: list[Asteroid]
+
+
+class SpaceXLaunchBasic(TypedDict):
+    id: str
+    name: str
+    date_utc: str
+    rocket: str
+    success: bool
+    details: str
+    webcast: str
+
+
+class SpaceXLaunchesOutput(TypedDict):
+    upcoming: bool
+    count: int
+    launches: list[SpaceXLaunchBasic]
+
+
+class SpaceXLaunchOutput(TypedDict):
+    id: str
+    name: str
+    date_utc: str
+    rocket: str
+    success: bool
+    failures: list[dict]
+    details: str
+    crew: list[str]
+    ships: list[str]
+    payloads: list[str]
+    launchpad: str
+    links: dict
+
+
+class Earthquake(TypedDict):
+    id: str
+    magnitude: float
+    place: str
+    time: int
+    latitude: float | None
+    longitude: float | None
+    depth_km: float | None
+    url: str
+
+
+class EarthquakesOutput(TypedDict):
+    min_magnitude: float
+    days: int
+    count: int
+    earthquakes: list[Earthquake]
+
+
+#--------------------------------------------------------------------------------------------------
+# Types: Food
+#--------------------------------------------------------------------------------------------------
+
+
+class RecipeBasic(TypedDict):
+    id: str
+    name: str
+    category: str
+    area: str
+    thumbnail: str
+
+
+class SearchRecipesOutput(TypedDict):
+    query: str
+    count: int
+    results: list[RecipeBasic]
+
+
+class Ingredient(TypedDict):
+    ingredient: str
+    measure: str
+
+
+class RecipeOutput(TypedDict):
+    id: str
+    name: str
+    category: str
+    area: str
+    instructions: str
+    ingredients: list[Ingredient]
+    youtube: str
+    source: str
+    thumbnail: str
+
+
+class CocktailBasic(TypedDict):
+    id: str
+    name: str
+    category: str
+    glass: str
+    alcoholic: str
+    thumbnail: str
+
+
+class SearchCocktailsOutput(TypedDict):
+    query: str
+    count: int
+    results: list[CocktailBasic]
+
+
+class CocktailOutput(TypedDict):
+    id: str
+    name: str
+    category: str
+    glass: str
+    alcoholic: str
+    instructions: str
+    ingredients: list[Ingredient]
+    thumbnail: str
+
+
+class NutritionPer100g(TypedDict):
+    energy_kcal: float
+    fat_g: float
+    saturated_fat_g: float
+    carbs_g: float
+    sugars_g: float
+    fiber_g: float
+    protein_g: float
+    salt_g: float
+
+
+class ProductNutritionOutput(TypedDict):
+    barcode: str
+    name: str
+    brands: str
+    categories: str
+    serving_size: str
+    nutrition_per_100g: NutritionPer100g
+    ingredients: str
+    nutriscore: str
+
+
+#--------------------------------------------------------------------------------------------------
+# Types: Utilities
+#--------------------------------------------------------------------------------------------------
+
+
+class UserLocation(TypedDict):
+    city: str
+    state: str
+    country: str
+
+
+class User(TypedDict):
+    name: str
+    email: str
+    username: str
+    gender: str
+    location: UserLocation
+    phone: str
+    dob: str
+    picture: str
+
+
+class RandomUserOutput(TypedDict):
+    count: int
+    users: list[User]
+
+
+class QuoteOutput(TypedDict):
+    content: str
+    author: str
+    tags: list[str]
+
+
+class UuidOutput(TypedDict):
+    count: int
+    uuids: list[str]
+
+
+#--------------------------------------------------------------------------------------------------
+# Types: Error
+#--------------------------------------------------------------------------------------------------
+
+
+class ErrorOutput(TypedDict):
+    error: str
 
 # Shared HTTP client settings
 CLIENT_TIMEOUT = 30.0
@@ -55,7 +692,7 @@ async def fetch_json(
 
 
 @mcp.tool()
-async def get_current_weather(latitude: float, longitude: float) -> dict:
+async def get_current_weather(latitude: float, longitude: float) -> CurrentWeatherOutput | ErrorOutput:
     """
     Get current weather for a location.
 
@@ -94,7 +731,7 @@ async def get_current_weather(latitude: float, longitude: float) -> dict:
 @mcp.tool()
 async def get_weather_forecast(
     latitude: float, longitude: float, days: int = 7
-) -> dict:
+) -> WeatherForecastOutput | ErrorOutput:
     """
     Get weather forecast for a location.
 
@@ -140,7 +777,7 @@ async def get_weather_forecast(
 @mcp.tool()
 async def get_historical_weather(
     latitude: float, longitude: float, date: str
-) -> dict:
+) -> HistoricalWeatherOutput | ErrorOutput:
     """
     Get historical weather for a specific date.
 
@@ -182,7 +819,7 @@ async def get_historical_weather(
 
 
 @mcp.tool()
-async def geocode(address: str) -> dict:
+async def geocode(address: str) -> GeocodeOutput | ErrorOutput:
     """
     Convert an address or place name to coordinates.
 
@@ -217,7 +854,7 @@ async def geocode(address: str) -> dict:
 
 
 @mcp.tool()
-async def reverse_geocode(latitude: float, longitude: float) -> dict:
+async def reverse_geocode(latitude: float, longitude: float) -> ReverseGeocodeOutput | ErrorOutput:
     """
     Convert coordinates to an address.
 
@@ -254,7 +891,7 @@ async def reverse_geocode(latitude: float, longitude: float) -> dict:
 
 
 @mcp.tool()
-async def get_country(name_or_code: str) -> dict:
+async def get_country(name_or_code: str) -> CountryOutput | ErrorOutput:
     """
     Get detailed information about a country.
 
@@ -301,7 +938,7 @@ async def get_country(name_or_code: str) -> dict:
 
 
 @mcp.tool()
-async def list_countries(region: Optional[str] = None) -> dict:
+async def list_countries(region: Optional[str] = None) -> ListCountriesOutput | ErrorOutput:
     """
     List all countries, optionally filtered by region.
 
@@ -340,7 +977,7 @@ async def list_countries(region: Optional[str] = None) -> dict:
 
 
 @mcp.tool()
-async def get_ip_location(ip: Optional[str] = None) -> dict:
+async def get_ip_location(ip: Optional[str] = None) -> IpLocationOutput | ErrorOutput:
     """
     Get geolocation for an IP address.
 
@@ -376,7 +1013,7 @@ async def get_ip_location(ip: Optional[str] = None) -> dict:
 
 
 @mcp.tool()
-async def wiki_summary(topic: str) -> dict:
+async def wiki_summary(topic: str) -> WikiSummaryOutput | ErrorOutput:
     """
     Get a Wikipedia summary for a topic.
 
@@ -401,7 +1038,7 @@ async def wiki_summary(topic: str) -> dict:
 
 
 @mcp.tool()
-async def wiki_search(query: str, limit: int = 10) -> dict:
+async def wiki_search(query: str, limit: int = 10) -> WikiSearchOutput | ErrorOutput:
     """
     Search Wikipedia for articles.
 
@@ -442,7 +1079,7 @@ async def wiki_search(query: str, limit: int = 10) -> dict:
 
 
 @mcp.tool()
-async def define_word(word: str) -> dict:
+async def define_word(word: str) -> DefineWordOutput | ErrorOutput:
     """
     Get dictionary definition of a word.
 
@@ -486,7 +1123,7 @@ async def define_word(word: str) -> dict:
 
 
 @mcp.tool()
-async def get_book(query: str) -> dict:
+async def get_book(query: str) -> BookOutput | ErrorOutput:
     """
     Get book information by ISBN or title.
 
@@ -541,7 +1178,7 @@ async def get_book(query: str) -> dict:
 
 
 @mcp.tool()
-async def search_books(query: str, limit: int = 10) -> dict:
+async def search_books(query: str, limit: int = 10) -> SearchBooksOutput | ErrorOutput:
     """
     Search for books by title, author, or subject.
 
@@ -583,7 +1220,7 @@ async def search_books(query: str, limit: int = 10) -> dict:
 
 
 @mcp.tool()
-async def get_crypto_price(coin: str) -> dict:
+async def get_crypto_price(coin: str) -> CryptoPriceOutput | ErrorOutput:
     """
     Get current price and market data for a cryptocurrency.
 
@@ -621,7 +1258,7 @@ async def get_crypto_price(coin: str) -> dict:
 
 
 @mcp.tool()
-async def list_crypto(limit: int = 20) -> dict:
+async def list_crypto(limit: int = 20) -> ListCryptoOutput | ErrorOutput:
     """
     List top cryptocurrencies by market cap.
 
@@ -662,7 +1299,7 @@ async def list_crypto(limit: int = 20) -> dict:
 
 
 @mcp.tool()
-async def convert_currency(amount: float, from_currency: str, to_currency: str) -> dict:
+async def convert_currency(amount: float, from_currency: str, to_currency: str) -> ConvertCurrencyOutput | ErrorOutput:
     """
     Convert between currencies.
 
@@ -697,7 +1334,7 @@ async def convert_currency(amount: float, from_currency: str, to_currency: str) 
 
 
 @mcp.tool()
-async def get_exchange_rates(base: str = "USD") -> dict:
+async def get_exchange_rates(base: str = "USD") -> ExchangeRatesOutput | ErrorOutput:
     """
     Get exchange rates for a base currency.
 
@@ -727,7 +1364,7 @@ async def get_exchange_rates(base: str = "USD") -> dict:
 
 
 @mcp.tool()
-async def hn_top_stories(limit: int = 20) -> dict:
+async def hn_top_stories(limit: int = 20) -> HNTopStoriesOutput | ErrorOutput:
     """
     Get top stories from Hacker News.
 
@@ -768,7 +1405,7 @@ async def hn_top_stories(limit: int = 20) -> dict:
 
 
 @mcp.tool()
-async def hn_story(story_id: int) -> dict:
+async def hn_story(story_id: int) -> HNStoryOutput | ErrorOutput:
     """
     Get a Hacker News story with top comments.
 
@@ -812,7 +1449,7 @@ async def hn_story(story_id: int) -> dict:
 
 
 @mcp.tool()
-async def reddit_posts(subreddit: str, sort: str = "hot", limit: int = 20) -> dict:
+async def reddit_posts(subreddit: str, sort: str = "hot", limit: int = 20) -> RedditPostsOutput | ErrorOutput:
     """
     Get posts from a subreddit.
 
@@ -865,7 +1502,7 @@ async def reddit_posts(subreddit: str, sort: str = "hot", limit: int = 20) -> di
 
 
 @mcp.tool()
-async def reddit_post(subreddit: str, post_id: str) -> dict:
+async def reddit_post(subreddit: str, post_id: str) -> RedditPostOutput | ErrorOutput:
     """
     Get a Reddit post with top comments.
 
@@ -930,7 +1567,7 @@ async def reddit_post(subreddit: str, post_id: str) -> dict:
 
 
 @mcp.tool()
-async def search_movies(query: str) -> dict:
+async def search_movies(query: str) -> SearchMoviesOutput | ErrorOutput:
     """
     Search for movies by title.
 
@@ -968,7 +1605,7 @@ async def search_movies(query: str) -> dict:
 
 
 @mcp.tool()
-async def get_movie(imdb_id: str) -> dict:
+async def get_movie(imdb_id: str) -> MovieOutput | ErrorOutput:
     """
     Get detailed movie information.
 
@@ -1006,7 +1643,7 @@ async def get_movie(imdb_id: str) -> dict:
 
 
 @mcp.tool()
-async def search_tv(query: str) -> dict:
+async def search_tv(query: str) -> SearchTVOutput | ErrorOutput:
     """
     Search for TV shows.
 
@@ -1044,7 +1681,7 @@ async def search_tv(query: str) -> dict:
 
 
 @mcp.tool()
-async def get_tv_show(show_id: int) -> dict:
+async def get_tv_show(show_id: int) -> TVShowOutput | ErrorOutput:
     """
     Get detailed TV show information.
 
@@ -1097,7 +1734,7 @@ async def get_tv_show(show_id: int) -> dict:
 @mcp.tool()
 async def get_trivia(
     amount: int = 10, category: Optional[int] = None, difficulty: Optional[str] = None
-) -> dict:
+) -> TriviaOutput | ErrorOutput:
     """
     Get trivia questions.
 
@@ -1139,7 +1776,7 @@ async def get_trivia(
 
 
 @mcp.tool()
-async def get_pokemon(name_or_id: str) -> dict:
+async def get_pokemon(name_or_id: str) -> PokemonOutput | ErrorOutput:
     """
     Get Pokemon information.
 
@@ -1170,7 +1807,7 @@ async def get_pokemon(name_or_id: str) -> dict:
 
 
 @mcp.tool()
-async def search_games(query: str, limit: int = 10) -> dict:
+async def search_games(query: str, limit: int = 10) -> SearchGamesOutput | ErrorOutput:
     """
     Search for video games and find deals.
 
@@ -1215,7 +1852,7 @@ async def search_games(query: str, limit: int = 10) -> dict:
 
 
 @mcp.tool()
-async def nasa_apod(date: Optional[str] = None) -> dict:
+async def nasa_apod(date: Optional[str] = None) -> NasaApodOutput | ErrorOutput:
     """
     Get NASA's Astronomy Picture of the Day.
 
@@ -1247,7 +1884,7 @@ async def nasa_apod(date: Optional[str] = None) -> dict:
 
 
 @mcp.tool()
-async def get_asteroids(start_date: str, end_date: str) -> dict:
+async def get_asteroids(start_date: str, end_date: str) -> AsteroidsOutput | ErrorOutput:
     """
     Get near-Earth asteroids for a date range.
 
@@ -1295,7 +1932,7 @@ async def get_asteroids(start_date: str, end_date: str) -> dict:
 
 
 @mcp.tool()
-async def spacex_launches(upcoming: bool = True, limit: int = 10) -> dict:
+async def spacex_launches(upcoming: bool = True, limit: int = 10) -> SpaceXLaunchesOutput | ErrorOutput:
     """
     Get SpaceX launches.
 
@@ -1338,7 +1975,7 @@ async def spacex_launches(upcoming: bool = True, limit: int = 10) -> dict:
 
 
 @mcp.tool()
-async def spacex_launch(launch_id: str) -> dict:
+async def spacex_launch(launch_id: str) -> SpaceXLaunchOutput | ErrorOutput:
     """
     Get details for a specific SpaceX launch.
 
@@ -1373,7 +2010,7 @@ async def spacex_launch(launch_id: str) -> dict:
 @mcp.tool()
 async def get_earthquakes(
     min_magnitude: float = 4.5, days: int = 7, limit: int = 20
-) -> dict:
+) -> EarthquakesOutput | ErrorOutput:
     """
     Get recent earthquakes.
 
@@ -1436,7 +2073,7 @@ async def get_earthquakes(
 
 
 @mcp.tool()
-async def search_recipes(query: str) -> dict:
+async def search_recipes(query: str) -> SearchRecipesOutput | ErrorOutput:
     """
     Search for meal recipes.
 
@@ -1470,7 +2107,7 @@ async def search_recipes(query: str) -> dict:
 
 
 @mcp.tool()
-async def get_recipe(meal_id: str) -> dict:
+async def get_recipe(meal_id: str) -> RecipeOutput | ErrorOutput:
     """
     Get full recipe details.
 
@@ -1515,7 +2152,7 @@ async def get_recipe(meal_id: str) -> dict:
 
 
 @mcp.tool()
-async def random_recipe() -> dict:
+async def random_recipe() -> RecipeOutput | ErrorOutput:
     """
     Get a random recipe.
 
@@ -1553,7 +2190,7 @@ async def random_recipe() -> dict:
 
 
 @mcp.tool()
-async def search_cocktails(query: str) -> dict:
+async def search_cocktails(query: str) -> SearchCocktailsOutput | ErrorOutput:
     """
     Search for cocktail recipes.
 
@@ -1588,7 +2225,7 @@ async def search_cocktails(query: str) -> dict:
 
 
 @mcp.tool()
-async def get_cocktail(drink_id: str) -> dict:
+async def get_cocktail(drink_id: str) -> CocktailOutput | ErrorOutput:
     """
     Get full cocktail recipe.
 
@@ -1631,7 +2268,7 @@ async def get_cocktail(drink_id: str) -> dict:
 
 
 @mcp.tool()
-async def get_product_nutrition(barcode: str) -> dict:
+async def get_product_nutrition(barcode: str) -> ProductNutritionOutput | ErrorOutput:
     """
     Get nutrition facts for a product by barcode.
 
@@ -1680,7 +2317,7 @@ async def get_product_nutrition(barcode: str) -> dict:
 
 
 @mcp.tool()
-async def random_user(count: int = 1) -> dict:
+async def random_user(count: int = 1) -> RandomUserOutput | ErrorOutput:
     """
     Generate random user profiles.
 
@@ -1721,7 +2358,7 @@ async def random_user(count: int = 1) -> dict:
 
 
 @mcp.tool()
-async def random_quote(category: Optional[str] = None) -> dict:
+async def random_quote(category: Optional[str] = None) -> QuoteOutput | ErrorOutput:
     """
     Get a random quote.
 
@@ -1755,7 +2392,7 @@ async def random_quote(category: Optional[str] = None) -> dict:
 
 
 @mcp.tool()
-async def generate_uuid(count: int = 1) -> dict:
+async def generate_uuid(count: int = 1) -> UuidOutput:
     """
     Generate random UUIDs.
 
