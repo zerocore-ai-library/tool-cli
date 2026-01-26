@@ -319,9 +319,10 @@ pub async fn list_tools(
                 .map(|d| format!("  {}", d.dimmed()))
                 .unwrap_or_default();
             println!("    {}{}", entry.name.bright_cyan().bold(), desc);
+            println!("        {}       {}", "Type".dimmed(), entry.tool_type);
             println!(
-                "    {}  {}",
-                entry.tool_type.dimmed(),
+                "        {}   {}",
+                "Location".dimmed(),
                 entry.path.display().to_string().dimmed()
             );
 
@@ -438,9 +439,10 @@ pub async fn list_tools(
                 .map(|d| format!("  {}", d.dimmed()))
                 .unwrap_or_default();
             println!("    {}{}", entry.name.bright_cyan(), desc);
+            println!("        {}       {}", "Type".dimmed(), entry.tool_type);
             println!(
-                "    └── {}  {}",
-                entry.tool_type.dimmed(),
+                "        {}   {}",
+                "Location".dimmed(),
                 entry.path.display().to_string().dimmed()
             );
             println!();

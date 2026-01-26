@@ -73,6 +73,7 @@ const INFO_EXAMPLES: &str = examples![
     "tool info appcypher/bash          " # "Inspect installed tool",
     "tool info appcypher/bash -c       " # "Concise output",
     "tool info . -m exec               " # "Show specific method details",
+    "tool info . -m exec -m read       " # "Show multiple methods",
     "tool info . -m exec --input       " # "Show only input schema",
     "tool info . -m exec --output      " # "Show only output schema",
     "tool info . -m exec -d            " # "Show only description",
@@ -408,9 +409,9 @@ pub enum Command {
         #[arg(default_value = ".")]
         tool: String,
 
-        /// Focus on a specific method by name.
+        /// Focus on specific methods by name (can be repeated).
         #[arg(short = 'm', long = "method")]
-        method: Option<String>,
+        methods: Vec<String>,
 
         /// Show only input schema (requires -m).
         #[arg(long = "input")]
