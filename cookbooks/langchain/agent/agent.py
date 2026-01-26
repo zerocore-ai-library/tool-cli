@@ -44,93 +44,49 @@ logging.getLogger("mcp").setLevel(logging.WARNING)
 console = Console()
 
 CODE_MODE_TEMPLATE = """\
-You are a CODE MODE agent with ONLY bash access. Use the `tool` CLI to discover and call MCP tools.
+You are a CODE MODE agent. Use the `tool` CLI to discover and call MCP tools.
 
 ## Environment
 - OS: {os_info}
-- CPU: {cpu_info}
 - Time: {current_time}
-- Available commands: {available_commands}
+- Shell commands: {available_commands}
 
-## Quick Reference
+## tool CLI Commands
 
+### Discover methods
 ```bash
-tool grep <pattern> -c              # Find tools/methods matching pattern (includes descriptions!)
-tool info <tool> -m <method> -c     # Get ONE method's signature
-tool info <tool> --tools -c         # List ALL method signatures for a tool
-tool call <tool> -m <method> -p key=value -c
+tool grep <pattern> --concise
 ```
+Searches all installed tools. Returns method names and descriptions with Args info.
 
-## Output Formats
-
-### tool grep output
-```
-#path    value
-['open-data-mcp'].tools.search_movies    search_movies
-['open-data-mcp'].tools.search_movies.description    "Search for movies by title..."
-['open-data-mcp'].tools.get_movie    get_movie
-['open-data-mcp'].tools.get_movie.description    "Get detailed movie information. Args: imdb_id..."
-```
-Descriptions tell you what parameters are needed. Often NO `tool info` call required.
-
-### tool info -m output
-```
-open-data-mcp:search_movies(query*: string) -> {{query*: string, count*: integer, results*: {{imdb_id*: string, title*: string, year*: string}}[]}}
-```
-Shows exact input params and output fields. Use this to understand what to extract with jq.
-
-### tool call output
-Returns JSON. Use jq to extract fields for chaining:
+### Get method signature (if needed)
 ```bash
-tool call open-data-mcp -m search_movies -p query="Inception" -c | jq -r '.results[0].imdb_id'
+tool info <tool> --method <name> --concise
 ```
+Shows: `tool:method(param*: type) -> {{output}}` where `*` = required, `?` = optional.
+
+### Call a method
+```bash
+tool call <tool> --method <name> --param key=value --concise
+```
+Returns JSON. Use jq to parse output.
 
 ## Workflow
 
-### 1. DISCOVER with grep (often sufficient)
+1. `tool grep <keyword> --concise` to find methods. Descriptions show parameter names.
+2. If descriptions are clear, call directly. If not, use `tool info` for exact signature.
+3. Chain dependent calls in a single script:
+
 ```bash
-tool grep <keyword> -c
+VAL=$(tool call <tool> --method <method1> --param x=y --concise | jq -r '.<path>'); tool call <tool> --method <method2> --param z="$VAL" --concise
 ```
-Descriptions usually tell you parameter names. If clear, skip to EXECUTE.
-
-### 2. CLARIFY with info (only if needed)
-```bash
-tool info <tool> -m <method> -c    # Get ONE method signature - NOT the whole tool
-```
-Only use this if grep descriptions are unclear about parameters or output structure.
-
-### 3. EXECUTE (REQUIRED: chain when possible)
-
-When calls can be chained (output of one feeds into another), you MUST combine them in ONE script:
-
-**BAD** (2 tool calls - wasteful):
-```bash
-# Call 1
-tool call open-data-mcp -m search_movies -p query="Inception" -c | jq -r '.results[0].imdb_id'
-# Returns: tt1375666
-
-# Call 2
-tool call open-data-mcp -m get_movie -p imdb_id="tt1375666" -c
-```
-
-**GOOD** (1 tool call - efficient):
-```bash
-ID=$(tool call open-data-mcp -m search_movies -p query="Inception" -c | jq -r '.results[0].imdb_id')
-tool call open-data-mcp -m get_movie -p imdb_id="$ID" -c
-```
-
-Only use separate calls when you genuinely cannot predict what the next step will be.
 
 ## Rules
 
-1. `tool grep` descriptions often have enough info - don't over-discover
-2. NEVER run `tool info <tool> -c` without `-m <method>` - it dumps everything
-3. Use jq to extract fields: `.field`, `.results[0].id`, `.items[] | .name`
-
-## Anti-patterns (AVOID)
-
-- `tool list -c` then `tool grep` then `tool info <tool> -c` then `tool call` (over-discovery)
-- `tool info open-data-mcp -c` (dumps 40+ method signatures)
+- Always use `--concise` for machine-readable output
+- Read the method description from grep output - it tells you the Args
+- Use `tool info --method <name>` to see exact input/output schema when needed
+- Chain calls using bash variables to minimize round-trips
 """
 
 
@@ -200,8 +156,24 @@ class TokenTracker:
         return self.total_input + self.total_output
 
 
-def get_model():
-    """Get the LLM model based on available API keys."""
+def get_model(provider: str | None = None):
+    """Get the LLM model based on provider flag or available API keys."""
+    # Explicit provider selection
+    if provider == "anthropic":
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            raise ValueError("ANTHROPIC_API_KEY not set")
+        from langchain_anthropic import ChatAnthropic
+        model_id = "claude-sonnet-4-5-20250929"
+        return ChatAnthropic(model=model_id), "Claude Sonnet", "claude", model_id
+
+    if provider == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            raise ValueError("OPENAI_API_KEY not set")
+        from langchain_openai import ChatOpenAI
+        model_id = "gpt-5.2"
+        return ChatOpenAI(model=model_id), "GPT-5.2", "openai", model_id
+
+    # Auto-detect from available keys
     if os.getenv("ANTHROPIC_API_KEY"):
         from langchain_anthropic import ChatAnthropic
         model_id = "claude-sonnet-4-5-20250929"
@@ -209,8 +181,8 @@ def get_model():
 
     if os.getenv("OPENAI_API_KEY"):
         from langchain_openai import ChatOpenAI
-        model_id = "gpt-4o"
-        return ChatOpenAI(model=model_id), "GPT-4o", "openai", model_id
+        model_id = "gpt-5.2"
+        return ChatOpenAI(model=model_id), "GPT-5.2", "openai", model_id
 
     raise ValueError("Set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable")
 
@@ -276,8 +248,8 @@ def print_token_summary(tracker: TokenTracker):
     console.print(table)
 
 
-async def run(code_mode: bool = False):
-    model, model_name, provider, model_id = get_model()
+async def run(code_mode: bool = False, provider: str | None = None):
+    model, model_name, provider, model_id = get_model(provider)
 
     # MCP server paths - relative to this file's parent directory (agent/)
     # The sibling directories are bash_mcp/ and open_data_mcp/
@@ -490,9 +462,24 @@ def main():
         action="store_true",
         help="Code mode: only load bash tool, use `tool call` CLI for MCP tools",
     )
+    provider_group = parser.add_mutually_exclusive_group()
+    provider_group.add_argument(
+        "--anthropic",
+        action="store_const",
+        const="anthropic",
+        dest="provider",
+        help="Use Anthropic Claude model",
+    )
+    provider_group.add_argument(
+        "--openai",
+        action="store_const",
+        const="openai",
+        dest="provider",
+        help="Use OpenAI GPT model",
+    )
     args = parser.parse_args()
 
-    asyncio.run(run(code_mode=args.code))
+    asyncio.run(run(code_mode=args.code, provider=args.provider))
 
 
 if __name__ == "__main__":
