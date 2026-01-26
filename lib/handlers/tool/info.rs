@@ -18,7 +18,7 @@ use super::common::{PrepareToolOptions, prepare_tool};
 #[allow(clippy::too_many_arguments)]
 pub async fn tool_info(
     tool: String,
-    method: Option<String>,
+    methods: Vec<String>,
     input_only: bool,
     output_only: bool,
     description_only: bool,
@@ -99,14 +99,18 @@ pub async fn tool_info(
     // Extract toolset name from the tool reference
     let toolset = tool.split('@').next().unwrap_or(&tool);
 
-    // If -m is specified, we're drilling down to a specific method
-    if let Some(ref method_name) = method {
-        // Find the matching tool
-        let matching_tool = capabilities.tools.iter().find(|t| t.name == *method_name);
+    // If -m is specified, we're drilling down to specific methods
+    if !methods.is_empty() {
+        // Find all matching tools
+        let matching_tools: Vec<&Tool> = capabilities
+            .tools
+            .iter()
+            .filter(|t| methods.iter().any(|m| m == t.name.as_ref()))
+            .collect();
 
-        let tool_item = match matching_tool {
-            Some(t) => t,
-            None => {
+        // Validate all requested methods exist
+        for method_name in &methods {
+            if !matching_tools.iter().any(|t| t.name == *method_name) {
                 if !concise {
                     println!(
                         "  {} Method not found: {}",
@@ -116,15 +120,15 @@ pub async fn tool_info(
                 }
                 std::process::exit(1);
             }
-        };
+        }
 
         // Handle method-specific output
         if json_output {
-            output_method_json(tool_item, concise)?;
+            output_methods_json(&matching_tools, concise)?;
         } else if concise {
-            output_method_concise(
+            output_methods_concise(
                 toolset,
-                tool_item,
+                &matching_tools,
                 input_only,
                 output_only,
                 description_only,
@@ -132,8 +136,8 @@ pub async fn tool_info(
                 level,
             );
         } else {
-            output_method_normal(
-                tool_item,
+            output_methods_normal(
+                &matching_tools,
                 input_only,
                 output_only,
                 description_only,
@@ -757,14 +761,18 @@ fn output_tool_info_json(
     Ok(())
 }
 
-/// Output a single method as JSON.
-fn output_method_json(tool: &Tool, concise: bool) -> ToolResult<()> {
-    let json = serde_json::json!({
-        "name": tool.name,
-        "description": tool.description,
-        "input_schema": tool.input_schema,
-        "output_schema": tool.output_schema,
-    });
+/// Output methods as JSON (object keyed by method name).
+fn output_methods_json(tools: &[&Tool], concise: bool) -> ToolResult<()> {
+    let mut map = serde_json::Map::new();
+    for tool in tools {
+        let value = serde_json::json!({
+            "description": tool.description,
+            "input_schema": tool.input_schema,
+            "output_schema": tool.output_schema,
+        });
+        map.insert(tool.name.to_string(), value);
+    }
+    let json = serde_json::Value::Object(map);
     if concise {
         println!("{}", serde_json::to_string(&json)?);
     } else {
@@ -773,11 +781,11 @@ fn output_method_json(tool: &Tool, concise: bool) -> ToolResult<()> {
     Ok(())
 }
 
-/// Output a single method in concise TSV format.
+/// Output methods in concise TSV format.
 #[allow(clippy::too_many_arguments)]
-fn output_method_concise(
+fn output_methods_concise(
     toolset: &str,
-    tool: &Tool,
+    tools: &[&Tool],
     input_only: bool,
     output_only: bool,
     description_only: bool,
@@ -786,55 +794,37 @@ fn output_method_concise(
 ) {
     use crate::concise::quote;
 
-    // If description only, just print description
+    // If description only, print method + description
     if description_only {
-        if let Some(desc) = &tool.description {
-            println!("{}", desc);
+        if !no_header {
+            println!("#method\tdescription");
+        }
+        for tool in tools {
+            let desc = tool.description.as_deref().unwrap_or("");
+            println!("{}\t{}", tool.name, quote(desc));
         }
         return;
     }
 
-    // If input only, show input schema parameters
+    // If input only, show input schema parameters with method column
     if input_only {
         if !no_header {
-            println!("#param\ttype\trequired\tdescription");
+            println!("#method\tparam\ttype\trequired\tdescription");
         }
-        if let Some(props) = tool
-            .input_schema
-            .get("properties")
-            .and_then(|p| p.as_object())
-        {
-            let required: Vec<&str> = tool
+        for tool in tools {
+            if let Some(props) = tool
                 .input_schema
-                .get("required")
-                .and_then(|r| r.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-                .unwrap_or_default();
-            let defs = tool.input_schema.get("$defs").and_then(|d| d.as_object());
-
-            for (name, prop) in props {
-                let is_required = required.contains(&name.as_str());
-                let type_str = format_schema_type(prop, defs, level);
-                let desc = prop
-                    .get("description")
-                    .and_then(|d| d.as_str())
-                    .unwrap_or("");
-                println!("{}\t{}\t{}\t{}", name, type_str, is_required, quote(desc));
-            }
-        }
-        return;
-    }
-
-    // If output only, show output schema parameters
-    if output_only {
-        if !no_header {
-            println!("#param\ttype\trequired\tdescription");
-        }
-        if let Some(output_schema) = &tool.output_schema {
-            let defs = output_schema.get("$defs").and_then(|d| d.as_object());
-            if let Some((resolved, required)) = resolve_output_schema(output_schema)
-                && let Some(props) = resolved.get("properties").and_then(|p| p.as_object())
+                .get("properties")
+                .and_then(|p| p.as_object())
             {
+                let required: Vec<&str> = tool
+                    .input_schema
+                    .get("required")
+                    .and_then(|r| r.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+                let defs = tool.input_schema.get("$defs").and_then(|d| d.as_object());
+
                 for (name, prop) in props {
                     let is_required = required.contains(&name.as_str());
                     let type_str = format_schema_type(prop, defs, level);
@@ -842,152 +832,165 @@ fn output_method_concise(
                         .get("description")
                         .and_then(|d| d.as_str())
                         .unwrap_or("");
-                    println!("{}\t{}\t{}\t{}", name, type_str, is_required, quote(desc));
+                    println!(
+                        "{}\t{}\t{}\t{}\t{}",
+                        tool.name,
+                        name,
+                        type_str,
+                        is_required,
+                        quote(desc)
+                    );
                 }
             }
         }
         return;
     }
 
-    // Default: show function signature
-    let params = format_schema_params_concise(&tool.input_schema, true, level);
-    let outputs = tool
-        .output_schema
-        .as_ref()
-        .map(|s| format_schema_params_concise(s, false, level))
-        .unwrap_or_default();
+    // If output only, show output schema parameters with method column
+    if output_only {
+        if !no_header {
+            println!("#method\tparam\ttype\trequired\tdescription");
+        }
+        for tool in tools {
+            if let Some(output_schema) = &tool.output_schema {
+                let defs = output_schema.get("$defs").and_then(|d| d.as_object());
+                if let Some((resolved, required)) = resolve_output_schema(output_schema)
+                    && let Some(props) = resolved.get("properties").and_then(|p| p.as_object())
+                {
+                    for (name, prop) in props {
+                        let is_required = required.contains(&name.as_str());
+                        let type_str = format_schema_type(prop, defs, level);
+                        let desc = prop
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("");
+                        println!(
+                            "{}\t{}\t{}\t{}\t{}",
+                            tool.name,
+                            name,
+                            type_str,
+                            is_required,
+                            quote(desc)
+                        );
+                    }
+                }
+            }
+        }
+        return;
+    }
 
-    if outputs.is_empty() {
-        println!("{}:{}({})", toolset, tool.name, params);
-    } else {
-        println!("{}:{}({}) -> {}", toolset, tool.name, params, outputs);
+    // Default: show function signatures
+    if !no_header {
+        println!("#tool");
+    }
+    for tool in tools {
+        let params = format_schema_params_concise(&tool.input_schema, true, level);
+        let outputs = tool
+            .output_schema
+            .as_ref()
+            .map(|s| format_schema_params_concise(s, false, level))
+            .unwrap_or_default();
+
+        if outputs.is_empty() {
+            println!("{}:{}({})", toolset, tool.name, params);
+        } else {
+            println!("{}:{}({}) -> {}", toolset, tool.name, params, outputs);
+        }
     }
 }
 
-/// Output a single method in human-readable format.
-fn output_method_normal(
-    tool: &Tool,
+/// Output methods in human-readable format.
+fn output_methods_normal(
+    tools: &[&Tool],
     input_only: bool,
     output_only: bool,
     description_only: bool,
     verbose: bool,
     level: usize,
 ) {
-    // If description only, just print description
-    if description_only {
-        if let Some(desc) = &tool.description {
-            if verbose {
-                // Verbose: show full description
-                if let Some(formatted) = format_description(desc, true, "") {
-                    println!("{}", formatted);
-                }
-            } else {
-                // Non-verbose: show first line only
-                if let Some(first_line) = format_description(desc, false, "") {
-                    println!("{}", first_line);
+    for (idx, tool) in tools.iter().enumerate() {
+        // If description only, just print description
+        if description_only {
+            if let Some(desc) = &tool.description {
+                if verbose {
+                    // Verbose: show full description with method name
+                    println!("      {}", tool.name.bright_cyan());
+                    if let Some(formatted) = format_description(desc, true, "        ") {
+                        println!("{}", formatted.dimmed());
+                    }
+                } else {
+                    // Non-verbose: method name + first line
+                    let first_line = format_description(desc, false, "")
+                        .map(|d| format!("  {}", d.dimmed()))
+                        .unwrap_or_default();
+                    println!("      {}{}", tool.name.bright_cyan(), first_line);
                 }
             }
+            if idx < tools.len() - 1 {
+                println!();
+            }
+            continue;
         }
-        return;
-    }
 
-    // Determine what to show
-    let show_all = !input_only && !output_only;
+        // Determine what to show
+        let show_all = !input_only && !output_only;
 
-    if verbose {
-        // Verbose: name on its own line, description block below
-        println!("      {}", tool.name.bright_cyan());
-        if show_all
-            && let Some(desc) = &tool.description
-            && let Some(formatted) = format_description(desc, true, "        ")
-        {
-            println!("{}\n", formatted.dimmed());
-        }
-    } else {
-        // Non-verbose: name + first line description inline
-        let desc = tool
-            .description
-            .as_ref()
-            .and_then(|d| format_description(d, false, ""))
-            .map(|d| format!("  {}", d.dimmed()))
-            .unwrap_or_default();
-        if show_all {
-            println!("      {}{}", tool.name.bright_cyan(), desc);
-        } else {
+        if verbose {
+            // Verbose: name on its own line, description block below
             println!("      {}", tool.name.bright_cyan());
+            if show_all
+                && let Some(desc) = &tool.description
+                && let Some(formatted) = format_description(desc, true, "        ")
+            {
+                println!("{}\n", formatted.dimmed());
+            }
+        } else {
+            // Non-verbose: name + first line description inline
+            let desc = tool
+                .description
+                .as_ref()
+                .and_then(|d| format_description(d, false, ""))
+                .map(|d| format!("  {}", d.dimmed()))
+                .unwrap_or_default();
+            if show_all {
+                println!("      {}{}", tool.name.bright_cyan(), desc);
+            } else {
+                println!("      {}", tool.name.bright_cyan());
+            }
         }
-    }
 
-    let has_input = tool
-        .input_schema
-        .get("properties")
-        .and_then(|p| p.as_object())
-        .is_some_and(|p| !p.is_empty());
-    let has_output = tool.output_schema.is_some();
-
-    // Input schema
-    if (show_all || input_only) && has_input {
-        let schema = &tool.input_schema;
-        let defs = schema.get("$defs").and_then(|d| d.as_object());
-        let props = schema
+        let has_input = tool
+            .input_schema
             .get("properties")
             .and_then(|p| p.as_object())
-            .unwrap();
-        let required: Vec<&str> = schema
-            .get("required")
-            .and_then(|r| r.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-            .unwrap_or_default();
+            .is_some_and(|p| !p.is_empty());
+        let has_output = tool.output_schema.is_some();
 
-        let input_branch = if has_output && show_all {
-            "├──"
-        } else {
-            "└──"
-        };
-        println!("      {} {}", input_branch.dimmed(), "Input".dimmed());
+        // Input schema
+        if (show_all || input_only) && has_input {
+            let schema = &tool.input_schema;
+            let defs = schema.get("$defs").and_then(|d| d.as_object());
+            let props = schema
+                .get("properties")
+                .and_then(|p| p.as_object())
+                .unwrap();
+            let required: Vec<&str> = schema
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
 
-        let prop_count = props.len();
-        for (i, (name, prop)) in props.iter().enumerate() {
-            let is_last = i == prop_count - 1;
-            let prefix = if has_output && show_all { "│" } else { " " };
-            let branch = if is_last { "└──" } else { "├──" };
-            let type_str = format_schema_type(prop, defs, level);
-            let req_marker = if required.contains(&name.as_str()) {
-                "*"
+            let input_branch = if has_output && show_all {
+                "├──"
             } else {
-                ""
+                "└──"
             };
-            let param_desc = prop
-                .get("description")
-                .and_then(|d| d.as_str())
-                .unwrap_or("");
+            println!("      {} {}", input_branch.dimmed(), "Input".dimmed());
 
-            let param_name = format!("{}{}", name, req_marker);
-            println!(
-                "      {}   {} {:<20} {:<10} {}",
-                prefix.dimmed(),
-                branch.dimmed(),
-                param_name,
-                type_str.dimmed(),
-                param_desc.dimmed()
-            );
-        }
-    }
-
-    // Output schema
-    if (show_all || output_only)
-        && has_output
-        && let Some(output_schema) = &tool.output_schema
-    {
-        println!("      {} {}", "└──".dimmed(), "Output".dimmed());
-
-        let defs = output_schema.get("$defs").and_then(|d| d.as_object());
-        if let Some((resolved, required)) = resolve_output_schema(output_schema)
-            && let Some(props) = resolved.get("properties").and_then(|p| p.as_object())
-        {
             let prop_count = props.len();
             for (i, (name, prop)) in props.iter().enumerate() {
                 let is_last = i == prop_count - 1;
+                let prefix = if has_output && show_all { "│" } else { " " };
                 let branch = if is_last { "└──" } else { "├──" };
                 let type_str = format_schema_type(prop, defs, level);
                 let req_marker = if required.contains(&name.as_str()) {
@@ -1002,13 +1005,57 @@ fn output_method_normal(
 
                 let param_name = format!("{}{}", name, req_marker);
                 println!(
-                    "          {} {:<20} {:<10} {}",
+                    "      {}   {} {:<20} {:<10} {}",
+                    prefix.dimmed(),
                     branch.dimmed(),
                     param_name,
                     type_str.dimmed(),
                     param_desc.dimmed()
                 );
             }
+        }
+
+        // Output schema
+        if (show_all || output_only)
+            && has_output
+            && let Some(output_schema) = &tool.output_schema
+        {
+            println!("      {} {}", "└──".dimmed(), "Output".dimmed());
+
+            let defs = output_schema.get("$defs").and_then(|d| d.as_object());
+            if let Some((resolved, required)) = resolve_output_schema(output_schema)
+                && let Some(props) = resolved.get("properties").and_then(|p| p.as_object())
+            {
+                let prop_count = props.len();
+                for (i, (name, prop)) in props.iter().enumerate() {
+                    let is_last = i == prop_count - 1;
+                    let branch = if is_last { "└──" } else { "├──" };
+                    let type_str = format_schema_type(prop, defs, level);
+                    let req_marker = if required.contains(&name.as_str()) {
+                        "*"
+                    } else {
+                        ""
+                    };
+                    let param_desc = prop
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("");
+
+                    let param_name = format!("{}{}", name, req_marker);
+                    println!(
+                        "          {} {:<20} {:<10} {}",
+                        branch.dimmed(),
+                        param_name,
+                        type_str.dimmed(),
+                        param_desc.dimmed()
+                    );
+                }
+            }
+        }
+
+        // Add spacing between methods
+        if idx < tools.len() - 1 {
+            println!();
         }
     }
     println!();

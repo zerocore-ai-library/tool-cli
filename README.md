@@ -79,7 +79,7 @@ Get your first MCP tool published in three steps.
 <h4>2&nbsp;&nbsp;⏵&nbsp;&nbsp;Test</h4>
 
 > ```sh
-> tool info
+> tool info my_tool
 > ```
 >
 > Shows you what your server exposes. Tools, prompts, resources. This is what clients will see when they connect.
@@ -108,7 +108,7 @@ Get your first MCP tool published in three steps.
 
 > ```sh
 > tool login
-> tool publish
+> tool publish my_tool
 > ```
 >
 > Log in once, then publish. Now anyone can install your tool.

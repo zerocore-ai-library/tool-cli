@@ -304,7 +304,7 @@ async fn run() -> ToolResult<()> {
 
         Command::Info {
             tool,
-            method,
+            methods,
             input_only,
             output_only,
             description_only,
@@ -322,7 +322,7 @@ async fn run() -> ToolResult<()> {
         } => {
             handlers::tool_info(
                 tool,
-                method,
+                methods,
                 input_only,
                 output_only,
                 description_only,
