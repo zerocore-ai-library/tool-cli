@@ -133,7 +133,9 @@ pub enum ToolError {
     },
 
     /// Invalid host name.
-    #[error("Unknown host '{0}'. Supported: claude-desktop, cursor, claude-code, vscode")]
+    #[error(
+        "Unknown host '{0}'. Supported: claude-desktop, cursor, claude-code, vscode, codex, windsurf, zed, gemini-cli, kiro, roo-code"
+    )]
     InvalidHost(String),
 
     /// Failed to parse host config.

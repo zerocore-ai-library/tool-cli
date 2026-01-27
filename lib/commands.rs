@@ -190,9 +190,9 @@ const HOST_REMOVE_EXAMPLES: &str = examples![
     "tool host remove vscode -y        " # "Skip confirmation",
 ];
 
-const HOST_SHOW_EXAMPLES: &str = examples![
-    "tool host show claude-desktop     " # "Preview config for all tools",
-    "tool host show cursor bash        " # "Preview config for specific tool",
+const HOST_PREVIEW_EXAMPLES: &str = examples![
+    "tool host preview claude-desktop  " # "Preview config for all tools",
+    "tool host preview cursor bash     " # "Preview config for specific tool",
 ];
 
 const HOST_PATH_EXAMPLES: &str = examples![
@@ -772,9 +772,9 @@ pub enum HostCommand {
     /// List supported hosts and their status.
     List,
 
-    /// Show the MCP config that would be generated.
-    #[command(after_help = HOST_SHOW_EXAMPLES)]
-    Show {
+    /// Preview the MCP config that would be generated.
+    #[command(after_help = HOST_PREVIEW_EXAMPLES)]
+    Preview {
         /// Target host.
         host: String,
 

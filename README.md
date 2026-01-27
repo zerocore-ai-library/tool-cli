@@ -219,6 +219,15 @@ Get your first MCP tool published in three steps.
 
 <br />
 
+## Context-Efficient Agents with tool-cli
+
+
+<br />
+
+<div align='center'>• • •</div>
+
+<br />
+
 ## Host Integration
 
 Once you've installed some tools, you probably want to use them in your favorite AI app. Instead of manually editing JSON configs, just run:
@@ -227,40 +236,65 @@ Once you've installed some tools, you probably want to use them in your favorite
 > tool host add claude-desktop radical/weather
 > ```
 >
-> This registers the tool with the host. Works with Claude Desktop, Cursor, VS Code, and Claude Code.
+> This registers the tool with the host. Works with Claude Desktop, Cursor, VS Code, Claude Code, Codex, Windsurf, Zed, Gemini CLI, Kiro, and Roo Code.
 
 <br />
+
 
 <div align="center">
 <table>
 <tr>
-<td align="center" width="150">
+<td align="center" width="180">
 <img src="https://avatars.githubusercontent.com/u/76263028?s=200&v=4" width="50" height="50" alt="Anthropic"/>
-<br />
-<strong>Claude Desktop</strong>
 <br />
 <code>claude-desktop</code>
 </td>
-<td align="center" width="150">
+<td align="center" width="180">
 <img src="https://www.cursor.com/brand/icon.svg" width="50" height="50" alt="Cursor"/>
-<br />
-<strong>Cursor</strong>
 <br />
 <code>cursor</code>
 </td>
-<td align="center" width="150">
+<td align="center" width="180">
 <img src="https://upload.wikimedia.org/wikipedia/commons/9/9a/Visual_Studio_Code_1.35_icon.svg" width="50" height="50" alt="VS Code"/>
-<br />
-<strong>VS Code</strong>
 <br />
 <code>vscode</code>
 </td>
-<td align="center" width="150">
+<td align="center" width="180">
 <img src="https://avatars.githubusercontent.com/u/76263028?s=200&v=4" width="50" height="50" alt="Claude Code"/>
 <br />
-<strong>Claude Code</strong>
-<br />
 <code>claude-code</code>
+</td>
+<td align="center" width="180">
+<img src="https://avatars.githubusercontent.com/u/14957082?s=200&v=4" width="50" height="50" alt="Codex"/>
+<br />
+<code>codex</code>
+</td>
+</tr>
+<tr>
+<td align="center" width="180">
+<img src="https://exafunction.github.io/public/brand/windsurf-black-symbol.svg" width="50" height="50" alt="Windsurf"/>
+<br />
+<code>windsurf</code>
+</td>
+<td align="center" width="180">
+<img src="https://avatars.githubusercontent.com/u/79345384?s=200&v=4" width="50" height="50" alt="Zed"/>
+<br />
+<code>zed</code>
+</td>
+<td align="center" width="180">
+<img src="https://avatars.githubusercontent.com/u/161781182?s=200&v=4" width="50" height="50" alt="Gemini CLI"/>
+<br />
+<code>gemini-cli</code>
+</td>
+<td align="center" width="180">
+<img src="https://avatars.githubusercontent.com/u/207925904?s=200&v=4" width="50" height="50" alt="Kiro"/>
+<br />
+<code>kiro</code>
+</td>
+<td align="center" width="180">
+<img src="https://avatars.githubusercontent.com/u/211522643?s=200&v=4" width="50" height="50" alt="Roo Code"/>
+<br />
+<code>roo-code</code>
 </td>
 </tr>
 </table>
@@ -273,7 +307,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 > tool host add cursor radical/weather       # add a tool to Cursor
 > tool host add vscode                       # add all installed tools
 > tool host remove claude-desktop            # remove tools from a host
-> tool host show cursor                      # preview the generated config
+> tool host preview cursor                   # preview the generated config
 > ```
 >
 > You can specify individual tools or omit them to register all installed tools. The command creates backups before modifying anything, so your original config is safe.
@@ -322,13 +356,6 @@ Anthropic's MCPB format solved the installation problem. Users can install MCP t
 tool-cli is that toolchain. And tool.store is that registry.
 
 The goal is simple. Make building and sharing MCP tools as easy as publishing an npm package.
-
-
-<br />
-
-<div align="center">
-    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
-</div>
 
 <br />
 
