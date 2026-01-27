@@ -67,9 +67,8 @@ Get your first MCP tool published in three steps.
 > Run `tool detect` in your project to see what tool-cli finds. Then `tool init` will generate a manifest from your existing code.
 >
 > ```sh
-> cd my_existing_mcp_project
-> tool detect        # shows detected type, transport, entry point
-> tool init          # generates manifest.json
+> tool detect my_tool      # shows detected type, transport, entry point
+> tool init my_tool        # generates manifest.json
 > ```
 > </blockquote>
 > </details>
@@ -140,6 +139,8 @@ Get your first MCP tool published in three steps.
 <br />
 
 ## Using Tools
+
+`tool-cli` essentially turns your MCP servers into CLIs. You can inspect, call, and compose tools directly from the terminal — no client needed. This is also the foundation for building [context-efficient agents](#context-efficient-agents-with-tool-cli).
 
 ### Find Tools
 

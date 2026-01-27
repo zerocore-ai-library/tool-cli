@@ -3,7 +3,7 @@
 use super::utils::{has_any_pattern, read_toml};
 use super::{
     DetectError, DetectOptions, DetectionDetails, DetectionResult, DetectionSignals,
-    GeneratedScaffold, ProjectDetector,
+    GeneratedScaffold, ProjectDetector, SignalCallback,
 };
 use crate::mcpb::{
     McpbCompatibility, McpbManifest, McpbMcpConfig, McpbPlatform, McpbServer, McpbServerType,
@@ -100,6 +100,84 @@ impl RustDetector {
         }
     }
 
+    /// Core detection logic with optional signal callback.
+    fn detect_impl(
+        &self,
+        dir: &Path,
+        on_signal: Option<SignalCallback<'_>>,
+    ) -> Option<DetectionResult> {
+        let cargo_path = dir.join("Cargo.toml");
+        if !cargo_path.exists() {
+            return None;
+        }
+
+        let cargo: CargoToml = read_toml(&cargo_path)?;
+
+        // Gather detection signals, reporting each as it's evaluated
+        let entry_from_config = cargo.bin.is_some() || cargo.package.as_ref().is_some();
+        if let Some(cb) = &on_signal {
+            cb("Entry point in config", entry_from_config, "30%");
+        }
+
+        let binary_name = self.get_binary_name(&cargo)?;
+        let platform = detect_platform();
+        let entry_point = self.get_entry_point(&binary_name, &platform);
+        let is_built = self.is_built(dir, &binary_name);
+        if let Some(cb) = &on_signal {
+            cb("Entry point exists", is_built, "20%");
+        }
+
+        let has_mcp_sdk = self.has_rmcp(&cargo);
+        if let Some(cb) = &on_signal {
+            cb("MCP SDK detected (rmcp)", has_mcp_sdk, "10%");
+        }
+
+        let has_lock_file = dir.join("Cargo.lock").exists();
+        if let Some(cb) = &on_signal {
+            cb("Lock file found", has_lock_file, "10%");
+        }
+
+        let name_from_config = cargo
+            .package
+            .as_ref()
+            .and_then(|p| p.name.as_ref())
+            .is_some();
+        if let Some(cb) = &on_signal {
+            cb("Name in config", name_from_config, "5%");
+        }
+
+        let transport = self.detect_transport(dir);
+
+        // Build detection signals
+        let signals = DetectionSignals {
+            entry_point_from_config: entry_from_config,
+            entry_point_exists: is_built,
+            has_mcp_sdk,
+            package_manager_certain: has_lock_file,
+            name_from_config,
+        };
+
+        let confidence = signals.confidence();
+        let notes = signals.warnings();
+        let command = self.get_command_path(&binary_name, &platform);
+
+        Some(DetectionResult {
+            confidence,
+            server_type: McpbServerType::Binary,
+            details: DetectionDetails {
+                entry_point: Some(entry_point),
+                script_name: None,
+                package_manager: None,
+                transport: Some(transport),
+                build_command: Some("cargo build --release".to_string()),
+                run_command: Some(command),
+                run_args: vec![],
+                notes,
+            },
+            signals,
+        })
+    }
+
     /// Check if the binary is already built.
     fn is_built(&self, dir: &Path, name: &str) -> bool {
         let release_path = dir.join(format!("target/release/{}", name));
@@ -133,67 +211,11 @@ impl ProjectDetector for RustDetector {
     }
 
     fn detect(&self, dir: &Path) -> Option<DetectionResult> {
-        let cargo_path = dir.join("Cargo.toml");
-        if !cargo_path.exists() {
-            return None;
-        }
+        self.detect_impl(dir, None)
+    }
 
-        let cargo: CargoToml = read_toml(&cargo_path)?;
-
-        // Gather detection signals
-        let has_mcp_sdk = self.has_rmcp(&cargo);
-        let binary_name = self.get_binary_name(&cargo)?;
-        let platform = detect_platform();
-        let transport = self.detect_transport(dir);
-        let entry_point = self.get_entry_point(&binary_name, &platform);
-        let is_built = self.is_built(dir, &binary_name);
-
-        // Check if entry point is from [[bin]] config
-        let entry_from_config = cargo.bin.is_some() || cargo.package.as_ref().is_some();
-
-        // Check if name comes from config
-        let name_from_config = cargo
-            .package
-            .as_ref()
-            .and_then(|p| p.name.as_ref())
-            .is_some();
-
-        // Check for lock file
-        let has_lock_file = dir.join("Cargo.lock").exists();
-
-        // Build detection signals
-        let signals = DetectionSignals {
-            entry_point_from_config: entry_from_config,
-            entry_point_exists: is_built,
-            has_mcp_sdk,
-            package_manager_certain: has_lock_file,
-            name_from_config,
-        };
-
-        // Calculate confidence from signals
-        let confidence = signals.confidence();
-
-        // Build notes from signals (includes "Entry point file not found" if !is_built)
-        let notes = signals.warnings();
-
-        // Run args for mcp_config
-        let command = self.get_command_path(&binary_name, &platform);
-
-        Some(DetectionResult {
-            confidence,
-            server_type: McpbServerType::Binary,
-            details: DetectionDetails {
-                entry_point: Some(entry_point),
-                script_name: None,
-                package_manager: None, // Rust uses cargo, not a package manager in the MCPB sense
-                transport: Some(transport),
-                build_command: Some("cargo build --release".to_string()),
-                run_command: Some(command),
-                run_args: vec![],
-                notes,
-            },
-            signals,
-        })
+    fn detect_verbose(&self, dir: &Path, on_signal: SignalCallback<'_>) -> Option<DetectionResult> {
+        self.detect_impl(dir, Some(on_signal))
     }
 
     fn generate(

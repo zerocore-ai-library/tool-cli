@@ -19,6 +19,9 @@ pub use utils::{
     FileGrepMatch, GrepOptions, grep_dir, has_any_pattern, has_pattern, parse_env_example,
 };
 
+/// Callback type for reporting detection signals as they happen.
+pub type SignalCallback<'a> = &'a dyn Fn(&str, bool, &str);
+
 //--------------------------------------------------------------------------------------------------
 // Types
 //--------------------------------------------------------------------------------------------------
@@ -60,26 +63,39 @@ impl DetectionSignals {
 
         // Critical: Entry point detection
         if !self.entry_point_from_config {
-            score -= 0.30;
+            score -= 0.24;
         }
         if !self.entry_point_exists {
-            score -= 0.20;
+            score -= 0.16;
         }
 
         // Important: SDK and package manager
         if !self.has_mcp_sdk {
-            score -= 0.10;
+            score -= 0.08;
         }
         if !self.package_manager_certain {
-            score -= 0.10;
+            score -= 0.08;
         }
 
         // Minor: Metadata quality
         if !self.name_from_config {
-            score -= 0.05;
+            score -= 0.04;
         }
 
-        score.max(0.0)
+        // Cap at 80% — static analysis alone cannot prove a working MCP server.
+        // The remaining 20% requires --verify (runtime initialization check).
+        score.clamp(0.0, 0.80)
+    }
+
+    /// Get signal items for display: (passed, label, weight as percentage string).
+    pub fn signal_items(&self) -> Vec<(bool, &'static str, &'static str)> {
+        vec![
+            (self.entry_point_from_config, "Entry point in config", "24%"),
+            (self.entry_point_exists, "Entry point exists", "16%"),
+            (self.has_mcp_sdk, "MCP SDK detected", "8%"),
+            (self.package_manager_certain, "Lock file found", "8%"),
+            (self.name_from_config, "Name in config", "4%"),
+        ]
     }
 
     /// Get warnings based on signals.
@@ -239,6 +255,17 @@ pub trait ProjectDetector: Send + Sync {
     /// Returns None if not applicable, Some(result) with confidence if applicable.
     fn detect(&self, dir: &Path) -> Option<DetectionResult>;
 
+    /// Detect with a callback that reports each signal as it's evaluated.
+    /// The callback receives (label, passed, weight_str) for each signal.
+    /// Default implementation just calls `detect()` without reporting.
+    fn detect_verbose(
+        &self,
+        dir: &Path,
+        _on_signal: SignalCallback<'_>,
+    ) -> Option<DetectionResult> {
+        self.detect(dir)
+    }
+
     /// Generate MCPB scaffolding for the detected project.
     fn generate(
         &self,
@@ -284,6 +311,36 @@ impl DetectorRegistry {
 
         for detector in &self.detectors {
             if let Some(result) = detector.detect(dir) {
+                let current_match = DetectionMatch {
+                    detector_name: detector.name(),
+                    display_name: detector.display_name(),
+                    server_type: detector.server_type(),
+                    result,
+                };
+
+                match &best {
+                    None => best = Some(current_match),
+                    Some(prev) if current_match.result.confidence > prev.result.confidence => {
+                        best = Some(current_match);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        best
+    }
+
+    /// Detect project type with verbose signal reporting.
+    pub fn detect_verbose(
+        &self,
+        dir: &Path,
+        on_signal: SignalCallback<'_>,
+    ) -> Option<DetectionMatch> {
+        let mut best: Option<DetectionMatch> = None;
+
+        for detector in &self.detectors {
+            if let Some(result) = detector.detect_verbose(dir, on_signal) {
                 let current_match = DetectionMatch {
                     detector_name: detector.name(),
                     display_name: detector.display_name(),
@@ -399,7 +456,8 @@ mod tests {
             package_manager_certain: true,
             name_from_config: true,
         };
-        assert_eq!(signals.confidence(), 1.0);
+        // Capped at 80% — runtime verification (--verify) needed for 100%
+        assert_eq!(signals.confidence(), 0.80);
     }
 
     #[test]
@@ -411,8 +469,8 @@ mod tests {
             package_manager_certain: true,
             name_from_config: true,
         };
-        // 1.0 - 0.30 = 0.70
-        assert!((signals.confidence() - 0.70).abs() < 0.001);
+        // 1.0 - 0.24 = 0.76, capped at 0.76
+        assert!((signals.confidence() - 0.76).abs() < 0.001);
     }
 
     #[test]
@@ -424,8 +482,8 @@ mod tests {
             package_manager_certain: true,
             name_from_config: true,
         };
-        // 1.0 - 0.20 = 0.80
-        assert!((signals.confidence() - 0.80).abs() < 0.001);
+        // 1.0 - 0.16 = 0.84, capped at 0.80
+        assert_eq!(signals.confidence(), 0.80);
     }
 
     #[test]
@@ -437,8 +495,8 @@ mod tests {
             package_manager_certain: true,
             name_from_config: true,
         };
-        // 1.0 - 0.10 = 0.90
-        assert!((signals.confidence() - 0.90).abs() < 0.001);
+        // 1.0 - 0.08 = 0.92, capped at 0.80
+        assert_eq!(signals.confidence(), 0.80);
     }
 
     #[test]
@@ -450,8 +508,8 @@ mod tests {
             package_manager_certain: false, // -0.10
             name_from_config: false,        // -0.05
         };
-        // 1.0 - 0.30 - 0.20 - 0.10 - 0.10 - 0.05 = 0.25
-        assert!((signals.confidence() - 0.25).abs() < 0.001);
+        // 1.0 - 0.24 - 0.16 - 0.08 - 0.08 - 0.04 = 0.40
+        assert!((signals.confidence() - 0.40).abs() < 0.001);
     }
 
     #[test]

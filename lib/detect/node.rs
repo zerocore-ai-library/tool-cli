@@ -3,7 +3,7 @@
 use super::utils::{find_first_relative, has_any_pattern, read_json};
 use super::{
     DetectError, DetectOptions, DetectionDetails, DetectionResult, DetectionSignals,
-    GeneratedScaffold, ProjectDetector,
+    GeneratedScaffold, ProjectDetector, SignalCallback,
 };
 use crate::mcpb::{
     McpbManifest, McpbMcpConfig, McpbServer, McpbServerType, McpbTransport, McpbUserConfigField,
@@ -195,6 +195,91 @@ impl NodeDetector {
         has_dep || has_dev_dep
     }
 
+    /// Core detection logic with optional signal callback.
+    fn detect_impl(
+        &self,
+        dir: &Path,
+        on_signal: Option<SignalCallback<'_>>,
+    ) -> Option<DetectionResult> {
+        let pkg_path = dir.join("package.json");
+        if !pkg_path.exists() {
+            return None;
+        }
+
+        let pkg: serde_json::Value = read_json(&pkg_path)?;
+
+        // Gather detection signals, reporting each as it's evaluated
+        let (entry_point, entry_exists, entry_from_config) = self.detect_entry_point(dir, &pkg);
+        if let Some(cb) = &on_signal {
+            cb("Entry point in config", entry_from_config, "30%");
+        }
+        if let Some(cb) = &on_signal {
+            cb("Entry point exists", entry_exists, "20%");
+        }
+
+        let has_mcp_sdk = self.has_mcp_sdk(&pkg);
+        if let Some(cb) = &on_signal {
+            cb(
+                "MCP SDK detected (@modelcontextprotocol/sdk)",
+                has_mcp_sdk,
+                "10%",
+            );
+        }
+
+        let (package_manager, has_lock_file) = self.detect_package_manager(dir);
+        if let Some(cb) = &on_signal {
+            cb("Lock file found", has_lock_file, "10%");
+        }
+
+        let name_from_config = pkg.get("name").and_then(|v| v.as_str()).is_some();
+        if let Some(cb) = &on_signal {
+            cb("Name in config", name_from_config, "5%");
+        }
+
+        let transport = self.detect_transport(dir);
+        let build_command = self.detect_build_command(dir, package_manager);
+
+        // Build detection signals
+        let signals = DetectionSignals {
+            entry_point_from_config: entry_from_config,
+            entry_point_exists: entry_exists,
+            has_mcp_sdk,
+            package_manager_certain: has_lock_file,
+            name_from_config,
+        };
+
+        let confidence = signals.confidence();
+        let mut notes = signals.warnings();
+
+        if entry_point.is_none() {
+            notes.push(
+                "Could not auto-detect entry point. Specify --entry to set it manually.".into(),
+            );
+        }
+
+        let run_args = if let Some(ref ep) = entry_point {
+            vec![format!("${{__dirname}}/{}", ep)]
+        } else {
+            vec!["${__dirname}/dist/index.js".to_string()]
+        };
+
+        Some(DetectionResult {
+            confidence,
+            server_type: McpbServerType::Node,
+            details: DetectionDetails {
+                entry_point,
+                script_name: None,
+                package_manager: Some(PackageManager::Node(package_manager)),
+                transport: Some(transport),
+                build_command: Some(build_command),
+                run_command: Some("node".to_string()),
+                run_args,
+                notes,
+            },
+            signals,
+        })
+    }
+
     /// Detect build command from package.json scripts.
     /// Returns the full build command including install + custom build script if present.
     fn detect_build_command(&self, dir: &Path, pm: NodePackageManager) -> String {
@@ -251,66 +336,11 @@ impl ProjectDetector for NodeDetector {
     }
 
     fn detect(&self, dir: &Path) -> Option<DetectionResult> {
-        let pkg_path = dir.join("package.json");
-        if !pkg_path.exists() {
-            return None;
-        }
+        self.detect_impl(dir, None)
+    }
 
-        let pkg: serde_json::Value = read_json(&pkg_path)?;
-
-        // Gather detection signals
-        let has_mcp_sdk = self.has_mcp_sdk(&pkg);
-        let (package_manager, has_lock_file) = self.detect_package_manager(dir);
-        let (entry_point, entry_exists, entry_from_config) = self.detect_entry_point(dir, &pkg);
-        let transport = self.detect_transport(dir);
-        let build_command = self.detect_build_command(dir, package_manager);
-
-        // Check if name comes from config
-        let name_from_config = pkg.get("name").and_then(|v| v.as_str()).is_some();
-
-        // Build detection signals
-        let signals = DetectionSignals {
-            entry_point_from_config: entry_from_config,
-            entry_point_exists: entry_exists,
-            has_mcp_sdk,
-            package_manager_certain: has_lock_file,
-            name_from_config,
-        };
-
-        // Calculate confidence from signals
-        let confidence = signals.confidence();
-
-        // Build notes from signals (includes "Entry point file not found" if !entry_exists)
-        let mut notes = signals.warnings();
-
-        if entry_point.is_none() {
-            notes.push(
-                "Could not auto-detect entry point. Specify --entry to set it manually.".into(),
-            );
-        }
-
-        // Determine run args
-        let run_args = if let Some(ref ep) = entry_point {
-            vec![format!("${{__dirname}}/{}", ep)]
-        } else {
-            vec!["${__dirname}/dist/index.js".to_string()]
-        };
-
-        Some(DetectionResult {
-            confidence,
-            server_type: McpbServerType::Node,
-            details: DetectionDetails {
-                entry_point,
-                script_name: None,
-                package_manager: Some(PackageManager::Node(package_manager)),
-                transport: Some(transport),
-                build_command: Some(build_command),
-                run_command: Some("node".to_string()),
-                run_args,
-                notes,
-            },
-            signals,
-        })
+    fn detect_verbose(&self, dir: &Path, on_signal: SignalCallback<'_>) -> Option<DetectionResult> {
+        self.detect_impl(dir, Some(on_signal))
     }
 
     fn generate(
@@ -525,8 +555,8 @@ mod tests {
 
         assert!(result.is_some());
         let result = result.unwrap();
-        // With deduction method: 1.0 - all signals positive = 1.0
-        assert_eq!(result.confidence, 1.0);
+        // With deduction method: all signals positive = 0.80 (capped)
+        assert_eq!(result.confidence, 0.80);
         assert!(result.signals.has_mcp_sdk);
         assert!(result.signals.entry_point_exists);
         assert!(result.signals.entry_point_from_config);

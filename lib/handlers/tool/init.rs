@@ -34,6 +34,7 @@ pub async fn init_mcpb(
     entry: Option<String>,
     transport: Option<String>,
     force: bool,
+    verify: bool,
 ) -> ToolResult<()> {
     use crate::prompt::{McpbPrefill, get_git_author_name, prompt_init_mcpb};
 
@@ -78,6 +79,7 @@ pub async fn init_mcpb(
             yes,
             force,
             path.as_deref(),
+            verify,
         )
         .await;
     }
@@ -324,6 +326,7 @@ fn is_dir_empty(dir: &Path) -> ToolResult<bool> {
 }
 
 /// Handle migration of existing project to MCPB format.
+#[allow(clippy::too_many_arguments)]
 async fn init_migrate(
     target_dir: PathBuf,
     name: Option<String>,
@@ -332,6 +335,7 @@ async fn init_migrate(
     yes: bool,
     _force: bool,
     display_path: Option<&str>,
+    verify: bool,
 ) -> ToolResult<()> {
     use crate::detect::{
         DetectOptions, DetectorRegistry, EnvConfigType, EnvVar, parse_env_example,
@@ -345,19 +349,41 @@ async fn init_migrate(
 
     let manifest_path = target_dir.join(MCPB_MANIFEST_FILE);
 
-    // Run detection
+    // Run detection with verbose signal reporting
     let registry = DetectorRegistry::new();
-    let detection = registry.detect(&target_dir).ok_or_else(|| {
-        ToolError::Generic(
-            "No MCP server project detected in this directory.\n\n    \
+
+    println!("\n    {}", "Signals".dimmed());
+    let on_signal = |label: &str, passed: bool, weight: &str| {
+        if passed {
+            println!(
+                "      {} {:<40} {}",
+                "✓".bright_green(),
+                label,
+                format!("+{}", weight).dimmed()
+            );
+        } else {
+            println!(
+                "      {} {:<40} {}",
+                "✗".bright_red(),
+                label,
+                format!("-{}", weight).bright_red()
+            );
+        }
+    };
+
+    let detection = registry
+        .detect_verbose(&target_dir, &on_signal)
+        .ok_or_else(|| {
+            ToolError::Generic(
+                "No MCP server project detected in this directory.\n\n    \
              If this is a new project, remove existing files or use an empty directory.\n\n    \
              Checked for:\n    \
              - Node.js with @modelcontextprotocol/sdk\n    \
              - Python with mcp package\n    \
              - Rust with rmcp crate"
-                .into(),
-        )
-    })?;
+                    .into(),
+            )
+        })?;
 
     // Parse transport override
     let transport_override = transport
@@ -437,6 +463,22 @@ async fn init_migrate(
     // Show build command
     if let Some(build_cmd) = &detection.result.details.build_command {
         println!("    {:<12} {}", "Build".dimmed(), build_cmd.dimmed());
+    }
+
+    // Verify: start server and send MCP initialize
+    if verify {
+        let verified =
+            super::detect_cmd::verify_server(&target_dir, &detection, transport_display, yes).await;
+        let final_confidence = if verified {
+            100.0
+        } else {
+            detection.result.confidence * 100.0
+        };
+        println!(
+            "\n    {:<12} {:.0}%",
+            "Confidence".dimmed(),
+            final_confidence
+        );
     }
 
     // Show notes/warnings
