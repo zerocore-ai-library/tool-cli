@@ -353,6 +353,7 @@ async fn run() -> ToolResult<()> {
             no_save,
             yes,
             verbose,
+            json: _,
         } => {
             handlers::tool_call(
                 tool,

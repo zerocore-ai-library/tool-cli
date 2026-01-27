@@ -212,6 +212,10 @@ async fn host_add(
         }
     }
 
+    if !yes {
+        cliclack::outro("Done!")?;
+    }
+
     Ok(())
 }
 
@@ -359,6 +363,10 @@ async fn host_remove(
         } else {
             println!();
         }
+    }
+
+    if !yes {
+        cliclack::outro("Done!")?;
     }
 
     Ok(())

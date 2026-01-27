@@ -103,11 +103,24 @@ pub struct GrepMatch {
     pub value: String,
 }
 
+/// Grep match result with path only (for -l mode).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrepMatchPathOnly {
+    pub path: Vec<String>,
+}
+
 /// Grep output containing pattern and all matches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrepOutput {
     pub pattern: String,
     pub matches: Vec<GrepMatch>,
+}
+
+/// Grep output containing pattern and paths only (for -l mode).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrepOutputPathOnly {
+    pub pattern: String,
+    pub matches: Vec<GrepMatchPathOnly>,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -270,6 +283,31 @@ impl GrepOutput {
             path,
             value: value.into(),
         });
+    }
+
+    /// Serialize to JSON string.
+    pub fn to_json(&self) -> serde_json::Result<String> {
+        serde_json::to_string(self)
+    }
+
+    /// Serialize to pretty JSON string.
+    pub fn to_json_pretty(&self) -> serde_json::Result<String> {
+        serde_json::to_string_pretty(self)
+    }
+}
+
+impl GrepOutputPathOnly {
+    /// Create a new grep output with paths only.
+    pub fn new(pattern: impl Into<String>) -> Self {
+        Self {
+            pattern: pattern.into(),
+            matches: Vec::new(),
+        }
+    }
+
+    /// Add a path match.
+    pub fn add_path(&mut self, path: Vec<String>) {
+        self.matches.push(GrepMatchPathOnly { path });
     }
 
     /// Serialize to JSON string.
