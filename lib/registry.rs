@@ -10,7 +10,6 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
 //--------------------------------------------------------------------------------------------------
@@ -208,7 +207,6 @@ impl RegistryClient {
             url,
             auth_token,
             http: Client::builder()
-                .timeout(Duration::from_secs(60))
                 .build()
                 .expect("Failed to create HTTP client"),
         }
