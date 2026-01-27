@@ -658,6 +658,47 @@ impl McpbManifest {
         self
     }
 
+    /// Returns true if this manifest requires the `.mcpbx` format.
+    ///
+    /// A manifest requires `.mcpbx` if it uses any feature beyond the base MCPB spec:
+    /// - Reference mode (no `entry_point` or no `type`)
+    /// - HTTP transport
+    /// - `system_config`
+    /// - `mcp_config.url`, `mcp_config.headers`, `mcp_config.oauth_config`
+    pub fn requires_mcpbx(&self) -> bool {
+        // Reference mode: entry_point or type absent
+        if self.server.entry_point.is_none() {
+            return true;
+        }
+        if self.server.server_type.is_none() {
+            return true;
+        }
+        // HTTP transport
+        if self.server.transport == McpbTransport::Http {
+            return true;
+        }
+        // system_config present
+        if self.system_config.is_some() {
+            return true;
+        }
+        // mcp_config extensions
+        if let Some(ref cfg) = self.server.mcp_config
+            && (cfg.url.is_some() || !cfg.headers.is_empty() || cfg.oauth_config.is_some())
+        {
+            return true;
+        }
+        false
+    }
+
+    /// Get the appropriate bundle file extension (`"mcpb"` or `"mcpbx"`).
+    pub fn bundle_extension(&self) -> &'static str {
+        if self.requires_mcpbx() {
+            "mcpbx"
+        } else {
+            "mcpb"
+        }
+    }
+
     /// Serialize to pretty-printed JSON.
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)

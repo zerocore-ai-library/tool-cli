@@ -100,6 +100,9 @@ pub struct PackResult {
 
     /// Files that were ignored.
     pub ignored_files: Vec<String>,
+
+    /// Bundle format extension (`"mcpb"` or `"mcpbx"`).
+    pub extension: String,
 }
 
 /// Options for collecting bundle files.
@@ -146,7 +149,7 @@ pub struct CollectResult {
 //--------------------------------------------------------------------------------------------------
 
 /// Built-in ignore patterns (cannot be overridden).
-const BUILTIN_IGNORES: &[&str] = &[".git", "*.mcpb"];
+const BUILTIN_IGNORES: &[&str] = &[".git", "*.mcpb", "*.mcpbx"];
 
 /// Default ignore patterns (can be overridden with !pattern in .mcpbignore).
 const DEFAULT_IGNORES: &[&str] = &[
@@ -185,12 +188,13 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
 
     let name = manifest.name.as_deref().unwrap_or("bundle");
     let version = manifest.version.as_deref().unwrap_or("0.0.0");
+    let ext = manifest.bundle_extension();
 
     // 4. Determine output path (inside the project directory)
     let output_path = options
         .output
         .clone()
-        .unwrap_or_else(|| dir.join(format!("{}-{}.mcpb", name, version)));
+        .unwrap_or_else(|| dir.join(format!("{}-{}.{}", name, version, ext)));
 
     // 5. Build ignore matcher
     let ignore_matcher = build_ignore_matcher(dir)?;
@@ -300,6 +304,7 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
         total_size,
         compressed_size,
         ignored_files,
+        extension: ext.to_string(),
     })
 }
 
@@ -559,6 +564,8 @@ mod tests {
         assert!(is_builtin_ignored(&base.join(".git/config"), base));
         assert!(is_builtin_ignored(&base.join("foo.mcpb"), base));
         assert!(is_builtin_ignored(&base.join("dist/bar.mcpb"), base));
+        assert!(is_builtin_ignored(&base.join("foo.mcpbx"), base));
+        assert!(is_builtin_ignored(&base.join("dist/bar.mcpbx"), base));
         assert!(!is_builtin_ignored(&base.join("manifest.json"), base));
         assert!(!is_builtin_ignored(&base.join("server/index.js"), base));
     }
@@ -702,7 +709,12 @@ mod tests {
         let result = pack_bundle(dir.path(), &options).unwrap();
         assert_eq!(result.file_count, 2); // manifest.json + server/index.js
         assert!(result.output_path.exists());
-        assert!(result.output_path.to_string_lossy().ends_with(".mcpb"));
+        let path_str = result.output_path.to_string_lossy();
+        assert!(
+            path_str.ends_with(".mcpb") || path_str.ends_with(".mcpbx"),
+            "expected .mcpb or .mcpbx extension, got: {}",
+            path_str
+        );
 
         // Cleanup
         std::fs::remove_file(&result.output_path).ok();

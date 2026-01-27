@@ -123,10 +123,16 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
         .await?;
 
     pb.finish_and_clear();
+    let path_str = output_path.display().to_string();
+    let colored_path = if path_str.ends_with(".mcpbx") {
+        path_str.bright_yellow()
+    } else {
+        path_str.bright_green()
+    };
     println!(
         "  {} Downloaded {} ({})",
         "✓".bright_green(),
-        output_path.display().to_string().dimmed(),
+        colored_path,
         format_size(download_size)
     );
 
@@ -254,13 +260,28 @@ pub async fn add_tool(name: &str) -> ToolResult<()> {
     // Clean up temp file
     let _ = std::fs::remove_file(&temp_file);
 
+    let is_mcpbx = McpbManifest::load(&target_dir)
+        .map(|m| m.requires_mcpbx())
+        .unwrap_or(false);
+    let format_display = if is_mcpbx {
+        "mcpbx".bright_yellow()
+    } else {
+        "mcpb".bright_green()
+    };
+    let path_display = target_dir.display().to_string();
+    let colored_path = if is_mcpbx {
+        path_display.bright_yellow()
+    } else {
+        path_display.bright_green()
+    };
     println!(
-        "  {} Installed {}/{}@{} to {}",
+        "  {} Installed {}/{}@{} ({}) to {}",
         "✓".bright_green(),
         namespace.bright_cyan(),
         tool_name.bright_cyan(),
         version.bright_cyan(),
-        target_dir.display()
+        format_display,
+        colored_path
     );
 
     Ok(())
@@ -775,12 +796,18 @@ pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
         )
         .await?;
 
+    let format_display = if manifest.requires_mcpbx() {
+        "mcpbx".bright_yellow()
+    } else {
+        "mcpb".bright_green()
+    };
     println!(
-        "\n  {} Published {}/{}@{}",
+        "\n  {} Published {}/{}@{} ({})",
         "✓".bright_green(),
         namespace.bright_blue(),
         tool_name.bright_cyan(),
-        result.version.bright_white()
+        result.version.bright_white(),
+        format_display
     );
     println!(
         "    {}/plugins/{}/{}",

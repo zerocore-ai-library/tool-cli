@@ -170,7 +170,7 @@ fn prompt_transport(prefill: Option<McpbTransport>) -> ToolResult<McpbTransport>
     let t: &str = map_cancelled(
         select("Transport")
             .item("stdio", "Stdio", "Communicate via stdin/stdout")
-            .item("http", "HTTP", "Run HTTP server, connect via HTTP")
+            .item("http", "HTTP", "Run HTTP server, connect via HTTP [mcpbx]")
             .interact(),
     )?;
     Ok(if t == "http" {
@@ -239,11 +239,11 @@ pub fn prompt_init_mcpb(
         } else {
             let t: &str = map_cancelled(
                 select("Transport")
-                    .item("http", "HTTP", "Connect to remote server via HTTP")
+                    .item("http", "HTTP", "Connect to remote server via HTTP [mcpbx]")
                     .item(
                         "stdio",
                         "Stdio",
-                        "Spawn external command, communicate via stdin/stdout",
+                        "Spawn external command, communicate via stdin/stdout [mcpbx]",
                     )
                     .interact(),
             )?;
@@ -274,7 +274,7 @@ pub fn prompt_init_mcpb(
                 .item(
                     "reference",
                     "Reference",
-                    "Point to external server (no scaffold)",
+                    "Point to external server (no scaffold) [mcpbx]",
                 )
                 .interact(),
         )?;
@@ -282,11 +282,11 @@ pub fn prompt_init_mcpb(
         if is_reference == "reference" {
             let transport: &str = map_cancelled(
                 select("Transport")
-                    .item("http", "HTTP", "Connect to remote server via HTTP")
+                    .item("http", "HTTP", "Connect to remote server via HTTP [mcpbx]")
                     .item(
                         "stdio",
                         "Stdio",
-                        "Spawn external command, communicate via stdin/stdout",
+                        "Spawn external command, communicate via stdin/stdout [mcpbx]",
                     )
                     .interact(),
             )?;
