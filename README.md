@@ -153,7 +153,7 @@ Get your first MCP tool published in three steps.
 ### Install Tools
 
 > ```sh
-> tool install appcypher/bash
+> tool install radical/bash
 > ```
 >
 > Installs a tool from the registry. You can also install from a local path.
@@ -169,7 +169,7 @@ Get your first MCP tool published in three steps.
 ### Run Tools
 
 > ```sh
-> tool run appcypher/bash
+> tool run radical/bash
 > ```
 >
 > Starts the tool with its native transport. Connect your MCP client to it.
@@ -177,8 +177,8 @@ Get your first MCP tool published in three steps.
 > You can also use `--expose` to bridge between transports.
 >
 > ```sh
-> tool run appcypher/asana --expose stdio             # HTTP backend to stdio
-> tool run appcypher/bash --expose http --port 3000   # stdio backend to HTTP
+> tool run radical/asana --expose stdio             # HTTP backend to stdio
+> tool run radical/bash --expose http --port 3000   # stdio backend to HTTP
 > ```
 
 ##
@@ -186,13 +186,13 @@ Get your first MCP tool published in three steps.
 ### Configure Tools
 
 > ```sh
-> tool config set appcypher/bash
+> tool config set radical/bash
 > ```
 >
 > Some tools need configuration like API keys. This walks you through setting them up interactively.
 >
 > ```sh
-> tool config get appcypher/bash
+> tool config get radical/bash
 > ```
 >
 > Check what config values are set.
@@ -202,13 +202,13 @@ Get your first MCP tool published in three steps.
 ### Use Tools
 
 > ```sh
-> tool info appcypher/bash
+> tool info radical/bash
 > ```
 >
 > See what a tool exposes. Tools, prompts, resources.
 >
 > ```sh
-> tool call appcypher/bash -m .exec command="echo hello"
+> tool call radical/bash -m .exec command="echo hello"
 > ```
 >
 > Call a method directly. Great for testing things out.
@@ -224,7 +224,7 @@ Get your first MCP tool published in three steps.
 Once you've installed some tools, you probably want to use them in your favorite AI app. Instead of manually editing JSON configs, just run:
 
 > ```sh
-> tool host add claude-desktop appcypher/weather
+> tool host add claude-desktop radical/weather
 > ```
 >
 > This registers the tool with the host. Works with Claude Desktop, Cursor, VS Code, and Claude Code.
@@ -270,7 +270,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 > ```sh
 > tool host list                             # see all supported hosts
-> tool host add cursor appcypher/weather     # add a tool to Cursor
+> tool host add cursor radical/weather       # add a tool to Cursor
 > tool host add vscode                       # add all installed tools
 > tool host remove claude-desktop            # remove tools from a host
 > tool host show cursor                      # preview the generated config

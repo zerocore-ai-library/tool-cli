@@ -7,8 +7,8 @@ use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
 use crate::mcp::get_tool_info;
 use crate::output::{
-    GrepOutput, path_schema_field, path_schema_field_prop, path_server, path_server_prop,
-    path_to_string, path_to_string_relative, path_tool, path_tool_prop,
+    GrepOutput, GrepOutputPathOnly, path_schema_field, path_schema_field_prop, path_server,
+    path_server_prop, path_to_string, path_to_string_relative, path_tool, path_tool_prop,
 };
 use crate::resolver::{FilePluginResolver, load_tool_from_path};
 use crate::system_config::allocate_system_config;
@@ -335,13 +335,17 @@ pub async fn grep_tool(
 
     // Output results
     if json_output {
-        output_json(pattern, &all_matches, concise);
+        output_json(pattern, &all_matches, list_only, concise);
         return Ok(());
     }
 
-    // -l mode: show unique paths only
+    // -l mode: show paths only
     if list_only {
-        output_list_only(&all_matches, concise, no_header);
+        if concise {
+            output_list_only_concise(&all_matches, no_header);
+        } else {
+            output_list_only(pattern, &all_matches);
+        }
         return Ok(());
     }
 
@@ -358,38 +362,97 @@ pub async fn grep_tool(
 }
 
 /// Output grep results as JSON using GrepOutput structure.
-fn output_json(pattern: &str, matches: &[GrepMatch], concise: bool) {
-    let mut output = GrepOutput::new(pattern);
-    for m in matches {
-        output.add_match(m.path.clone(), &m.value);
-    }
-    if concise {
-        println!("{}", output.to_json().expect("Failed to serialize JSON"));
+fn output_json(pattern: &str, matches: &[GrepMatch], list_only: bool, concise: bool) {
+    if list_only {
+        // Deduplicate paths for -l mode
+        let mut seen = std::collections::HashSet::new();
+        let mut output = GrepOutputPathOnly::new(pattern);
+        for m in matches {
+            let path_key = m.path.join("\0");
+            if seen.insert(path_key) {
+                output.add_path(m.path.clone());
+            }
+        }
+        if concise {
+            println!("{}", output.to_json().expect("Failed to serialize JSON"));
+        } else {
+            println!(
+                "{}",
+                output.to_json_pretty().expect("Failed to serialize JSON")
+            );
+        }
     } else {
-        println!(
-            "{}",
-            output.to_json_pretty().expect("Failed to serialize JSON")
-        );
+        let mut output = GrepOutput::new(pattern);
+        for m in matches {
+            output.add_match(m.path.clone(), &m.value);
+        }
+        if concise {
+            println!("{}", output.to_json().expect("Failed to serialize JSON"));
+        } else {
+            println!(
+                "{}",
+                output.to_json_pretty().expect("Failed to serialize JSON")
+            );
+        }
     }
 }
 
-/// Output unique paths only (-l mode).
-fn output_list_only(matches: &[GrepMatch], concise: bool, no_header: bool) {
+/// Output paths in tree view format (-l mode, human-readable).
+fn output_list_only(pattern: &str, matches: &[GrepMatch]) {
+    // Deduplicate paths
+    let mut seen = std::collections::HashSet::new();
+    let mut unique_matches: Vec<&GrepMatch> = Vec::new();
+    for m in matches {
+        let path_key = m.path.join("\0");
+        if seen.insert(path_key) {
+            unique_matches.push(m);
+        }
+    }
+
+    let match_count = unique_matches.len();
+    let label = if match_count == 1 { "path" } else { "paths" };
+    println!(
+        "  {} Found {} {} for pattern: {}\n",
+        "✓".bright_green(),
+        match_count.to_string().bold(),
+        label,
+        pattern.bright_white().bold()
+    );
+
+    // Group by server
+    let mut by_server: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for m in &unique_matches {
+        let server = &m.server;
+        let relative_path = if m.path.len() > 1 {
+            path_to_string_relative(&m.path[1..])
+        } else {
+            "[key]".to_string()
+        };
+        by_server.entry(server).or_default().push(relative_path);
+    }
+
+    for (server, paths) in &by_server {
+        println!("  {}", server.bright_cyan().bold());
+        for path in paths {
+            println!("    {}", path.bright_white());
+        }
+        println!();
+    }
+}
+
+/// Output paths only in concise format (-l -c mode).
+fn output_list_only_concise(matches: &[GrepMatch], no_header: bool) {
     // Collect unique paths as strings for display
     let mut paths: Vec<String> = matches.iter().map(|m| path_to_string(&m.path)).collect();
     paths.sort();
     paths.dedup();
 
-    if concise && !no_header {
+    if !no_header {
         println!("#path");
     }
 
     for path in paths {
-        if concise {
-            println!("{}", path);
-        } else {
-            println!("{}", path.bright_cyan());
-        }
+        println!("{}", path);
     }
 }
 

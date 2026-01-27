@@ -508,6 +508,10 @@ pub enum Command {
         /// Show verbose output.
         #[arg(short, long)]
         verbose: bool,
+
+        /// Output as JSON (redundant, included for consistency).
+        #[arg(long, hide = true)]
+        json: bool,
     },
 
     /// Download a tool from the registry.
