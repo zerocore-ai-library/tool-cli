@@ -54,6 +54,7 @@ pub async fn tool_call(
     no_save: bool,
     yes: bool,
     _verbose: bool,
+    json_output: bool,
     concise: bool,
 ) -> ToolResult<()> {
     // Merge -p flags and trailing args
@@ -132,6 +133,41 @@ pub async fn tool_call(
     };
 
     let is_error = result.result.is_error.unwrap_or(false);
+
+    // JSON output: raw content, no decorations
+    if json_output {
+        for content in &result.result.content {
+            match &**content {
+                rmcp::model::RawContent::Text(text) => {
+                    // Pretty-print JSON, otherwise plain text
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text.text) {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&json).unwrap_or(text.text.clone())
+                        );
+                    } else {
+                        println!("{}", text.text);
+                    }
+                }
+                rmcp::model::RawContent::Image(img) => {
+                    println!("{{\"type\":\"image\",\"bytes\":{}}}", img.data.len());
+                }
+                rmcp::model::RawContent::Audio(audio) => {
+                    println!("{{\"type\":\"audio\",\"bytes\":{}}}", audio.data.len());
+                }
+                rmcp::model::RawContent::Resource(res) => {
+                    println!("{{\"type\":\"resource\",\"resource\":{:?}}}", res.resource);
+                }
+                rmcp::model::RawContent::ResourceLink(link) => {
+                    println!("{{\"type\":\"resource_link\",\"uri\":\"{}\"}}", link.uri);
+                }
+            }
+        }
+        if is_error {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
 
     // Concise output: just raw JSON
     if concise {
