@@ -570,6 +570,10 @@ pub enum Command {
         #[arg(long)]
         no_validate: bool,
 
+        /// Treat warnings as errors.
+        #[arg(long)]
+        strict: bool,
+
         /// Include dotfiles (except .git/).
         #[arg(long)]
         include_dotfiles: bool,
@@ -628,6 +632,10 @@ pub enum Command {
         /// Validate without uploading.
         #[arg(long)]
         dry_run: bool,
+
+        /// Treat warnings as errors.
+        #[arg(long)]
+        strict: bool,
     },
 
     /// Login to the registry.

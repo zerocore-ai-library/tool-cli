@@ -2,6 +2,7 @@
 
 use crate::error::{ToolError, ToolResult};
 use crate::pack::{PackError, PackOptions, pack_bundle};
+use crate::validate::validate_manifest;
 use colored::Colorize;
 use std::path::PathBuf;
 
@@ -14,12 +15,54 @@ pub async fn pack_mcpb(
     path: Option<String>,
     output: Option<String>,
     no_validate: bool,
+    strict: bool,
     include_dotfiles: bool,
     verbose: bool,
 ) -> ToolResult<()> {
     let dir = path
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    // Strict validation: treat warnings as errors
+    if strict && !no_validate {
+        let validation = validate_manifest(&dir);
+        if !validation.is_strict_valid() {
+            println!("  {} Validation failed (strict)\n", "✗".bright_red());
+
+            for issue in validation.errors.iter().chain(validation.warnings.iter()) {
+                println!(
+                    "  {}: → {}",
+                    format!("error[{}]", issue.code).bright_red().bold(),
+                    issue.location.bold()
+                );
+                if let Some(help) = &issue.help {
+                    println!("      {} {}", "├─".dimmed(), issue.details.dimmed());
+                    println!(
+                        "      {} {}: {}",
+                        "└─".dimmed(),
+                        "help".bright_green().dimmed(),
+                        help.dimmed()
+                    );
+                } else {
+                    println!("      {} {}", "└─".dimmed(), issue.details.dimmed());
+                }
+                println!();
+            }
+
+            let total = validation.errors.len() + validation.warnings.len();
+            println!(
+                "  {} {}",
+                "✗".bright_red(),
+                if total == 1 {
+                    "1 error".to_string()
+                } else {
+                    format!("{} errors", total)
+                }
+            );
+            println!("\n  Cannot pack with --strict. Fix errors and warnings, then retry.");
+            std::process::exit(1);
+        }
+    }
 
     let options = PackOptions {
         output: output.map(PathBuf::from),

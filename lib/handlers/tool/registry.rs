@@ -68,8 +68,11 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
     // Get bundle size from version info (may be None for older versions)
     let bundle_size = version_info.bundle_size.unwrap_or(0);
 
+    // Use bundle_format from API response, default to "mcpb" for older versions
+    let ext = version_info.bundle_format.as_deref().unwrap_or("mcpb");
+
     // Determine output path
-    let bundle_name = format!("{}@{}.mcpb", tool_name, version);
+    let bundle_name = format!("{}@{}.{}", tool_name, version, ext);
     let output_path = match output {
         Some(p) => {
             let path = PathBuf::from(p);
@@ -605,9 +608,10 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
 }
 
 /// Publish a tool to the registry.
-pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
+pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult<()> {
     use crate::handlers::auth::{get_registry_token, load_credentials};
     use crate::pack::{PackOptions, pack_bundle};
+    use crate::validate::validate_manifest;
     use sha2::{Digest, Sha256};
 
     // Resolve the directory
@@ -691,6 +695,45 @@ pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
         println!("    {}: {}", "Description".dimmed(), desc.dimmed());
     }
 
+    // Strict validation: treat warnings as errors
+    if strict {
+        let validation = validate_manifest(&dir);
+        if !validation.is_strict_valid() {
+            println!();
+            let total = validation.errors.len() + validation.warnings.len();
+            for issue in validation.errors.iter().chain(validation.warnings.iter()) {
+                println!(
+                    "  {}: → {}",
+                    format!("error[{}]", issue.code).bright_red().bold(),
+                    issue.location.bold()
+                );
+                if let Some(help) = &issue.help {
+                    println!("      {} {}", "├─".dimmed(), issue.details.dimmed());
+                    println!(
+                        "      {} {}: {}",
+                        "└─".dimmed(),
+                        "help".bright_green().dimmed(),
+                        help.dimmed()
+                    );
+                } else {
+                    println!("      {} {}", "└─".dimmed(), issue.details.dimmed());
+                }
+                println!();
+            }
+            println!(
+                "  {} {}",
+                "✗".bright_red(),
+                if total == 1 {
+                    "1 error".to_string()
+                } else {
+                    format!("{} errors", total)
+                }
+            );
+            println!("\n  Cannot publish with --strict. Fix errors and warnings, then retry.");
+            std::process::exit(1);
+        }
+    }
+
     // Bundle the tool
     println!("\n    {} Creating bundle...", "→".bright_blue());
     let pack_options = PackOptions {
@@ -754,9 +797,21 @@ pub async fn publish_mcpb(path: &str, dry_run: bool) -> ToolResult<()> {
     let sha256 = format!("{:x}", hasher.finalize());
 
     // Initiate upload
-    println!("\n    {} Uploading bundle...", "→".bright_blue());
+    let bundle_format = manifest.bundle_extension();
+    println!(
+        "\n    {} Uploading bundle ({})...",
+        "→".bright_blue(),
+        bundle_format
+    );
     let upload_info = client
-        .init_upload(&namespace, tool_name, version, bundle_size, &sha256)
+        .init_upload(
+            &namespace,
+            tool_name,
+            version,
+            bundle_size,
+            &sha256,
+            bundle_format,
+        )
         .await?;
 
     // Create progress bar for upload

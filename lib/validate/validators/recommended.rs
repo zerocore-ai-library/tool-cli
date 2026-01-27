@@ -54,6 +54,19 @@ pub fn validate_recommended_fields(
         });
     }
 
+    // Check .mcpbignore
+    if !dir.join(".mcpbignore").exists() {
+        result.warnings.push(ValidationIssue {
+            code: WarningCode::MissingMcpbIgnore.into(),
+            message: "missing .mcpbignore".into(),
+            location: dir.display().to_string(),
+            details: "no .mcpbignore found, bundling files that are typically excluded".into(),
+            help: Some(
+                "create a .mcpbignore file to exclude unnecessary files from the bundle".into(),
+            ),
+        });
+    }
+
     // Check dependencies bundled (only for bundled tools with server type)
     match manifest.server.server_type {
         Some(McpbServerType::Node) => {

@@ -119,6 +119,8 @@ pub struct VersionInfo {
     pub bundle_size: Option<u64>,
     /// Bundle checksum.
     pub bundle_checksum: Option<String>,
+    /// Bundle format: "mcpb" or "mcpbx".
+    pub bundle_format: Option<String>,
 }
 
 /// Upload initiation response.
@@ -144,6 +146,7 @@ struct UploadInitRequest {
     version: String,
     bundle_size: u64,
     sha256: String,
+    bundle_format: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -558,6 +561,7 @@ impl RegistryClient {
         version: &str,
         bundle_size: u64,
         sha256: &str,
+        bundle_format: &str,
     ) -> ToolResult<UploadInitResponse> {
         let token = self
             .auth_token
@@ -573,6 +577,7 @@ impl RegistryClient {
             version: version.to_string(),
             bundle_size,
             sha256: sha256.to_string(),
+            bundle_format: bundle_format.to_string(),
         };
 
         let response = self
