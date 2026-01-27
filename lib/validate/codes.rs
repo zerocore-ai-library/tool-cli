@@ -158,6 +158,10 @@ pub enum WarningCode {
     /// W016: compatibility.platforms doesn't match platform_overrides keys.
     #[serde(rename = "W016")]
     CompatibilityPlatformMismatch,
+
+    /// W017: No .mcpbignore file found.
+    #[serde(rename = "W017")]
+    MissingMcpbIgnore,
 }
 
 /// A validation code that can be either an error or warning.
@@ -220,6 +224,7 @@ impl fmt::Display for WarningCode {
             WarningCode::PlatformAlignmentMismatch => "W014",
             WarningCode::BinaryOverridePathNotFound => "W015",
             WarningCode::CompatibilityPlatformMismatch => "W016",
+            WarningCode::MissingMcpbIgnore => "W017",
         };
         write!(f, "{}", code)
     }

@@ -279,9 +279,12 @@ async fn run() -> ToolResult<()> {
             path,
             output,
             no_validate,
+            strict,
             include_dotfiles,
             verbose,
-        } => handlers::pack_mcpb(path, output, no_validate, include_dotfiles, verbose).await,
+        } => {
+            handlers::pack_mcpb(path, output, no_validate, strict, include_dotfiles, verbose).await
+        }
 
         Command::Run {
             tool,
@@ -397,9 +400,11 @@ async fn run() -> ToolResult<()> {
             handlers::search_tools(&query, cli.concise, cli.no_header).await
         }
 
-        Command::Publish { path, dry_run } => {
-            handlers::publish_mcpb(path.as_deref().unwrap_or("."), dry_run).await
-        }
+        Command::Publish {
+            path,
+            dry_run,
+            strict,
+        } => handlers::publish_mcpb(path.as_deref().unwrap_or("."), dry_run, strict).await,
 
         Command::Login { token } => handlers::auth_login(token.as_deref()).await,
 

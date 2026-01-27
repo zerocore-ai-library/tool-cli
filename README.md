@@ -11,7 +11,6 @@
   <video autoplay src="https://github.com/user-attachments/assets/23618f92-5897-44d1-bfa6-1058f30c09ef" width="800" controls></video>
 </div>
 
-
 <br />
 
 <div align='center'>
@@ -68,8 +67,12 @@ Get your first MCP tool published in three steps.
 >
 > ```sh
 > tool detect my_tool      # shows detected type, transport, entry point
+> ```
+>
+> ```sh
 > tool init my_tool        # generates manifest.json
 > ```
+>
 > </blockquote>
 > </details>
 
@@ -96,8 +99,12 @@ Get your first MCP tool published in three steps.
 >
 > ```sh
 > tool call bash -m .exec command="ls -la"     # expands to bash__exec
+> ```
+>
+> ```sh
 > tool call files -m .fs.read path="/tmp"      # expands to files__fs__read
 > ```
+>
 > </blockquote>
 > </details>
 >
@@ -115,7 +122,10 @@ Get your first MCP tool published in three steps.
 
 > ```sh
 > tool login
-> tool publish my_tool
+> ```
+>
+> ```sh
+> tool publish my_tool --strict
 > ```
 >
 > Log in once, then publish. Now anyone can install your tool.
@@ -129,6 +139,7 @@ Get your first MCP tool published in three steps.
 > ```
 >
 > Creates a `.mcpb` or `.mcpbx` file you can distribute yourself.
+>
 > </blockquote>
 > </details>
 
@@ -155,7 +166,6 @@ Get your first MCP tool published in three steps.
 > ```
 >
 > Search across all installed tools - server names, tool names, descriptions, and schema fields. Returns matches with JavaScript accessor paths so you can locate exactly where the match occurred.
-
 
 ##
 
@@ -187,6 +197,9 @@ Get your first MCP tool published in three steps.
 >
 > ```sh
 > tool run radical/asana --expose stdio             # HTTP backend to stdio
+> ```
+>
+> ```sh
 > tool run radical/bash --expose http --port 3000   # stdio backend to HTTP
 > ```
 
@@ -239,7 +252,6 @@ Once you've installed some tools, you probably want to use them in your favorite
 > This registers the tool with the host. Works with Claude Desktop, Cursor, VS Code, Claude Code, Codex, Windsurf, Zed, Gemini CLI, Kiro, and Roo Code.
 
 <br />
-
 
 <div align="center">
 <table>
@@ -320,7 +332,6 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 ## Context-Efficient Agents with tool-cli
 
-
 <br />
 
 <div align='center'>• • •</div>
@@ -329,26 +340,42 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 ## Commands
 
-| Command | What it does |
-|---------|--------------|
-| `init` | Create a new tool or convert an existing MCP server |
-| `detect` | Scan a project and show what tool-cli finds |
-| `validate` | Check your manifest for errors |
-| `info` | Show what a tool exposes |
-| `call` | Call a tool method directly |
-| `run` | Start a tool as a server |
-| `pack` | Bundle into a `.mcpb` or `.mcpbx` file |
-| `publish` | Upload to the registry |
-| `install` | Install a tool from the registry |
-| `uninstall` | Remove an installed tool |
-| `list` | Show installed tools |
-| `search` | Find tools in the registry |
-| `grep` | Search tool schemas by pattern |
-| `config` | Manage tool configuration |
-| `host` | Register tools with MCP hosts |
-| `login` | Log in to the registry |
+| Command     | What it does                                        |
+| ----------- | --------------------------------------------------- |
+| `init`      | Create a new tool or convert an existing MCP server |
+| `detect`    | Scan a project and show what tool-cli finds         |
+| `validate`  | Check your manifest for errors                      |
+| `info`      | Show what a tool exposes                            |
+| `call`      | Call a tool method directly                         |
+| `run`       | Start a tool as a server                            |
+| `pack`      | Bundle into a `.mcpb` or `.mcpbx` file              |
+| `publish`   | Upload to the registry                              |
+| `install`   | Install a tool from the registry                    |
+| `uninstall` | Remove an installed tool                            |
+| `list`      | Show installed tools                                |
+| `search`    | Find tools in the registry                          |
+| `grep`      | Search tool schemas by pattern                      |
+| `config`    | Manage tool configuration                           |
+| `host`      | Register tools with MCP hosts                       |
+| `login`     | Log in to the registry                              |
 
 Check out the [CLI docs](https://tool.store/docs/cli) for the full details.
+
+<br />
+
+<div align='center'>• • •</div>
+
+<br />
+
+## Why This Exists
+
+MCP is becoming the standard for AI tool integration. But standards only matter if people can actually use them.
+
+Anthropic's MCPB format solved the installation problem. Users can install MCP tools with one click now. But developers still need to create those packages. They need to validate manifests, bundle dependencies, test locally, and publish somewhere discoverable.
+
+tool-cli is that toolchain. And tool.store is that registry.
+
+The goal is simple. Make building and sharing MCP tools as easy as publishing an npm package.
 
 <br />
 
@@ -370,21 +397,6 @@ The separate file extension exists so hosts know upfront whether they can handle
 
 <br />
 
-## Why This Exists
+## Licensing
 
-MCP is becoming the standard for AI tool integration. But standards only matter if people can actually use them.
-
-Anthropic's MCPB format solved the installation problem. Users can install MCP tools with one click now. But developers still need to create those packages. They need to validate manifests, bundle dependencies, test locally, and publish somewhere discoverable.
-
-tool-cli is that toolchain. And tool.store is that registry.
-
-The goal is simple. Make building and sharing MCP tools as easy as publishing an npm package.
-
-<br />
-
-
-## Links
-
-- [tool.store](https://tool.store) — MCP tool registry
-- [MCPB Specification](https://github.com/modelcontextprotocol/mcpb) — the bundle format
-- [MCP Protocol](https://modelcontextprotocol.io) — the Model Context Protocol docs
+`tool-cli` is licensed under the [Apache 2.0 License](LICENSE).
