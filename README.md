@@ -240,78 +240,59 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 <br />
 
+
 <div align="center">
 <table>
 <tr>
-<td align="center" width="120">
+<td align="center" width="180">
 <img src="https://avatars.githubusercontent.com/u/76263028?s=200&v=4" width="50" height="50" alt="Anthropic"/>
-<br />
-<strong>Claude Desktop</strong>
 <br />
 <code>claude-desktop</code>
 </td>
-<td align="center" width="120">
+<td align="center" width="180">
 <img src="https://www.cursor.com/brand/icon.svg" width="50" height="50" alt="Cursor"/>
-<br />
-<strong>Cursor</strong>
 <br />
 <code>cursor</code>
 </td>
-<td align="center" width="120">
+<td align="center" width="180">
 <img src="https://upload.wikimedia.org/wikipedia/commons/9/9a/Visual_Studio_Code_1.35_icon.svg" width="50" height="50" alt="VS Code"/>
-<br />
-<strong>VS Code</strong>
 <br />
 <code>vscode</code>
 </td>
-<td align="center" width="120">
+<td align="center" width="180">
 <img src="https://avatars.githubusercontent.com/u/76263028?s=200&v=4" width="50" height="50" alt="Claude Code"/>
-<br />
-<strong>Claude Code</strong>
 <br />
 <code>claude-code</code>
 </td>
-<td align="center" width="120">
+<td align="center" width="180">
 <img src="https://avatars.githubusercontent.com/u/14957082?s=200&v=4" width="50" height="50" alt="Codex"/>
-<br />
-<strong>Codex</strong>
 <br />
 <code>codex</code>
 </td>
 </tr>
 <tr>
-<td align="center" width="120">
-<img src="https://avatars.githubusercontent.com/u/51174506?s=200&v=4" width="50" height="50" alt="Windsurf"/>
-<br />
-<strong>Windsurf</strong>
+<td align="center" width="180">
+<img src="https://exafunction.github.io/public/brand/windsurf-black-symbol.svg" width="50" height="50" alt="Windsurf"/>
 <br />
 <code>windsurf</code>
 </td>
-<td align="center" width="120">
+<td align="center" width="180">
 <img src="https://avatars.githubusercontent.com/u/79345384?s=200&v=4" width="50" height="50" alt="Zed"/>
-<br />
-<strong>Zed</strong>
 <br />
 <code>zed</code>
 </td>
-<td align="center" width="120">
+<td align="center" width="180">
 <img src="https://avatars.githubusercontent.com/u/161781182?s=200&v=4" width="50" height="50" alt="Gemini CLI"/>
-<br />
-<strong>Gemini CLI</strong>
 <br />
 <code>gemini-cli</code>
 </td>
-<td align="center" width="120">
+<td align="center" width="180">
 <img src="https://avatars.githubusercontent.com/u/207925904?s=200&v=4" width="50" height="50" alt="Kiro"/>
-<br />
-<strong>Kiro</strong>
 <br />
 <code>kiro</code>
 </td>
-<td align="center" width="120">
+<td align="center" width="180">
 <img src="https://avatars.githubusercontent.com/u/211522643?s=200&v=4" width="50" height="50" alt="Roo Code"/>
-<br />
-<strong>Roo Code</strong>
 <br />
 <code>roo-code</code>
 </td>
