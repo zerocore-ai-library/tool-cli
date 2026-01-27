@@ -509,8 +509,8 @@ pub enum Command {
         #[arg(short, long)]
         verbose: bool,
 
-        /// Output as JSON (redundant, included for consistency).
-        #[arg(long, hide = true)]
+        /// Output raw content without decorations.
+        #[arg(long)]
         json: bool,
     },
 

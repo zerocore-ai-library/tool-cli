@@ -98,8 +98,6 @@ Example output:
 {"result_key":"result_value",...}
 ```
 
-However unlike `tool grep` and `tool info`, `tool call` may return a json or plain text depending on the tool implementation. Usually if the tool has an output schema defined, it will return json. Because of this, there is no explicit `--json` flag for `tool call`.
-
 
 # Optimizations
 
