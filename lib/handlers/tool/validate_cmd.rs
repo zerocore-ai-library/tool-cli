@@ -1,6 +1,7 @@
 //! Tool validation command handlers.
 
 use crate::error::ToolResult;
+use crate::mcpb::McpbManifest;
 use crate::validate::{ValidationResult, validate_manifest};
 use colored::Colorize;
 use std::path::PathBuf;
@@ -22,24 +23,28 @@ pub async fn validate_mcpb(
 
     let result = validate_manifest(&dir);
     let format_name = "manifest.json";
+    let is_mcpbx = McpbManifest::load(&dir)
+        .map(|m| m.requires_mcpbx())
+        .unwrap_or(false);
 
     if json_output {
-        output_json(&result, format_name)?;
+        output_json(&result, format_name, is_mcpbx)?;
         return check_exit_status(&result, strict);
     }
 
     if quiet {
         output_quiet(&result);
     } else {
-        output_full(&result, strict, format_name);
+        output_full(&result, strict, format_name, is_mcpbx);
     }
 
     check_exit_status(&result, strict)
 }
 
 /// Output validation result as JSON.
-fn output_json(result: &ValidationResult, format_name: &str) -> ToolResult<()> {
+fn output_json(result: &ValidationResult, format_name: &str, is_mcpbx: bool) -> ToolResult<()> {
     let output = serde_json::json!({
+        "bundle_format": if is_mcpbx { "mcpbx" } else { "mcpb" },
         "format": format_name,
         "valid": result.is_valid(),
         "strict_valid": result.is_strict_valid(),
@@ -79,8 +84,13 @@ fn output_quiet(result: &ValidationResult) {
 }
 
 /// Output validation result in full format.
-fn output_full(result: &ValidationResult, strict: bool, format_name: &str) {
-    println!("  Validating {}\n", format_name.bold());
+fn output_full(result: &ValidationResult, strict: bool, format_name: &str, is_mcpbx: bool) {
+    let format_display = if is_mcpbx {
+        "mcpbx".bright_yellow()
+    } else {
+        "mcpb".bright_green()
+    };
+    println!("  Validating {} ({})\n", format_name.bold(), format_display);
 
     let all_issues: Vec<_> = if strict {
         result

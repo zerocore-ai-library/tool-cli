@@ -27,7 +27,7 @@
 
 > [MCP](https://github.com/modelcontextprotocol) solved how AI agents integrate with other systems. [MCPB](https://github.com/modelcontextprotocol/mcpb) solved how users install them. But if you're building MCP tools, you're still copying JSON configs, wrestling with dependencies, and manually testing against clients.
 >
-> `tool-cli` is the missing piece. It handles the entire lifecycle, from scaffolding to publishing, so you can focus on developing your tool.
+> `tool-cli` is the missing piece. It handles the entire lifecycle from scaffolding to publishing, so you can focus on building your tool.
 
 <br />
 
@@ -101,6 +101,14 @@ Get your first MCP tool published in three steps.
 > ```
 > </blockquote>
 > </details>
+>
+> <br />
+>
+> ```sh
+> tool run my_tool
+> ```
+>
+> Starts the mcp server for connection.
 
 ##
 
@@ -121,7 +129,7 @@ Get your first MCP tool published in three steps.
 > tool pack
 > ```
 >
-> Creates a `.mcpb` file you can distribute yourself.
+> Creates a `.mcpb` or `.mcpbx` file you can distribute yourself.
 > </blockquote>
 > </details>
 
@@ -219,15 +227,6 @@ Get your first MCP tool published in three steps.
 
 <br />
 
-## Context-Efficient Agents with tool-cli
-
-
-<br />
-
-<div align='center'>• • •</div>
-
-<br />
-
 ## Host Integration
 
 Once you've installed some tools, you probably want to use them in your favorite AI app. Instead of manually editing JSON configs, just run:
@@ -318,6 +317,15 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 <br />
 
+## Context-Efficient Agents with tool-cli
+
+
+<br />
+
+<div align='center'>• • •</div>
+
+<br />
+
 ## Commands
 
 | Command | What it does |
@@ -328,7 +336,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 | `info` | Show what a tool exposes |
 | `call` | Call a tool method directly |
 | `run` | Start a tool as a server |
-| `pack` | Bundle into a `.mcpb` file |
+| `pack` | Bundle into a `.mcpb` or `.mcpbx` file |
 | `publish` | Upload to the registry |
 | `install` | Install a tool from the registry |
 | `uninstall` | Remove an installed tool |
@@ -340,6 +348,20 @@ Once you've installed some tools, you probably want to use them in your favorite
 | `login` | Log in to the registry |
 
 Check out the [CLI docs](https://tool.store/docs/cli) for the full details.
+
+<br />
+
+<div align='center'>• • •</div>
+
+<br />
+
+## The MCPB Extension
+
+[MCPB](https://github.com/modelcontextprotocol/mcpb) is great for what it was designed for: bundled servers that run locally over stdio. But most MCP servers today run via `npx` or `uvx` (nothing to bundle), some are remote HTTP servers (no local code at all), and some need things like host-managed ports or OAuth flows that the spec doesn't cover.
+
+We created [MCPBX](https://github.com/anthropics/mcpb/blob/main/MANIFEST.md) (`.mcpbx`) to fill those gaps. It's a superset of MCPB that adds HTTP transport, reference mode (so you can point to `npx`/`uvx` or a remote URL instead of bundling code), system config for host-managed resources, OAuth config, and template functions for constructing auth headers.
+
+The separate file extension exists so hosts know upfront whether they can handle the manifest. `tool pack` picks the right format automatically based on what your manifest uses.
 
 <br />
 
@@ -362,6 +384,6 @@ The goal is simple. Make building and sharing MCP tools as easy as publishing an
 
 ## Links
 
-- [tool.store](https://tool.store) is the MCP tool registry
-- [MCPB Specification](https://github.com/modelcontextprotocol/mcpb) is the bundle format
-- [MCP Protocol](https://modelcontextprotocol.io) has the Model Context Protocol docs
+- [tool.store](https://tool.store) — MCP tool registry
+- [MCPB Specification](https://github.com/modelcontextprotocol/mcpb) — the bundle format
+- [MCP Protocol](https://modelcontextprotocol.io) — the Model Context Protocol docs

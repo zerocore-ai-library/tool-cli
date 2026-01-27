@@ -633,11 +633,27 @@ async fn init_migrate(
     let mcpbignore_path = target_dir.join(".mcpbignore");
     std::fs::write(&mcpbignore_path, &scaffold.mcpbignore)?;
 
-    println!("\n  {} Created manifest.json", "✓".bright_green());
+    let is_mcpbx = scaffold.manifest.requires_mcpbx();
+    let format_display = if is_mcpbx {
+        "mcpbx".bright_yellow()
+    } else {
+        "mcpb".bright_green()
+    };
+    println!(
+        "\n  {} Created manifest.json ({})",
+        "✓".bright_green(),
+        format_display
+    );
     println!("  {} Created .mcpbignore", "✓".bright_green());
 
     // Print next steps
-    print_migrate_next_steps(&detection, &target_dir, entry_display, display_path);
+    print_migrate_next_steps(
+        &detection,
+        &target_dir,
+        entry_display,
+        display_path,
+        is_mcpbx,
+    );
 
     Ok(())
 }
@@ -648,6 +664,7 @@ fn print_migrate_next_steps(
     target_dir: &Path,
     entry_display: Option<&String>,
     display_path: Option<&str>,
+    is_mcpbx: bool,
 ) {
     println!("\n  {}:", "Next steps".bold());
 
@@ -683,10 +700,16 @@ fn print_migrate_next_steps(
     );
     step += 1;
 
+    let pack_ext = if is_mcpbx {
+        ".mcpbx".bright_yellow().to_string()
+    } else {
+        ".mcpb".bright_green().to_string()
+    };
     println!(
-        "    {}. {}",
+        "    {}. {}  {}",
         step,
         format!("tool pack {}", display_path).bright_white(),
+        format!("# create {} bundle", pack_ext).dimmed(),
     );
 }
 
@@ -749,9 +772,15 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
     };
 
     let transport_display = if mode.is_http() { "http" } else { "stdio" };
+    let is_mcpbx = mode.is_reference() || mode.is_http();
 
     println!("    {}       {}", "Type".dimmed(), type_display);
     println!("    {}  {}", "Transport".dimmed(), transport_display);
+    if is_mcpbx {
+        println!("    {}     {}", "Format".dimmed(), "mcpbx".bright_yellow());
+    } else {
+        println!("    {}     {}", "Format".dimmed(), "mcpb".bright_green());
+    }
 
     if !mode.is_reference() {
         if is_rust {
@@ -873,10 +902,15 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
             step + 3,
             "# run server interactively".dimmed()
         );
+        let pack_hint = if is_mcpbx {
+            format!("# create {} bundle", ".mcpbx".bright_yellow())
+        } else {
+            format!("# create {} bundle", ".mcpb".bright_green())
+        };
         println!(
             "    {}. tool pack               {}",
             step + 4,
-            "# create .mcpb bundle".dimmed()
+            pack_hint.dimmed()
         );
     } else {
         println!(
@@ -899,10 +933,15 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
             step + 3,
             "# run server interactively".dimmed()
         );
+        let pack_hint = if is_mcpbx {
+            format!("# create {} bundle", ".mcpbx".bright_yellow())
+        } else {
+            format!("# create {} bundle", ".mcpb".bright_green())
+        };
         println!(
             "    {}. tool pack               {}",
             step + 4,
-            "# create .mcpb bundle".dimmed()
+            pack_hint.dimmed()
         );
     }
 }

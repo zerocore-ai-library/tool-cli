@@ -45,10 +45,16 @@ pub async fn pack_mcpb(
                 }
             }
 
+            let path_display = result.output_path.display().to_string();
+            let colored_path = if result.extension == "mcpbx" {
+                path_display.bright_yellow()
+            } else {
+                path_display.bright_green()
+            };
             println!(
                 "  {} Created {} ({})",
                 "✓".bright_green(),
-                result.output_path.display(),
+                colored_path,
                 format_size(result.compressed_size)
             );
             println!(

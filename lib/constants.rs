@@ -13,6 +13,12 @@ use std::sync::LazyLock;
 /// The manifest file name for MCPB bundles.
 pub const MCPB_MANIFEST_FILE: &str = "manifest.json";
 
+/// File extension for standard MCPB bundles.
+pub const MCPB_EXT: &str = "mcpb";
+
+/// File extension for MCPB extended bundles (reference mode, HTTP, system_config, etc.).
+pub const MCPBX_EXT: &str = "mcpbx";
+
 /// Default registry URL.
 pub const DEFAULT_REGISTRY_URL: &str = "https://tool.store";
 
