@@ -315,25 +315,25 @@ def get_model(provider: str | None = None):
             raise ValueError("ANTHROPIC_API_KEY not set")
         from langchain_anthropic import ChatAnthropic
         model_id = "claude-sonnet-4-5-20250929"
-        return ChatAnthropic(model=model_id), "Claude Sonnet", "claude", model_id
+        return ChatAnthropic(model=model_id, temperature=0), "Claude Sonnet", "claude", model_id
 
     if provider == "openai":
         if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY not set")
         from langchain_openai import ChatOpenAI
-        model_id = "gpt-4o"
-        return ChatOpenAI(model=model_id), "GPT-4o", "openai", model_id
+        model_id = "gpt-5.2"
+        return ChatOpenAI(model=model_id, temperature=0), "GPT-5.2", "openai", model_id
 
     # Auto-detect from available keys
     if os.getenv("ANTHROPIC_API_KEY"):
         from langchain_anthropic import ChatAnthropic
         model_id = "claude-sonnet-4-5-20250929"
-        return ChatAnthropic(model=model_id), "Claude Sonnet", "claude", model_id
+        return ChatAnthropic(model=model_id, temperature=0), "Claude Sonnet", "claude", model_id
 
     if os.getenv("OPENAI_API_KEY"):
         from langchain_openai import ChatOpenAI
-        model_id = "gpt-4o"
-        return ChatOpenAI(model=model_id), "GPT-4o", "openai", model_id
+        model_id = "gpt-5.2"
+        return ChatOpenAI(model=model_id, temperature=0), "GPT-5.2", "openai", model_id
 
     raise ValueError("Set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable")
 
