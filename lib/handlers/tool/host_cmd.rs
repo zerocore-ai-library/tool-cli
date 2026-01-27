@@ -6,8 +6,8 @@ use serde_json::json;
 use crate::commands::HostCommand;
 use crate::error::{ToolError, ToolResult};
 use crate::hosts::{
-    McpHost, create_backup, generate_server_entry, load_config, load_metadata, save_config,
-    save_metadata, tool_ref_to_server_name,
+    McpHost, create_backup, generate_codex_server_entry, generate_server_entry, load_config,
+    load_metadata, save_config, save_metadata, tool_ref_to_server_name,
 };
 use crate::prompt::init_theme;
 use crate::resolver::FilePluginResolver;
@@ -37,7 +37,7 @@ pub async fn handle_host_command(
             yes,
         } => host_remove(&host, tools, dry_run, yes, concise).await,
         HostCommand::List => host_list(concise, no_header).await,
-        HostCommand::Show { host, tools } => host_show(&host, tools, concise).await,
+        HostCommand::Preview { host, tools } => host_preview(&host, tools, concise).await,
         HostCommand::Path { host } => host_path(&host).await,
     }
 }
@@ -103,8 +103,12 @@ async fn host_add(
             continue;
         }
 
-        let entry = generate_server_entry(tool_ref, &host);
-        servers.insert(server_name, serde_json::to_value(&entry)?);
+        let entry = if matches!(host, McpHost::Codex) {
+            generate_codex_server_entry(tool_ref)
+        } else {
+            generate_server_entry(tool_ref, &host)
+        };
+        servers.insert(server_name, entry);
 
         if !metadata.managed_tools.contains(tool_ref) {
             metadata.managed_tools.push(tool_ref.clone());
@@ -192,6 +196,10 @@ async fn host_add(
     save_config(&host, &config)?;
     save_metadata(&host, &metadata)?;
 
+    if !yes {
+        cliclack::outro("Done!")?;
+    }
+
     // Output result
     if concise {
         println!("ok\t{}", added.len());
@@ -212,10 +220,6 @@ async fn host_add(
         }
     }
 
-    if !yes {
-        cliclack::outro("Done!")?;
-    }
-
     Ok(())
 }
 
@@ -233,11 +237,14 @@ async fn host_remove(
     let mut config = load_config(&host)?;
     let mut metadata = load_metadata(&host)?;
 
-    // Determine tools to remove
+    // Determine tools to remove (only allow removing tools managed by tool-cli)
     let tools_to_remove = if tools.is_empty() {
         metadata.managed_tools.clone()
     } else {
         tools
+            .into_iter()
+            .filter(|t| metadata.managed_tools.contains(t))
+            .collect()
     };
 
     if tools_to_remove.is_empty() {
@@ -345,6 +352,10 @@ async fn host_remove(
     save_config(&host, &config)?;
     save_metadata(&host, &metadata)?;
 
+    if !yes {
+        cliclack::outro("Done!")?;
+    }
+
     // Output result
     if concise {
         println!("ok\t{}", removed.len());
@@ -363,10 +374,6 @@ async fn host_remove(
         } else {
             println!();
         }
-    }
-
-    if !yes {
-        cliclack::outro("Done!")?;
     }
 
     Ok(())
@@ -420,8 +427,8 @@ async fn host_list(concise: bool, no_header: bool) -> ToolResult<()> {
     Ok(())
 }
 
-/// Show the config that would be generated.
-async fn host_show(host_name: &str, tools: Vec<String>, concise: bool) -> ToolResult<()> {
+/// Preview the config that would be generated.
+async fn host_preview(host_name: &str, tools: Vec<String>, concise: bool) -> ToolResult<()> {
     let host = McpHost::parse(host_name)?;
 
     let tools_to_show = if tools.is_empty() {
@@ -433,8 +440,12 @@ async fn host_show(host_name: &str, tools: Vec<String>, concise: bool) -> ToolRe
     let mut servers = serde_json::Map::new();
     for tool_ref in &tools_to_show {
         let server_name = tool_ref_to_server_name(tool_ref);
-        let entry = generate_server_entry(tool_ref, &host);
-        servers.insert(server_name, serde_json::to_value(&entry)?);
+        let entry = if matches!(host, McpHost::Codex) {
+            generate_codex_server_entry(tool_ref)
+        } else {
+            generate_server_entry(tool_ref, &host)
+        };
+        servers.insert(server_name, entry);
     }
 
     // Use the appropriate key for the host (mcpServers vs servers)

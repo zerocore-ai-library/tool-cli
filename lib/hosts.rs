@@ -4,7 +4,6 @@
 //! (Claude Desktop, Cursor, Claude Code) with safety features like backups and
 //! atomic writes.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -27,18 +26,12 @@ pub enum McpHost {
     Cursor,
     ClaudeCode,
     Vscode,
-}
-
-/// Entry in the mcpServers/servers config.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpServerEntry {
-    /// Server type (required for VSCode: "stdio" or "http").
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub server_type: Option<String>,
-    pub command: String,
-    pub args: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub env: Option<BTreeMap<String, String>>,
+    Codex,
+    Windsurf,
+    Zed,
+    GeminiCli,
+    Kiro,
+    RooCode,
 }
 
 /// Metadata for tracking tool-cli managed entries.
@@ -60,6 +53,12 @@ impl McpHost {
             "cursor" => Ok(Self::Cursor),
             "claude-code" | "claudecode" | "cc" => Ok(Self::ClaudeCode),
             "vscode" | "vs-code" | "vsc" | "code" => Ok(Self::Vscode),
+            "codex" => Ok(Self::Codex),
+            "windsurf" => Ok(Self::Windsurf),
+            "zed" => Ok(Self::Zed),
+            "gemini-cli" | "geminicli" | "gemini" => Ok(Self::GeminiCli),
+            "kiro" => Ok(Self::Kiro),
+            "roo-code" | "roocode" | "roo" => Ok(Self::RooCode),
             _ => Err(ToolError::InvalidHost(s.to_string())),
         }
     }
@@ -71,6 +70,12 @@ impl McpHost {
             Self::Cursor => "Cursor",
             Self::ClaudeCode => "Claude Code",
             Self::Vscode => "VS Code",
+            Self::Codex => "Codex",
+            Self::Windsurf => "Windsurf",
+            Self::Zed => "Zed",
+            Self::GeminiCli => "Gemini CLI",
+            Self::Kiro => "Kiro",
+            Self::RooCode => "Roo Code",
         }
     }
 
@@ -81,6 +86,12 @@ impl McpHost {
             Self::Cursor => "cursor",
             Self::ClaudeCode => "claude-code",
             Self::Vscode => "vscode",
+            Self::Codex => "codex",
+            Self::Windsurf => "windsurf",
+            Self::Zed => "zed",
+            Self::GeminiCli => "gemini-cli",
+            Self::Kiro => "kiro",
+            Self::RooCode => "roo-code",
         }
     }
 
@@ -89,6 +100,8 @@ impl McpHost {
     pub fn server_key(&self) -> &'static str {
         match self {
             Self::Vscode => "servers",
+            Self::Zed => "context_servers",
+            Self::Codex => "mcp_servers",
             _ => "mcpServers",
         }
     }
@@ -100,6 +113,12 @@ impl McpHost {
             Self::Cursor => Self::cursor_path(),
             Self::ClaudeCode => Self::claude_code_path(),
             Self::Vscode => Self::vscode_path(),
+            Self::Codex => Self::codex_path(),
+            Self::Windsurf => Self::windsurf_path(),
+            Self::Zed => Self::zed_path(),
+            Self::GeminiCli => Self::gemini_cli_path(),
+            Self::Kiro => Self::kiro_path(),
+            Self::RooCode => Self::roo_code_path(),
         }
     }
 
@@ -205,6 +224,162 @@ impl McpHost {
         }
     }
 
+    fn codex_path() -> ToolResult<PathBuf> {
+        #[cfg(target_os = "windows")]
+        {
+            Err(ToolError::Generic(
+                "Codex is not supported on Windows".to_string(),
+            ))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let home = dirs::home_dir().ok_or_else(|| {
+                ToolError::Generic("Could not determine home directory".to_string())
+            })?;
+            Ok(home.join(".codex").join("config.toml"))
+        }
+    }
+
+    fn windsurf_path() -> ToolResult<PathBuf> {
+        #[cfg(target_os = "windows")]
+        {
+            let home = std::env::var("USERPROFILE")
+                .map(PathBuf::from)
+                .or_else(|_| {
+                    dirs::home_dir().ok_or_else(|| {
+                        ToolError::Generic("Could not determine home directory".to_string())
+                    })
+                })?;
+            Ok(home
+                .join(".codeium")
+                .join("windsurf")
+                .join("mcp_config.json"))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let home = dirs::home_dir().ok_or_else(|| {
+                ToolError::Generic("Could not determine home directory".to_string())
+            })?;
+            Ok(home
+                .join(".codeium")
+                .join("windsurf")
+                .join("mcp_config.json"))
+        }
+    }
+
+    fn zed_path() -> ToolResult<PathBuf> {
+        #[cfg(target_os = "macos")]
+        {
+            let home = dirs::home_dir().ok_or_else(|| {
+                ToolError::Generic("Could not determine home directory".to_string())
+            })?;
+            Ok(home.join("Library/Application Support/Zed/settings.json"))
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let config = dirs::config_dir().ok_or_else(|| {
+                ToolError::Generic("Could not determine config directory".to_string())
+            })?;
+            Ok(config.join("zed").join("settings.json"))
+        }
+        #[cfg(target_os = "windows")]
+        {
+            Err(ToolError::Generic(
+                "Zed is not supported on Windows".to_string(),
+            ))
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        {
+            Err(ToolError::Generic("Unsupported platform".to_string()))
+        }
+    }
+
+    fn gemini_cli_path() -> ToolResult<PathBuf> {
+        #[cfg(target_os = "windows")]
+        {
+            let home = std::env::var("USERPROFILE")
+                .map(PathBuf::from)
+                .or_else(|_| {
+                    dirs::home_dir().ok_or_else(|| {
+                        ToolError::Generic("Could not determine home directory".to_string())
+                    })
+                })?;
+            Ok(home.join(".gemini").join("settings.json"))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let home = dirs::home_dir().ok_or_else(|| {
+                ToolError::Generic("Could not determine home directory".to_string())
+            })?;
+            Ok(home.join(".gemini").join("settings.json"))
+        }
+    }
+
+    fn kiro_path() -> ToolResult<PathBuf> {
+        #[cfg(target_os = "windows")]
+        {
+            let home = std::env::var("USERPROFILE")
+                .map(PathBuf::from)
+                .or_else(|_| {
+                    dirs::home_dir().ok_or_else(|| {
+                        ToolError::Generic("Could not determine home directory".to_string())
+                    })
+                })?;
+            Ok(home.join(".kiro").join("settings").join("mcp.json"))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let home = dirs::home_dir().ok_or_else(|| {
+                ToolError::Generic("Could not determine home directory".to_string())
+            })?;
+            Ok(home.join(".kiro").join("settings").join("mcp.json"))
+        }
+    }
+
+    fn roo_code_path() -> ToolResult<PathBuf> {
+        #[cfg(target_os = "macos")]
+        {
+            let home = dirs::home_dir().ok_or_else(|| {
+                ToolError::Generic("Could not determine home directory".to_string())
+            })?;
+            Ok(home
+                .join("Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings")
+                .join("mcp_settings.json"))
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let appdata = std::env::var("APPDATA").map(PathBuf::from).or_else(|_| {
+                dirs::config_dir().ok_or_else(|| {
+                    ToolError::Generic("Could not determine config directory".to_string())
+                })
+            })?;
+            Ok(appdata
+                .join("Code")
+                .join("User")
+                .join("globalStorage")
+                .join("rooveterinaryinc.roo-cline")
+                .join("settings")
+                .join("mcp_settings.json"))
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let config = dirs::config_dir().ok_or_else(|| {
+                ToolError::Generic("Could not determine config directory".to_string())
+            })?;
+            Ok(config
+                .join("Code")
+                .join("User")
+                .join("globalStorage")
+                .join("rooveterinaryinc.roo-cline")
+                .join("settings")
+                .join("mcp_settings.json"))
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        {
+            Err(ToolError::Generic("Unsupported platform".to_string()))
+        }
+    }
+
     /// Get all supported hosts.
     pub fn all() -> &'static [McpHost] {
         &[
@@ -212,6 +387,12 @@ impl McpHost {
             Self::Cursor,
             Self::ClaudeCode,
             Self::Vscode,
+            Self::Codex,
+            Self::Windsurf,
+            Self::Zed,
+            Self::GeminiCli,
+            Self::Kiro,
+            Self::RooCode,
         ]
     }
 
@@ -226,6 +407,7 @@ impl McpHost {
 //--------------------------------------------------------------------------------------------------
 
 /// Load host config file as JSON. Returns empty object if file doesn't exist.
+/// For TOML hosts (Codex), the TOML is converted to a JSON Value.
 pub fn load_config(host: &McpHost) -> ToolResult<Value> {
     let path = host.config_path()?;
 
@@ -243,15 +425,33 @@ pub fn load_config(host: &McpHost) -> ToolResult<Value> {
         return Ok(serde_json::json!({}));
     }
 
-    serde_json::from_str(&content).map_err(|e| ToolError::HostConfigParseError {
-        host: host.display_name().to_string(),
-        message: format!("Invalid JSON: {}", e),
-    })
+    if is_toml_host(host) {
+        // Parse TOML into a serde_json::Value via toml::Value
+        let toml_val: toml::Value =
+            toml::from_str(&content).map_err(|e| ToolError::HostConfigParseError {
+                host: host.display_name().to_string(),
+                message: format!("Invalid TOML: {}", e),
+            })?;
+        serde_json::to_value(toml_val).map_err(|e| ToolError::HostConfigParseError {
+            host: host.display_name().to_string(),
+            message: format!("TOML to JSON conversion failed: {}", e),
+        })
+    } else {
+        serde_json::from_str(&content).map_err(|e| ToolError::HostConfigParseError {
+            host: host.display_name().to_string(),
+            message: format!("Invalid JSON: {}", e),
+        })
+    }
 }
 
 /// Save host config file with atomic write (temp file + rename).
+/// For TOML hosts (Codex), uses toml_edit for non-destructive editing.
 pub fn save_config(host: &McpHost, config: &Value) -> ToolResult<()> {
     let config_path = host.config_path()?;
+
+    if is_toml_host(host) {
+        return save_toml_config(host, config, &config_path);
+    }
 
     // Serialize to pretty JSON
     let content =
@@ -291,6 +491,121 @@ pub fn save_config(host: &McpHost, config: &Value) -> ToolResult<()> {
     })?;
 
     Ok(())
+}
+
+/// Save TOML config using toml_edit for non-destructive editing.
+/// Reads the existing file, applies changes from the JSON Value, and writes back.
+fn save_toml_config(host: &McpHost, config: &Value, config_path: &Path) -> ToolResult<()> {
+    use toml_edit::DocumentMut;
+
+    // Load existing document or create new one
+    let mut doc: DocumentMut = if config_path.exists() {
+        let content =
+            fs::read_to_string(config_path).map_err(|e| ToolError::HostConfigParseError {
+                host: host.display_name().to_string(),
+                message: format!("Failed to read config: {}", e),
+            })?;
+        content
+            .parse()
+            .map_err(|e| ToolError::HostConfigParseError {
+                host: host.display_name().to_string(),
+                message: format!("Failed to parse TOML: {}", e),
+            })?
+    } else {
+        DocumentMut::new()
+    };
+
+    // Update mcp_servers section from config JSON
+    let server_key = host.server_key();
+    if let Some(servers) = config.get(server_key).and_then(|v| v.as_object()) {
+        // Ensure [mcp_servers] table exists
+        if doc.get(server_key).is_none() {
+            doc[server_key] = toml_edit::Item::Table(toml_edit::Table::new());
+        }
+        let mcp_table =
+            doc[server_key]
+                .as_table_mut()
+                .ok_or_else(|| ToolError::HostConfigParseError {
+                    host: host.display_name().to_string(),
+                    message: format!("{} is not a table", server_key),
+                })?;
+
+        // Remove entries not in config (handles removals)
+        let existing_keys: Vec<String> = mcp_table.iter().map(|(k, _)| k.to_string()).collect();
+        for key in &existing_keys {
+            if !servers.contains_key(key) {
+                mcp_table.remove(key);
+            }
+        }
+
+        // Add/update entries
+        for (name, value) in servers {
+            let mut server_table = toml_edit::Table::new();
+            if let Some(obj) = value.as_object() {
+                if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
+                    server_table["command"] = toml_edit::value(cmd);
+                }
+                if let Some(args) = obj.get("args").and_then(|v| v.as_array()) {
+                    let mut arr = toml_edit::Array::new();
+                    for arg in args {
+                        if let Some(s) = arg.as_str() {
+                            arr.push(s);
+                        }
+                    }
+                    server_table["args"] = toml_edit::value(arr);
+                }
+                if let Some(enabled) = obj.get("enabled").and_then(|v| v.as_bool()) {
+                    server_table["enabled"] = toml_edit::value(enabled);
+                }
+            }
+            mcp_table[name] = toml_edit::Item::Table(server_table);
+        }
+    } else {
+        // No servers — remove the section entirely
+        doc.remove(server_key);
+    }
+
+    // Create parent directories if needed
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let content = doc.to_string();
+    let temp_path = config_path.with_extension("toml.tmp");
+
+    {
+        let mut file = fs::File::create(&temp_path)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+    }
+
+    // Validate temp file is parseable TOML
+    let verify_content = fs::read_to_string(&temp_path)?;
+    let _: DocumentMut = verify_content.parse().map_err(|e| {
+        let _ = fs::remove_file(&temp_path);
+        ToolError::HostConfigParseError {
+            host: host.display_name().to_string(),
+            message: format!("TOML verification failed: {}", e),
+        }
+    })?;
+
+    // Atomic rename
+    fs::rename(&temp_path, config_path).map_err(|e| {
+        let _ = fs::remove_file(&temp_path);
+        ToolError::Io(e)
+    })?;
+
+    Ok(())
+}
+
+/// Generate a Codex TOML server entry as a JSON Value.
+/// Codex uses `enabled = true` by default.
+pub fn generate_codex_server_entry(tool_ref: &str) -> Value {
+    serde_json::json!({
+        "command": "tool",
+        "args": ["run", "--expose", "stdio", tool_ref, "--yes"],
+        "enabled": true,
+    })
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -388,26 +703,48 @@ pub fn tool_ref_to_server_name(tool_ref: &str) -> String {
     tool_ref.replace(['/', '@'], "__")
 }
 
-/// Generate MCP server entry for a tool.
+/// Generate MCP server entry for a tool as a JSON value.
 /// Uses `--expose stdio` to bridge any transport to stdio.
 /// Uses `--yes` to skip interactive prompts during automated startup.
 /// VSCode requires an explicit "type" field.
-pub fn generate_server_entry(tool_ref: &str, host: &McpHost) -> McpServerEntry {
-    McpServerEntry {
-        server_type: match host {
-            McpHost::Vscode => Some("stdio".to_string()),
-            _ => None,
-        },
-        command: "tool".to_string(),
-        args: vec![
-            "run".to_string(),
-            "--expose".to_string(),
-            "stdio".to_string(),
-            tool_ref.to_string(),
-            "--yes".to_string(),
-        ],
-        env: None,
+/// Zed uses a different schema with `command.path` and `command.args`.
+pub fn generate_server_entry(tool_ref: &str, host: &McpHost) -> Value {
+    let args = vec![
+        "run".to_string(),
+        "--expose".to_string(),
+        "stdio".to_string(),
+        tool_ref.to_string(),
+        "--yes".to_string(),
+    ];
+
+    match host {
+        McpHost::Zed => {
+            serde_json::json!({
+                "command": {
+                    "path": "tool",
+                    "args": args,
+                }
+            })
+        }
+        McpHost::Vscode => {
+            serde_json::json!({
+                "type": "stdio",
+                "command": "tool",
+                "args": args,
+            })
+        }
+        _ => {
+            serde_json::json!({
+                "command": "tool",
+                "args": args,
+            })
+        }
     }
+}
+
+/// Check if the host uses TOML config format.
+pub fn is_toml_host(host: &McpHost) -> bool {
+    matches!(host, McpHost::Codex)
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -435,6 +772,22 @@ mod tests {
         assert!(matches!(McpHost::parse("vs-code"), Ok(McpHost::Vscode)));
         assert!(matches!(McpHost::parse("vsc"), Ok(McpHost::Vscode)));
         assert!(matches!(McpHost::parse("code"), Ok(McpHost::Vscode)));
+        assert!(matches!(McpHost::parse("codex"), Ok(McpHost::Codex)));
+        assert!(matches!(McpHost::parse("windsurf"), Ok(McpHost::Windsurf)));
+        assert!(matches!(McpHost::parse("zed"), Ok(McpHost::Zed)));
+        assert!(matches!(
+            McpHost::parse("gemini-cli"),
+            Ok(McpHost::GeminiCli)
+        ));
+        assert!(matches!(
+            McpHost::parse("geminicli"),
+            Ok(McpHost::GeminiCli)
+        ));
+        assert!(matches!(McpHost::parse("gemini"), Ok(McpHost::GeminiCli)));
+        assert!(matches!(McpHost::parse("kiro"), Ok(McpHost::Kiro)));
+        assert!(matches!(McpHost::parse("roo-code"), Ok(McpHost::RooCode)));
+        assert!(matches!(McpHost::parse("roocode"), Ok(McpHost::RooCode)));
+        assert!(matches!(McpHost::parse("roo"), Ok(McpHost::RooCode)));
         assert!(McpHost::parse("invalid").is_err());
     }
 
@@ -450,19 +803,26 @@ mod tests {
 
     #[test]
     fn test_generate_server_entry() {
-        // Non-VSCode hosts don't have type field
+        // Standard hosts: command + args, no type
         let entry = generate_server_entry("appcypher/filesystem", &McpHost::ClaudeDesktop);
-        assert_eq!(entry.command, "tool");
-        assert_eq!(
-            entry.args,
-            vec!["run", "--expose", "stdio", "appcypher/filesystem", "--yes"]
-        );
-        assert!(entry.server_type.is_none());
-        assert!(entry.env.is_none());
+        assert_eq!(entry["command"], "tool");
+        assert_eq!(entry["args"][0], "run");
+        assert!(entry.get("type").is_none());
 
         // VSCode requires type field
         let entry = generate_server_entry("appcypher/filesystem", &McpHost::Vscode);
-        assert_eq!(entry.server_type, Some("stdio".to_string()));
+        assert_eq!(entry["type"], "stdio");
+        assert_eq!(entry["command"], "tool");
+
+        // Zed uses command.path + command.args
+        let entry = generate_server_entry("appcypher/filesystem", &McpHost::Zed);
+        assert_eq!(entry["command"]["path"], "tool");
+        assert_eq!(entry["command"]["args"][0], "run");
+
+        // Codex entry has enabled field
+        let entry = generate_codex_server_entry("appcypher/filesystem");
+        assert_eq!(entry["command"], "tool");
+        assert_eq!(entry["enabled"], true);
     }
 
     #[test]
@@ -471,6 +831,12 @@ mod tests {
         assert_eq!(McpHost::Cursor.canonical_name(), "cursor");
         assert_eq!(McpHost::ClaudeCode.canonical_name(), "claude-code");
         assert_eq!(McpHost::Vscode.canonical_name(), "vscode");
+        assert_eq!(McpHost::Codex.canonical_name(), "codex");
+        assert_eq!(McpHost::Windsurf.canonical_name(), "windsurf");
+        assert_eq!(McpHost::Zed.canonical_name(), "zed");
+        assert_eq!(McpHost::GeminiCli.canonical_name(), "gemini-cli");
+        assert_eq!(McpHost::Kiro.canonical_name(), "kiro");
+        assert_eq!(McpHost::RooCode.canonical_name(), "roo-code");
     }
 
     #[test]
@@ -479,6 +845,12 @@ mod tests {
         assert_eq!(McpHost::Cursor.display_name(), "Cursor");
         assert_eq!(McpHost::ClaudeCode.display_name(), "Claude Code");
         assert_eq!(McpHost::Vscode.display_name(), "VS Code");
+        assert_eq!(McpHost::Codex.display_name(), "Codex");
+        assert_eq!(McpHost::Windsurf.display_name(), "Windsurf");
+        assert_eq!(McpHost::Zed.display_name(), "Zed");
+        assert_eq!(McpHost::GeminiCli.display_name(), "Gemini CLI");
+        assert_eq!(McpHost::Kiro.display_name(), "Kiro");
+        assert_eq!(McpHost::RooCode.display_name(), "Roo Code");
     }
 
     #[test]
@@ -487,5 +859,11 @@ mod tests {
         assert_eq!(McpHost::Cursor.server_key(), "mcpServers");
         assert_eq!(McpHost::ClaudeCode.server_key(), "mcpServers");
         assert_eq!(McpHost::Vscode.server_key(), "servers");
+        assert_eq!(McpHost::Codex.server_key(), "mcp_servers");
+        assert_eq!(McpHost::Zed.server_key(), "context_servers");
+        assert_eq!(McpHost::Windsurf.server_key(), "mcpServers");
+        assert_eq!(McpHost::GeminiCli.server_key(), "mcpServers");
+        assert_eq!(McpHost::Kiro.server_key(), "mcpServers");
+        assert_eq!(McpHost::RooCode.server_key(), "mcpServers");
     }
 }

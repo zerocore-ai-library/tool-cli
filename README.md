@@ -219,6 +219,15 @@ Get your first MCP tool published in three steps.
 
 <br />
 
+## Context-Efficient Agents with tool-cli
+
+
+<br />
+
+<div align='center'>• • •</div>
+
+<br />
+
 ## Host Integration
 
 Once you've installed some tools, you probably want to use them in your favorite AI app. Instead of manually editing JSON configs, just run:
@@ -273,7 +282,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 > tool host add cursor radical/weather       # add a tool to Cursor
 > tool host add vscode                       # add all installed tools
 > tool host remove claude-desktop            # remove tools from a host
-> tool host show cursor                      # preview the generated config
+> tool host preview cursor                   # preview the generated config
 > ```
 >
 > You can specify individual tools or omit them to register all installed tools. The command creates backups before modifying anything, so your original config is safe.
@@ -322,13 +331,6 @@ Anthropic's MCPB format solved the installation problem. Users can install MCP t
 tool-cli is that toolchain. And tool.store is that registry.
 
 The goal is simple. Make building and sharing MCP tools as easy as publishing an npm package.
-
-
-<br />
-
-<div align="center">
-    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
-</div>
 
 <br />
 
