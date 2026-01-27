@@ -298,6 +298,10 @@ pub enum Command {
         /// Force overwrite existing manifest.json.
         #[arg(short, long)]
         force: bool,
+
+        /// Verify detection by starting the server and sending an MCP initialize request.
+        #[arg(long)]
+        verify: bool,
     },
 
     /// Determine if an existing MCP server can be converted to a MCPB package.
@@ -318,6 +322,14 @@ pub enum Command {
         /// Override package name.
         #[arg(short, long)]
         name: Option<String>,
+
+        /// Verify detection by starting the server and sending an MCP initialize request.
+        #[arg(long)]
+        verify: bool,
+
+        /// Skip confirmation prompt for --verify.
+        #[arg(short, long)]
+        yes: bool,
     },
 
     /// Search for tools in the registry.

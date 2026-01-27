@@ -3,7 +3,7 @@
 use super::utils::{GrepOptions, find_first_relative, grep_dir, has_any_pattern, read_toml};
 use super::{
     DetectError, DetectOptions, DetectionDetails, DetectionResult, DetectionSignals,
-    GeneratedScaffold, ProjectDetector,
+    GeneratedScaffold, ProjectDetector, SignalCallback,
 };
 use crate::mcpb::{
     McpbManifest, McpbMcpConfig, McpbServer, McpbServerType, McpbTransport, McpbUserConfigField,
@@ -269,6 +269,135 @@ impl PythonDetector {
         .is_some()
     }
 
+    /// Core detection logic with optional signal callback.
+    fn detect_impl(
+        &self,
+        dir: &Path,
+        on_signal: Option<SignalCallback<'_>>,
+    ) -> Option<DetectionResult> {
+        let has_pyproject = dir.join("pyproject.toml").exists();
+        let has_requirements = dir.join("requirements.txt").exists();
+
+        if !has_pyproject && !has_requirements {
+            return None;
+        }
+
+        // Gather detection signals, reporting each as it's evaluated
+        let (entry_point, script_name, entry_exists, entry_from_config) =
+            self.detect_entry_point(dir);
+        if let Some(cb) = &on_signal {
+            cb("Entry point in config", entry_from_config, "30%");
+        }
+        if let Some(cb) = &on_signal {
+            cb("Entry point exists", entry_exists, "20%");
+        }
+
+        let has_mcp_sdk = self.has_mcp_dependency(dir);
+        if let Some(cb) = &on_signal {
+            cb("MCP SDK detected (mcp)", has_mcp_sdk, "10%");
+        }
+
+        let (package_manager, has_lock_file) = self.detect_package_manager(dir);
+        if let Some(cb) = &on_signal {
+            cb("Lock file found", has_lock_file, "10%");
+        }
+
+        let name_from_config =
+            if let Some(pyproject) = read_toml::<PyProject>(&dir.join("pyproject.toml")) {
+                pyproject
+                    .project
+                    .as_ref()
+                    .and_then(|p| p.name.as_ref())
+                    .is_some()
+                    || pyproject
+                        .tool
+                        .as_ref()
+                        .and_then(|t| t.poetry.as_ref())
+                        .and_then(|p| p.name.as_ref())
+                        .is_some()
+            } else {
+                false
+            };
+        if let Some(cb) = &on_signal {
+            cb("Name in config", name_from_config, "5%");
+        }
+
+        let transport = self.detect_transport(dir);
+
+        // Build detection signals
+        let signals = DetectionSignals {
+            entry_point_from_config: entry_from_config,
+            entry_point_exists: entry_exists,
+            has_mcp_sdk,
+            package_manager_certain: has_lock_file,
+            name_from_config,
+        };
+
+        let confidence = signals.confidence();
+        let mut notes = signals.warnings();
+
+        if entry_point.is_none() && script_name.is_none() {
+            notes.push(
+                "Could not auto-detect entry point. Specify --entry to set it manually.".into(),
+            );
+        }
+
+        let (run_command, run_args) = match package_manager {
+            PythonPackageManager::Uv => {
+                let args = if let Some(ref sn) = script_name {
+                    vec!["run".to_string(), sn.clone()]
+                } else if let Some(ref ep) = entry_point {
+                    vec!["run".to_string(), ep.clone()]
+                } else {
+                    vec!["run".to_string(), "main.py".to_string()]
+                };
+                ("uv".to_string(), args)
+            }
+            PythonPackageManager::Poetry => {
+                let args = if let Some(ref sn) = script_name {
+                    vec!["run".to_string(), sn.clone()]
+                } else if let Some(ref ep) = entry_point {
+                    vec!["run".to_string(), "python".to_string(), ep.clone()]
+                } else {
+                    vec![
+                        "run".to_string(),
+                        "python".to_string(),
+                        "main.py".to_string(),
+                    ]
+                };
+                ("poetry".to_string(), args)
+            }
+            PythonPackageManager::Pip => {
+                if let Some(ref sn) = script_name {
+                    (format!(".venv/bin/{}", sn), vec![])
+                } else {
+                    let args = if let Some(ref ep) = entry_point {
+                        vec![ep.clone()]
+                    } else {
+                        vec!["main.py".to_string()]
+                    };
+                    (".venv/bin/python".to_string(), args)
+                }
+            }
+        };
+
+        Some(DetectionResult {
+            confidence,
+            server_type: McpbServerType::Python,
+            details: DetectionDetails {
+                entry_point,
+                script_name,
+                package_manager: Some(PackageManager::Python(package_manager)),
+                transport: Some(transport),
+                build_command: Some(package_manager.build_command().to_string()),
+                run_command: Some(run_command),
+                run_args,
+                notes,
+            },
+            signals,
+        })
+    }
+
     /// Get project name from pyproject.toml or directory name.
     fn get_project_name(&self, dir: &Path) -> String {
         if let Some(pyproject) = read_toml::<PyProject>(&dir.join("pyproject.toml")) {
@@ -311,116 +440,11 @@ impl ProjectDetector for PythonDetector {
     }
 
     fn detect(&self, dir: &Path) -> Option<DetectionResult> {
-        // Check for Python project markers
-        let has_pyproject = dir.join("pyproject.toml").exists();
-        let has_requirements = dir.join("requirements.txt").exists();
+        self.detect_impl(dir, None)
+    }
 
-        if !has_pyproject && !has_requirements {
-            return None;
-        }
-
-        // Gather detection signals
-        let has_mcp_sdk = self.has_mcp_dependency(dir);
-        let (package_manager, has_lock_file) = self.detect_package_manager(dir);
-        let (entry_point, script_name, entry_exists, entry_from_config) =
-            self.detect_entry_point(dir);
-        let transport = self.detect_transport(dir);
-
-        // Check if name comes from config
-        let name_from_config =
-            if let Some(pyproject) = read_toml::<PyProject>(&dir.join("pyproject.toml")) {
-                pyproject
-                    .project
-                    .as_ref()
-                    .and_then(|p| p.name.as_ref())
-                    .is_some()
-                    || pyproject
-                        .tool
-                        .as_ref()
-                        .and_then(|t| t.poetry.as_ref())
-                        .and_then(|p| p.name.as_ref())
-                        .is_some()
-            } else {
-                false
-            };
-
-        // Build detection signals
-        let signals = DetectionSignals {
-            entry_point_from_config: entry_from_config,
-            entry_point_exists: entry_exists,
-            has_mcp_sdk,
-            package_manager_certain: has_lock_file,
-            name_from_config,
-        };
-
-        // Calculate confidence from signals
-        let confidence = signals.confidence();
-
-        // Build notes from signals
-        let mut notes = signals.warnings();
-
-        if entry_point.is_none() && script_name.is_none() {
-            notes.push(
-                "Could not auto-detect entry point. Specify --entry to set it manually.".into(),
-            );
-        }
-
-        // Determine run args based on package manager and whether we have a script name
-        let (run_command, run_args) = match package_manager {
-            PythonPackageManager::Uv => {
-                let args = if let Some(ref sn) = script_name {
-                    vec!["run".to_string(), sn.clone()]
-                } else if let Some(ref ep) = entry_point {
-                    vec!["run".to_string(), ep.clone()]
-                } else {
-                    vec!["run".to_string(), "main.py".to_string()]
-                };
-                ("uv".to_string(), args)
-            }
-            PythonPackageManager::Poetry => {
-                let args = if let Some(ref sn) = script_name {
-                    vec!["run".to_string(), sn.clone()]
-                } else if let Some(ref ep) = entry_point {
-                    vec!["run".to_string(), "python".to_string(), ep.clone()]
-                } else {
-                    vec![
-                        "run".to_string(),
-                        "python".to_string(),
-                        "main.py".to_string(),
-                    ]
-                };
-                ("poetry".to_string(), args)
-            }
-            PythonPackageManager::Pip => {
-                // For pip, if we have a script name, we can run it directly after pip install -e .
-                if let Some(ref sn) = script_name {
-                    (format!(".venv/bin/{}", sn), vec![])
-                } else {
-                    let args = if let Some(ref ep) = entry_point {
-                        vec![ep.clone()]
-                    } else {
-                        vec!["main.py".to_string()]
-                    };
-                    (".venv/bin/python".to_string(), args)
-                }
-            }
-        };
-
-        Some(DetectionResult {
-            confidence,
-            server_type: McpbServerType::Python,
-            details: DetectionDetails {
-                entry_point,
-                script_name,
-                package_manager: Some(PackageManager::Python(package_manager)),
-                transport: Some(transport),
-                build_command: Some(package_manager.build_command().to_string()),
-                run_command: Some(run_command),
-                run_args,
-                notes,
-            },
-            signals,
-        })
+    fn detect_verbose(&self, dir: &Path, on_signal: SignalCallback<'_>) -> Option<DetectionResult> {
+        self.detect_impl(dir, Some(on_signal))
     }
 
     fn generate(

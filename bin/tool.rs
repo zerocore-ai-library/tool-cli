@@ -215,6 +215,8 @@ async fn run() -> ToolResult<()> {
             entry,
             transport,
             name,
+            verify,
+            yes,
         } => {
             handlers::detect_mcpb(
                 path,
@@ -225,6 +227,8 @@ async fn run() -> ToolResult<()> {
                 false,
                 cli.concise,
                 cli.no_header,
+                verify,
+                yes,
             )
             .await
         }
@@ -243,6 +247,7 @@ async fn run() -> ToolResult<()> {
             entry,
             transport,
             force,
+            verify,
         } => {
             handlers::init_mcpb(
                 path,
@@ -258,6 +263,7 @@ async fn run() -> ToolResult<()> {
                 entry,
                 transport,
                 force,
+                verify,
             )
             .await
         }
