@@ -235,6 +235,8 @@ open-data-mcp: [
     spacex_launch, get_earthquakes, search_recipes, get_recipe, random_recipe, search_cocktails, get_cocktail, get_product_nutrition, random_user, random_quote,
     generate_uuid
 ]
+
+You should still call `tool info` to know the input/output schema of each method before calling them.
 """
 
 
@@ -400,10 +402,10 @@ async def run(code_mode: bool = False, provider: str | None = None, initial_prom
     model, model_name, provider, model_id = get_model(provider)
 
     # MCP server paths - relative to this file's parent directory (agent/)
-    # The sibling directories are bash_mcp/ and open_data_mcp/
-    base_dir = Path(__file__).parent.parent
-    bash_server_path = base_dir / "bash_mcp" / "server.py"
-    open_data_server_path = base_dir / "open_data_mcp" / "server.py"
+    # The MCP servers live in the sibling mcps/ directory
+    base_dir = Path(__file__).parent.parent.parent
+    bash_server_path = base_dir / "mcps" / "bash_mcp" / "server.py"
+    open_data_server_path = base_dir / "mcps" / "open_data_mcp" / "server.py"
 
     log.info("Starting MCP servers...")
 

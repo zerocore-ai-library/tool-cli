@@ -193,6 +193,8 @@ open-data-mcp: [
     generate_uuid
 ]
 
+You should still call `tool info` to know the input/output schema of each method before calling them.
+
 # Your Task
 
 $ARGUMENTS

@@ -43,3 +43,6 @@ __pycache__/
 *.pyc
 *.egg-info/
 .venv/
+
+# Claude
+/.claude/
