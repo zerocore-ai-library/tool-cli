@@ -103,28 +103,25 @@ pub async fn tool_call(
                 entry_point.bright_white()
             );
             if let Some(build_cmd) = build_script {
-                println!("    The tool needs to be built before it can be run.\n");
-                println!("    {}:", "To build".dimmed());
-                println!("      cd {} && tool build\n", bundle_path);
-                println!("    {}: {}", "Runs".dimmed(), build_cmd.dimmed());
+                println!("  · The tool needs to be built before it can be run.\n");
+                println!("  {}:", "To build".dimmed());
+                println!("  · cd {} && tool build\n", bundle_path);
+                println!("  · {}: {}", "Runs".dimmed(), build_cmd.dimmed());
             } else {
-                println!("    {}:", "If this tool requires building".dimmed());
-                println!("      Add a build script to manifest.json:\n");
-                println!("      {}", "\"_meta\": {".dimmed());
-                println!("        {}", "\"store.tool.mcpb\": {".dimmed());
-                println!(
-                    "          {}",
-                    "\"scripts\": { \"build\": \"...\" }".dimmed()
-                );
-                println!("        {}", "}".dimmed());
-                println!("      {}", "}".dimmed());
+                println!("  {}:", "If this tool requires building".dimmed());
+                println!("  · Add a build script to manifest.json:\n");
+                println!("  · {}", "\"_meta\": {".dimmed());
+                println!("  ·   {}", "\"store.tool.mcpb\": {".dimmed());
+                println!("  ·     {}", "\"scripts\": { \"build\": \"...\" }".dimmed());
+                println!("  ·   {}", "}".dimmed());
+                println!("  · {}", "}".dimmed());
             }
             std::process::exit(1);
         }
         Err(ToolError::OAuthNotConfigured) | Err(ToolError::AuthRequired { tool_ref: _ }) => {
             println!("  {} OAuth authentication failed\n", "✗".bright_red());
             println!(
-                "    Could not initialize credential storage. Check that {} is writable.",
+                "  · Could not initialize credential storage. Check that {} is writable.",
                 "~/.tool/secrets/".bright_cyan()
             );
             std::process::exit(1);
@@ -232,33 +229,33 @@ pub async fn tool_call(
                     let pretty = serde_json::to_string_pretty(&json).unwrap_or(text.text.clone());
                     for line in pretty.lines() {
                         if is_error {
-                            println!("    {}", line.bright_red());
+                            println!("  {}", line.bright_red());
                         } else {
-                            println!("    {}", line);
+                            println!("  {}", line);
                         }
                     }
                 } else {
                     // Plain text output
                     for line in text.text.lines() {
                         if is_error {
-                            println!("    {}", line.bright_red());
+                            println!("  {}", line.bright_red());
                         } else {
-                            println!("    {}", line);
+                            println!("  {}", line);
                         }
                     }
                 }
             }
             rmcp::model::RawContent::Image(img) => {
-                println!("    [Image: {} bytes]", img.data.len());
+                println!("  · [Image: {} bytes]", img.data.len());
             }
             rmcp::model::RawContent::Audio(audio) => {
-                println!("    [Audio: {} bytes]", audio.data.len());
+                println!("  · [Audio: {} bytes]", audio.data.len());
             }
             rmcp::model::RawContent::Resource(res) => {
-                println!("    [Resource: {:?}]", res.resource);
+                println!("  · [Resource: {:?}]", res.resource);
             }
             rmcp::model::RawContent::ResourceLink(link) => {
-                println!("    [ResourceLink: {}]", link.uri);
+                println!("  · [ResourceLink: {}]", link.uri);
             }
         }
     }

@@ -47,6 +47,7 @@ pub use registry::*;
 pub use resolver::*;
 pub use scaffold::*;
 pub use self_update::*;
+pub use styles::Spinner;
 pub use system_config::*;
 pub use validate::*;
 pub use vars::*;

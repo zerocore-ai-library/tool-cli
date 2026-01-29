@@ -182,24 +182,24 @@ async fn config_set(
             } else {
                 value.clone()
             };
-            println!("    {:<20} {}", key, display_value.dimmed());
+            println!("  · {:<20} {}", key, display_value.dimmed());
         }
 
         // Show OAuth status
         match oauth_result {
             OAuthSetupResult::NotRequired => {}
             OAuthSetupResult::AlreadyAuthenticated => {
-                println!("    {:<20} {}", "OAuth", "authenticated".bright_green());
+                println!("  · {:<20} {}", "OAuth", "authenticated".bright_green());
             }
             OAuthSetupResult::Authenticated => {
-                println!("    {:<20} {}", "OAuth", "authenticated".bright_green());
+                println!("  · {:<20} {}", "OAuth", "authenticated".bright_green());
             }
             OAuthSetupResult::Skipped(reason) => {
-                println!("    {:<20} {}", "OAuth", reason.dimmed());
+                println!("  · {:<20} {}", "OAuth", reason.dimmed());
             }
             OAuthSetupResult::Failed(err) => {
                 println!(
-                    "    {:<20} {} ({})",
+                    "  · {:<20} {} ({})",
                     "OAuth",
                     "failed".bright_red(),
                     err.dimmed()
@@ -313,7 +313,7 @@ async fn config_get(
         }
         println!("\n  No configuration saved for {}\n", plugin_ref);
         if let Some(schema) = schema {
-            println!("    Available config fields:");
+            println!("  Available config fields:");
             for (key, field) in &schema {
                 let title = &field.title;
                 let req = if field.required.unwrap_or(false) {
@@ -321,7 +321,7 @@ async fn config_get(
                 } else {
                     ""
                 };
-                println!("      {:<20} {}{}", key, title.dimmed(), req.dimmed());
+                println!("  · {:<20} {}{}", key, title.dimmed(), req.dimmed());
             }
             println!();
         }
@@ -375,11 +375,11 @@ async fn config_get(
             } else {
                 value.clone()
             };
-            println!("    {:<20} {}", key, display_value);
+            println!("  · {:<20} {}", key, display_value);
         }
 
         println!(
-            "\n    {}: {}\n",
+            "\n  · {}: {}\n",
             "Path".dimmed(),
             config_path.display().to_string().dimmed()
         );
@@ -398,7 +398,7 @@ async fn config_list(concise: bool, no_header: bool) -> ToolResult<()> {
         }
         println!("\n  No tools have saved configuration.\n");
         println!(
-            "    Use {} to configure a tool.\n",
+            "  · Use {} to configure a tool.\n",
             "tool config set <tool>".bright_cyan()
         );
         return Ok(());
@@ -416,7 +416,7 @@ async fn config_list(concise: bool, no_header: bool) -> ToolResult<()> {
         for (name, path, count) in &tools {
             let key_word = if *count == 1 { "key" } else { "keys" };
             println!(
-                "    {:<30} {} {}    {}",
+                "  · {:<30} {} {}    {}",
                 name.bold(),
                 count,
                 key_word.dimmed(),

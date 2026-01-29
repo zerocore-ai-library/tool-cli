@@ -67,28 +67,25 @@ pub async fn tool_info(
                 entry_point.bright_white()
             );
             if let Some(build_cmd) = build_script {
-                println!("    The tool needs to be built before it can be run.\n");
-                println!("    {}:", "To build".dimmed());
-                println!("      cd {} && tool build\n", bundle_path);
-                println!("    {}: {}", "Runs".dimmed(), build_cmd.dimmed());
+                println!("  · The tool needs to be built before it can be run.\n");
+                println!("  {}:", "To build".dimmed());
+                println!("  · cd {} && tool build\n", bundle_path);
+                println!("  · {}: {}", "Runs".dimmed(), build_cmd.dimmed());
             } else {
-                println!("    {}:", "If this tool requires building".dimmed());
-                println!("      Add a build script to manifest.json:\n");
-                println!("      {}", "\"_meta\": {".dimmed());
-                println!("        {}", "\"store.tool.mcpb\": {".dimmed());
-                println!(
-                    "          {}",
-                    "\"scripts\": { \"build\": \"...\" }".dimmed()
-                );
-                println!("        {}", "}".dimmed());
-                println!("      {}", "}".dimmed());
+                println!("  {}:", "If this tool requires building".dimmed());
+                println!("  · Add a build script to manifest.json:\n");
+                println!("  · {}", "\"_meta\": {".dimmed());
+                println!("  ·   {}", "\"store.tool.mcpb\": {".dimmed());
+                println!("  ·     {}", "\"scripts\": { \"build\": \"...\" }".dimmed());
+                println!("  ·   {}", "}".dimmed());
+                println!("  · {}", "}".dimmed());
             }
             std::process::exit(1);
         }
         Err(ToolError::OAuthNotConfigured) | Err(ToolError::AuthRequired { tool_ref: _ }) => {
             println!("  {} OAuth authentication failed\n", "✗".bright_red());
             println!(
-                "    Could not initialize credential storage. Check that {} is writable.",
+                "  · Could not initialize credential storage. Check that {} is writable.",
                 "~/.tool/secrets/".bright_cyan()
             );
             std::process::exit(1);
@@ -184,9 +181,9 @@ pub async fn tool_info(
     }
 
     // Show server metadata
-    println!("    {}       {}", "Type".dimmed(), tool_type);
+    println!("  · {}       {}", "Type".dimmed(), tool_type);
     println!(
-        "    {}   {}",
+        "  · {}   {}",
         "Location".dimmed(),
         prepared.manifest_path.display().to_string().dimmed()
     );

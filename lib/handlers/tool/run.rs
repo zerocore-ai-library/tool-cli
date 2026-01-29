@@ -73,10 +73,10 @@ pub async fn tool_run(
     };
 
     eprintln!("  {} Proxy server ready\n", "✓".bright_green());
-    eprintln!("    {}  {}", "Server".dimmed(), server_info.bright_white());
-    eprintln!("    {}  {}", "Expose".dimmed(), expose_str.bright_white());
+    eprintln!("  · {}  {}", "Server".dimmed(), server_info.bright_white());
+    eprintln!("  · {}  {}", "Expose".dimmed(), expose_str.bright_white());
     eprintln!(
-        "    {} {}",
+        "  · {} {}",
         "Backend".dimmed(),
         match backend_transport {
             crate::mcpb::McpbTransport::Stdio => "stdio".to_string(),

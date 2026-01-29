@@ -103,13 +103,13 @@ pub async fn list_scripts(path: Option<String>) -> ToolResult<()> {
             println!("  {}", "Available scripts:".bright_cyan().bold());
             for (name, cmd) in scripts {
                 if let Some(cmd_str) = cmd.as_str() {
-                    println!("    {} {}", name.bright_white(), cmd_str.bright_black());
+                    println!("  · {} {}", name.bright_white(), cmd_str.bright_black());
                 }
             }
         }
         _ => {
             println!("  {}", "No scripts defined in manifest.json".yellow());
-            println!("  Add scripts to _meta.store.tool.mcpb.scripts");
+            println!("  · Add scripts to _meta.store.tool.mcpb.scripts");
         }
     }
 

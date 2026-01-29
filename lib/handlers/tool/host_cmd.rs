@@ -133,23 +133,18 @@ async fn host_add(
                 host.config_path()?.display()
             );
             for tool in &added {
-                println!(
-                    "    {} {}    {}",
-                    "+".bright_green(),
-                    tool,
-                    "(new)".dimmed()
-                );
+                println!("  {} {}    {}", "+".bright_green(), tool, "(new)".dimmed());
             }
             for tool in &skipped {
                 println!(
-                    "    {} {}    {}",
+                    "  {} {}    {}",
                     "~".bright_yellow(),
                     tool,
                     "(skip, already exists)".dimmed()
                 );
             }
             println!(
-                "\n    Run without {} to apply changes.\n",
+                "\n  · Run without {} to apply changes.\n",
                 "--dry-run".bold()
             );
         }
@@ -211,10 +206,10 @@ async fn host_add(
             host.display_name()
         );
         for tool in &added {
-            println!("    {} {}", "+".bright_green(), tool);
+            println!("  {} {}", "+".bright_green(), tool);
         }
         if let Some(backup) = backup_path {
-            println!("\n    {}: {}\n", "Backup".dimmed(), backup.display());
+            println!("\n  · {}: {}\n", "Backup".dimmed(), backup.display());
         } else {
             println!();
         }
@@ -304,10 +299,10 @@ async fn host_remove(
                 host.config_path()?.display()
             );
             for tool in &removed {
-                println!("    {} {}", "-".bright_red(), tool);
+                println!("  {} {}", "-".bright_red(), tool);
             }
             println!(
-                "\n    Run without {} to apply changes.\n",
+                "\n  · Run without {} to apply changes.\n",
                 "--dry-run".bold()
             );
         }
@@ -367,10 +362,10 @@ async fn host_remove(
             host.display_name()
         );
         for tool in &removed {
-            println!("    {} {}", "-".bright_red(), tool);
+            println!("  {} {}", "-".bright_red(), tool);
         }
         if let Some(backup) = backup_path {
-            println!("\n    {}: {}\n", "Backup".dimmed(), backup.display());
+            println!("\n  · {}: {}\n", "Backup".dimmed(), backup.display());
         } else {
             println!();
         }
@@ -412,7 +407,7 @@ async fn host_list(concise: bool, no_header: bool) -> ToolResult<()> {
                 format!("{} {} {}", tool_count, tool_label, "(not found)".dimmed())
             };
             println!(
-                "    {:<18} {:<15} {}",
+                "  · {:<18} {:<15} {}",
                 host.canonical_name(),
                 status,
                 path.display().to_string().dimmed()

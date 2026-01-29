@@ -29,7 +29,7 @@ pub use info::tool_info;
 pub use init::init_mcpb;
 pub use list::{ResolvedToolPath, list_tools, resolve_tool_path};
 pub use pack_cmd::pack_mcpb;
-pub use registry::{add_tools, download_tool, publish_mcpb, remove_tools, search_tools};
+pub use registry::{add_tools, download_tools, publish_mcpb, remove_tools, search_tools};
 pub use run::tool_run;
 pub use scripts::{list_scripts, run_external_script, run_script};
 pub use validate_cmd::validate_mcpb;

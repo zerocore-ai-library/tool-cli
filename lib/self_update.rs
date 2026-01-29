@@ -1,6 +1,7 @@
 //! Self-update and self-uninstall functionality for tool-cli.
 
 use crate::error::{ToolError, ToolResult};
+use crate::styles::Spinner;
 use colored::Colorize;
 use flate2::read::GzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -176,7 +177,7 @@ async fn download_with_progress(client: &Client, url: &str, size: u64) -> ToolRe
     let pb = ProgressBar::new(size);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("    [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
+            .template("  [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
             .unwrap()
             .progress_chars("█░░"),
     );
@@ -261,10 +262,19 @@ fn extract_binary(tarball: &[u8]) -> ToolResult<Vec<u8>> {
 /// Perform the self-update.
 pub async fn self_update(target_version: Option<&str>) -> ToolResult<()> {
     println!();
-    println!("  {} Checking for updates...", "→".bright_blue());
+    let spinner = Spinner::with_indent("Checking for updates", 2);
 
     let client = Client::new();
-    let release = fetch_latest_release(&client).await?;
+    let release = match fetch_latest_release(&client).await {
+        Ok(release) => {
+            spinner.succeed(Some("Checked for updates"));
+            release
+        }
+        Err(e) => {
+            spinner.fail(None);
+            return Err(e);
+        }
+    };
     let latest_version = parse_version(&release.tag_name);
 
     // Determine target version
@@ -322,7 +332,7 @@ pub async fn self_update(target_version: Option<&str>) -> ToolResult<()> {
 
     // Download
     println!(
-        "  {} Downloading {}...",
+        "  {} Downloading {}",
         "→".bright_blue(),
         archive_name.bright_cyan()
     );
@@ -331,67 +341,86 @@ pub async fn self_update(target_version: Option<&str>) -> ToolResult<()> {
 
     // Verify checksum if available
     if let Some(expected_hash) = download_checksum(&client, version, &archive_name).await? {
-        print!("  {} Verifying checksum...", "→".bright_blue());
-        io::stdout().flush().ok();
+        let spinner = Spinner::with_indent("Verifying checksum", 2);
         if verify_checksum(&tarball, &expected_hash) {
-            println!("\r  {} Checksum verified    ", "✓".bright_green());
+            spinner.succeed(Some("Checksum verified"));
         } else {
-            println!("\r  {} Checksum mismatch    ", "✗".bright_red());
+            spinner.fail(Some("Checksum mismatch"));
             return Err(ToolError::Generic("Checksum verification failed".into()));
         }
     }
 
     // Extract binary
-    print!("  {} Extracting...", "→".bright_blue());
-    io::stdout().flush().ok();
-    let binary = extract_binary(&tarball)?;
-    println!("\r  {} Extracted        ", "✓".bright_green());
+    let spinner = Spinner::with_indent("Extracting", 2);
+    let binary = match extract_binary(&tarball) {
+        Ok(binary) => {
+            spinner.succeed(Some("Extracted"));
+            binary
+        }
+        Err(e) => {
+            spinner.fail(None);
+            return Err(e);
+        }
+    };
 
     // Replace current executable
     let exe_path = current_exe_path()?;
     let temp_path = exe_path.with_extension("new");
     let backup_path = exe_path.with_extension("backup");
 
-    print!("  {} Installing...", "→".bright_blue());
-    io::stdout().flush().ok();
+    let spinner = Spinner::with_indent("Installing", 2);
 
-    // Write new binary to temp file
-    {
-        let mut file = File::create(&temp_path)
-            .map_err(|e| ToolError::Generic(format!("Failed to create temp file: {}", e)))?;
-        file.write_all(&binary)
-            .map_err(|e| ToolError::Generic(format!("Failed to write binary: {}", e)))?;
-    }
-
-    // Set executable permissions
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o755))
-            .map_err(|e| ToolError::Generic(format!("Failed to set permissions: {}", e)))?;
-    }
-
-    // Backup current, move new into place
-    if exe_path.exists() {
-        fs::rename(&exe_path, &backup_path)
-            .map_err(|e| ToolError::Generic(format!("Failed to backup current binary: {}", e)))?;
-    }
-
-    if let Err(e) = fs::rename(&temp_path, &exe_path) {
-        // Restore backup on failure
-        if backup_path.exists() {
-            let _ = fs::rename(&backup_path, &exe_path);
+    // Installation closure to handle all steps
+    let install_result: ToolResult<()> = (|| {
+        // Write new binary to temp file
+        {
+            let mut file = File::create(&temp_path)
+                .map_err(|e| ToolError::Generic(format!("Failed to create temp file: {}", e)))?;
+            file.write_all(&binary)
+                .map_err(|e| ToolError::Generic(format!("Failed to write binary: {}", e)))?;
         }
-        return Err(ToolError::Generic(format!(
-            "Failed to install new binary: {}",
-            e
-        )));
+
+        // Set executable permissions
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o755))
+                .map_err(|e| ToolError::Generic(format!("Failed to set permissions: {}", e)))?;
+        }
+
+        // Backup current, move new into place
+        if exe_path.exists() {
+            fs::rename(&exe_path, &backup_path).map_err(|e| {
+                ToolError::Generic(format!("Failed to backup current binary: {}", e))
+            })?;
+        }
+
+        if let Err(e) = fs::rename(&temp_path, &exe_path) {
+            // Restore backup on failure
+            if backup_path.exists() {
+                let _ = fs::rename(&backup_path, &exe_path);
+            }
+            return Err(ToolError::Generic(format!(
+                "Failed to install new binary: {}",
+                e
+            )));
+        }
+
+        // Remove backup
+        let _ = fs::remove_file(&backup_path);
+
+        Ok(())
+    })();
+
+    match install_result {
+        Ok(()) => {
+            spinner.succeed(Some("Installed"));
+        }
+        Err(e) => {
+            spinner.fail(None);
+            return Err(e);
+        }
     }
-
-    // Remove backup
-    let _ = fs::remove_file(&backup_path);
-
-    println!("\r  {} Installed          ", "✓".bright_green());
     println!();
     println!(
         "  {} Updated to version {}",
