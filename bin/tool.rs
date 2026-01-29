@@ -392,9 +392,9 @@ async fn run() -> ToolResult<()> {
             handlers::download_tool(&name, output.as_deref()).await
         }
 
-        Command::Install { name } => handlers::add_tool(&name).await,
+        Command::Install { names } => handlers::add_tools(&names).await,
 
-        Command::Uninstall { name } => handlers::remove_tool(&name).await,
+        Command::Uninstall { names } => handlers::remove_tools(&names).await,
 
         Command::Search { query } => {
             handlers::search_tools(&query, cli.concise, cli.no_header).await

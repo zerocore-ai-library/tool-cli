@@ -338,24 +338,24 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 ## Commands
 
-| Command     | What it does                                        |
-| ----------- | --------------------------------------------------- |
-| `init`      | Create a new tool or convert an existing MCP server |
-| `detect`    | Scan a project and show what tool-cli finds         |
-| `validate`  | Check your manifest for errors                      |
-| `info`      | Show what a tool exposes                            |
-| `call`      | Call a tool method directly                         |
-| `run`       | Start a tool as a server                            |
-| `pack`      | Bundle into a `.mcpb` or `.mcpbx` file              |
-| `publish`   | Upload to the registry                              |
-| `install`   | Install a tool from the registry                    |
-| `uninstall` | Remove an installed tool                            |
-| `list`      | Show installed tools                                |
-| `search`    | Find tools in the registry                          |
-| `grep`      | Search tool schemas by pattern                      |
-| `config`    | Manage tool configuration                           |
-| `host`      | Register tools with MCP hosts                       |
-| `login`     | Log in to the registry                              |
+| Command     | What it does                                                |
+| ----------- | ----------------------------------------------------------- |
+| `init`      | Create a new tool or convert an existing MCP server to MCPB |
+| `detect`    | Scan a project and show what tool-cli finds                 |
+| `validate`  | Check your manifest for errors                              |
+| `info`      | Show what a tool exposes                                    |
+| `call`      | Call a tool method directly                                 |
+| `run`       | Start a tool as a server                                    |
+| `pack`      | Bundle into a `.mcpb` or `.mcpbx` file                      |
+| `publish`   | Upload to the registry                                      |
+| `install`   | Install a tool from the registry                            |
+| `uninstall` | Remove an installed tool                                    |
+| `list`      | Show installed tools                                        |
+| `search`    | Find tools in the registry                                  |
+| `grep`      | Search tool schemas by pattern                              |
+| `config`    | Manage tool configuration                                   |
+| `host`      | Register tools with MCP hosts                               |
+| `login`     | Log in to the registry                                      |
 
 Check out the [CLI docs](https://tool.store/docs/cli) for the full details.
 

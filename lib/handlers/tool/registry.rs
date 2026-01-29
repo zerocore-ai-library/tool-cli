@@ -8,11 +8,66 @@ use crate::references::PluginRef;
 use crate::registry::RegistryClient;
 use crate::resolver::FilePluginResolver;
 use colored::Colorize;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 
 use super::pack_cmd::format_size;
+
+//--------------------------------------------------------------------------------------------------
+// Types
+//--------------------------------------------------------------------------------------------------
+
+/// Result of a single tool installation.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum InstallResult {
+    /// Successfully installed from registry
+    InstalledRegistry,
+    /// Successfully linked from local path
+    InstalledLocal,
+    /// Tool was already installed
+    AlreadyInstalled,
+    /// Installation failed with error message
+    Failed(String),
+}
+
+/// Result of a single tool uninstallation.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum UninstallResult {
+    /// Successfully removed
+    Removed,
+    /// Tool not found
+    NotFound,
+    /// Removal failed
+    Failed(String),
+}
+
+/// Pre-flight information for a registry download.
+#[allow(dead_code)]
+struct RegistryPreflight {
+    name: String,
+    namespace: String,
+    tool_name: String,
+    version: String,
+    bundle_size: u64,
+    target_dir: PathBuf,
+    temp_file: PathBuf,
+}
+
+/// Result of pre-flight check.
+enum PreflightResult {
+    /// Ready for registry download
+    Registry(RegistryPreflight),
+    /// Local install (already handled)
+    Local(InstallResult),
+    /// Already installed
+    AlreadyInstalled,
+    /// Pre-flight failed
+    Failed(String),
+}
 
 //--------------------------------------------------------------------------------------------------
 // Functions
@@ -142,102 +197,94 @@ pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
     Ok(())
 }
 
-/// Add a tool from the registry or a local path.
-pub async fn add_tool(name: &str) -> ToolResult<()> {
+/// Run pre-flight checks for a tool (validation, metadata fetch, already-installed check).
+async fn preflight_tool(name: &str) -> PreflightResult {
     use crate::constants::DEFAULT_TOOLS_PATH;
 
     // Check if this looks like a local path
     if is_local_path(name) {
-        return install_local_tool(name).await;
+        return PreflightResult::Local(install_local_tool(name).await);
     }
 
-    let plugin_ref = name
-        .parse::<PluginRef>()
-        .map_err(|e| ToolError::Generic(format!("Invalid tool reference '{}': {}", name, e)))?;
-
-    // Check if it has a namespace (required for registry fetch)
-    let namespace = match plugin_ref.namespace() {
-        Some(ns) => ns,
-        None => {
-            println!(
-                "  {} Tool reference must include a namespace for registry fetch",
-                "✗".bright_red()
-            );
-            println!(
-                "    Example: {} or {}",
-                "appcypher/filesystem".bright_cyan(),
-                "myorg/mytool".bright_cyan()
-            );
-            return Ok(());
+    let plugin_ref = match name.parse::<PluginRef>() {
+        Ok(p) => p,
+        Err(e) => {
+            let msg = format!("Invalid tool reference '{}': {}", name, e);
+            return PreflightResult::Failed(msg);
         }
     };
 
-    let tool_name = plugin_ref.name();
+    // Check if it has a namespace (required for registry fetch)
+    let namespace = match plugin_ref.namespace() {
+        Some(ns) => ns.to_string(),
+        None => {
+            return PreflightResult::Failed(format!(
+                "{}: missing namespace (use namespace/name format)",
+                name
+            ));
+        }
+    };
 
-    println!(
-        "  {} Installing {} from registry...",
-        "→".bright_blue(),
-        name.bright_cyan()
-    );
+    let tool_name = plugin_ref.name().to_string();
 
     // Get artifact details from registry
     let client = RegistryClient::new();
-    let artifact = match client.get_artifact(namespace, tool_name).await {
+    let artifact = match client.get_artifact(&namespace, &tool_name).await {
         Ok(a) => a,
         Err(_) => {
-            println!(
-                "  {} Tool {} not found in registry",
-                "✗".bright_red(),
-                name.bright_white().bold()
-            );
-            return Ok(());
+            return PreflightResult::Failed(format!("Tool {} not found in registry", name));
         }
     };
 
     // Get version info
-    let version_info = artifact
-        .latest_version
-        .ok_or_else(|| ToolError::Generic(format!("No published version found for {}", name)))?;
-    let version = &version_info.version;
+    let version_info = match artifact.latest_version {
+        Some(v) => v,
+        None => {
+            return PreflightResult::Failed(format!("No published version for {}", name));
+        }
+    };
+    let version = version_info.version.clone();
     let bundle_size = version_info.bundle_size.unwrap_or(0);
 
     // Check if already installed
     let target_dir = DEFAULT_TOOLS_PATH
-        .join(namespace)
+        .join(&namespace)
         .join(format!("{}@{}", tool_name, version));
 
     if target_dir.join(MCPB_MANIFEST_FILE).exists() {
-        println!(
-            "  {} Already installed {}/{}@{}",
-            "✓".bright_green(),
-            namespace.bright_cyan(),
-            tool_name.bright_cyan(),
-            version.bright_cyan()
-        );
-        return Ok(());
+        return PreflightResult::AlreadyInstalled;
     }
 
-    // Create temp file for download
+    // Create temp file path for download
     let temp_file =
         std::env::temp_dir().join(format!("tool-{}-{}-{}.zip", namespace, tool_name, version));
 
-    // Create progress bar
-    let pb = ProgressBar::new(bundle_size);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("    [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
-            .unwrap()
-            .progress_chars("█░░"),
-    );
+    PreflightResult::Registry(RegistryPreflight {
+        name: name.to_string(),
+        namespace,
+        tool_name,
+        version,
+        bundle_size,
+        target_dir,
+        temp_file,
+    })
+}
+
+/// Download and install a tool with a progress bar.
+async fn download_and_install(preflight: RegistryPreflight, pb: ProgressBar) -> InstallResult {
+    let client = RegistryClient::new();
+
+    // Style for finished state (clean, aligned)
+    let finish_style = ProgressStyle::default_bar().template("  {msg}").unwrap();
 
     // Download with progress
     let pb_clone = pb.clone();
-    client
+    if let Err(e) = client
         .download_artifact_with_progress(
-            namespace,
-            tool_name,
-            version,
-            &temp_file,
+            &preflight.namespace,
+            &preflight.tool_name,
+            &preflight.version,
+            &preflight.temp_file,
             move |downloaded, total| {
                 if total > 0 && pb_clone.length() == Some(0) {
                     pb_clone.set_length(total);
@@ -245,47 +292,203 @@ pub async fn add_tool(name: &str) -> ToolResult<()> {
                 pb_clone.set_position(downloaded);
             },
         )
-        .await?;
+        .await
+    {
+        pb.set_style(finish_style);
+        pb.finish_with_message(format!(
+            "{} {:<30} Failed to download",
+            "✗".bright_red(),
+            format!("{}/{}", preflight.namespace, preflight.tool_name)
+        ));
+        return InstallResult::Failed(format!("Failed to download: {}", e));
+    }
 
-    pb.finish_and_clear();
+    pb.set_message(format!("{}/{}", preflight.namespace, preflight.tool_name));
 
     // Create target directory
-    tokio::fs::create_dir_all(&target_dir).await.map_err(|e| {
-        ToolError::Generic(format!(
-            "Failed to create tool directory {:?}: {}",
-            target_dir, e
-        ))
-    })?;
+    if let Err(e) = tokio::fs::create_dir_all(&preflight.target_dir).await {
+        pb.set_style(finish_style);
+        pb.finish_with_message(format!(
+            "{} {:<30} Failed to create directory",
+            "✗".bright_red(),
+            format!("{}/{}", preflight.namespace, preflight.tool_name)
+        ));
+        return InstallResult::Failed(format!("Failed to create directory: {}", e));
+    }
 
     // Extract the bundle
-    extract_bundle(&temp_file, &target_dir)?;
+    if let Err(e) = extract_bundle(&preflight.temp_file, &preflight.target_dir) {
+        pb.set_style(finish_style);
+        pb.finish_with_message(format!(
+            "{} {:<30} Failed to extract",
+            "✗".bright_red(),
+            format!("{}/{}", preflight.namespace, preflight.tool_name)
+        ));
+        return InstallResult::Failed(format!("Failed to extract: {}", e));
+    }
 
     // Clean up temp file
-    let _ = std::fs::remove_file(&temp_file);
+    let _ = std::fs::remove_file(&preflight.temp_file);
 
-    let is_mcpbx = McpbManifest::load(&target_dir)
+    // Determine format display
+    let is_mcpbx = McpbManifest::load(&preflight.target_dir)
         .map(|m| m.requires_mcpbx())
         .unwrap_or(false);
+    let format_tag = if is_mcpbx { "mcpbx" } else { "mcpb" };
     let format_display = if is_mcpbx {
-        "mcpbx".bright_yellow()
+        format_tag.bright_yellow()
     } else {
-        "mcpb".bright_green()
+        format_tag.bright_green()
     };
-    let path_display = target_dir.display().to_string();
-    let colored_path = if is_mcpbx {
-        path_display.bright_yellow()
-    } else {
-        path_display.bright_green()
-    };
-    println!(
-        "  {} Installed {}/{}@{} ({}) to {}",
+
+    pb.set_style(finish_style);
+    pb.finish_with_message(format!(
+        "{} {}/{}@{} ({})",
         "✓".bright_green(),
-        namespace.bright_cyan(),
-        tool_name.bright_cyan(),
-        version.bright_cyan(),
-        format_display,
-        colored_path
-    );
+        preflight.namespace.bright_cyan(),
+        preflight.tool_name.bright_cyan(),
+        preflight.version.bright_cyan(),
+        format_display
+    ));
+
+    InstallResult::InstalledRegistry
+}
+
+/// Install multiple tools from the registry or local paths.
+pub async fn add_tools(names: &[String]) -> ToolResult<()> {
+    use futures_util::future::join_all;
+
+    let mut registry_count = 0usize;
+    let mut local_count = 0usize;
+    let mut already_count = 0usize;
+    let mut failed_count = 0usize;
+
+    // Phase 1: Run preflight checks concurrently
+    let preflight_futures: Vec<_> = names.iter().map(|name| preflight_tool(name)).collect();
+    let preflight_results = join_all(preflight_futures).await;
+
+    // Separate registry downloads from immediate results
+    let mut registry_preflights = Vec::new();
+    let mut immediate_messages = Vec::new();
+
+    for (name, result) in names.iter().zip(preflight_results) {
+        match result {
+            PreflightResult::Registry(preflight) => {
+                registry_preflights.push(preflight);
+            }
+            PreflightResult::Local(install_result) => match install_result {
+                InstallResult::InstalledLocal => local_count += 1,
+                InstallResult::AlreadyInstalled => already_count += 1,
+                InstallResult::Failed(msg) => {
+                    immediate_messages.push(format!("  {} {}: {}", "✗".bright_red(), name, msg));
+                    failed_count += 1;
+                }
+                _ => {}
+            },
+            PreflightResult::AlreadyInstalled => {
+                immediate_messages.push(format!(
+                    "  {} Already installed {}",
+                    "✓".bright_green(),
+                    name.bright_cyan()
+                ));
+                already_count += 1;
+            }
+            PreflightResult::Failed(msg) => {
+                immediate_messages.push(format!("  {} {}", "✗".bright_red(), msg));
+                failed_count += 1;
+            }
+        }
+    }
+
+    // Print immediate messages (local installs, already installed, preflight failures)
+    for msg in &immediate_messages {
+        println!("{}", msg);
+    }
+
+    // Phase 2: Download registry packages in parallel with progress bars
+    if !registry_preflights.is_empty() {
+        let mp = MultiProgress::new();
+        let style = ProgressStyle::default_bar()
+            .template(
+                "  {msg:<30} [{bar:25.cyan/dim}] {bytes:>10}/{total_bytes:<10} {bytes_per_sec:>12}",
+            )
+            .unwrap()
+            .progress_chars("█░░");
+
+        // Create progress bars and spawn download tasks
+        let handles: Vec<JoinHandle<InstallResult>> = registry_preflights
+            .into_iter()
+            .map(|preflight| {
+                let pb = mp.add(ProgressBar::new(preflight.bundle_size));
+                pb.set_style(style.clone());
+                pb.set_message(format!("{}/{}", preflight.namespace, preflight.tool_name));
+
+                tokio::spawn(async move { download_and_install(preflight, pb).await })
+            })
+            .collect();
+
+        // Wait for all downloads to complete
+        let results = join_all(handles).await;
+
+        for result in results {
+            match result {
+                Ok(InstallResult::InstalledRegistry) => registry_count += 1,
+                Ok(InstallResult::Failed(_)) => failed_count += 1,
+                Err(_) => failed_count += 1, // Task panicked
+                _ => {}
+            }
+        }
+    }
+
+    // Print summary if multiple packages were requested
+    if names.len() > 1 {
+        println!();
+        let total_installed = registry_count + local_count;
+        let mut parts = Vec::new();
+
+        if registry_count > 0 {
+            parts.push(format!("{} from registry", registry_count));
+        }
+        if local_count > 0 {
+            parts.push(format!("{} linked", local_count));
+        }
+
+        if total_installed > 0 {
+            let details = if parts.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", parts.join(", "))
+            };
+            println!(
+                "Installed {} {}{details}",
+                total_installed.to_string().bright_green(),
+                if total_installed == 1 {
+                    "package"
+                } else {
+                    "packages"
+                }
+            );
+        }
+
+        if already_count > 0 {
+            println!(
+                "Skipped {} already installed",
+                already_count.to_string().bright_cyan()
+            );
+        }
+
+        if failed_count > 0 {
+            println!(
+                "Failed {} {}",
+                failed_count.to_string().bright_red(),
+                if failed_count == 1 {
+                    "package"
+                } else {
+                    "packages"
+                }
+            );
+        }
+    }
 
     Ok(())
 }
@@ -365,39 +568,62 @@ fn is_local_path(input: &str) -> bool {
 }
 
 /// Install a tool from a local path by creating a symlink.
-async fn install_local_tool(path: &str) -> ToolResult<()> {
+async fn install_local_tool(path: &str) -> InstallResult {
     use crate::constants::DEFAULT_TOOLS_PATH;
     use crate::mcpb::McpbManifest;
 
     // Resolve the path
     let source_path = if path.starts_with('~') {
-        dirs::home_dir()
-            .ok_or_else(|| ToolError::Generic("Could not determine home directory".into()))?
-            .join(&path[2..])
+        match dirs::home_dir() {
+            Some(home) => home.join(&path[2..]),
+            None => {
+                let msg = "Could not determine home directory".to_string();
+                println!("  {} {}", "✗".bright_red(), msg);
+                return InstallResult::Failed(msg);
+            }
+        }
     } else {
         PathBuf::from(path)
     };
 
-    let source_path = source_path
-        .canonicalize()
-        .map_err(|_| ToolError::Generic(format!("Path not found: {}", path)))?;
+    let source_path = match source_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            let msg = format!("Path not found: {}", path);
+            println!("  {} {}", "✗".bright_red(), msg);
+            return InstallResult::Failed(msg);
+        }
+    };
 
     // Check for manifest.json
     let manifest_path = source_path.join(MCPB_MANIFEST_FILE);
     if !manifest_path.exists() {
-        return Err(ToolError::Generic(format!(
+        let msg = format!(
             "No {} found in {}. Run `tool init` first.",
             MCPB_MANIFEST_FILE,
             source_path.display()
-        )));
+        );
+        println!("  {} {}", "✗".bright_red(), msg);
+        return InstallResult::Failed(msg);
     }
 
     // Load manifest to get name and version
-    let manifest = McpbManifest::load(&source_path)?;
-    let tool_name = manifest
-        .name
-        .as_ref()
-        .ok_or_else(|| ToolError::Generic("manifest.json must include a name field".into()))?;
+    let manifest = match McpbManifest::load(&source_path) {
+        Ok(m) => m,
+        Err(e) => {
+            let msg = format!("Failed to load manifest: {}", e);
+            println!("  {} {}", "✗".bright_red(), msg);
+            return InstallResult::Failed(msg);
+        }
+    };
+    let tool_name = match manifest.name.as_ref() {
+        Some(n) => n,
+        None => {
+            let msg = "manifest.json must include a name field".to_string();
+            println!("  {} {}", "✗".bright_red(), msg);
+            return InstallResult::Failed(msg);
+        }
+    };
     let version = manifest.version.as_ref();
 
     // Build target directory name
@@ -427,35 +653,46 @@ async fn install_local_tool(path: &str) -> ToolResult<()> {
                 "✓".bright_green(),
                 target_name.bright_cyan()
             );
-            return Ok(());
+            return InstallResult::AlreadyInstalled;
         }
 
         // Remove existing (symlink or directory)
         if target_path.is_symlink() || target_path.is_file() {
-            std::fs::remove_file(&target_path).map_err(|e| {
-                ToolError::Generic(format!("Failed to remove existing link: {}", e))
-            })?;
-        } else {
-            std::fs::remove_dir_all(&target_path).map_err(|e| {
-                ToolError::Generic(format!("Failed to remove existing directory: {}", e))
-            })?;
+            if let Err(e) = std::fs::remove_file(&target_path) {
+                let msg = format!("Failed to remove existing link: {}", e);
+                println!("  {} {}", "✗".bright_red(), msg);
+                return InstallResult::Failed(msg);
+            }
+        } else if let Err(e) = std::fs::remove_dir_all(&target_path) {
+            let msg = format!("Failed to remove existing directory: {}", e);
+            println!("  {} {}", "✗".bright_red(), msg);
+            return InstallResult::Failed(msg);
         }
     }
 
     // Ensure parent directory exists
-    if let Some(parent) = target_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| ToolError::Generic(format!("Failed to create tools directory: {}", e)))?;
+    if let Some(parent) = target_path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        let msg = format!("Failed to create tools directory: {}", e);
+        println!("  {} {}", "✗".bright_red(), msg);
+        return InstallResult::Failed(msg);
     }
 
     // Create symlink
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&source_path, &target_path)
-        .map_err(|e| ToolError::Generic(format!("Failed to create symlink: {}", e)))?;
+    if let Err(e) = std::os::unix::fs::symlink(&source_path, &target_path) {
+        let msg = format!("Failed to create symlink: {}", e);
+        println!("  {} {}", "✗".bright_red(), msg);
+        return InstallResult::Failed(msg);
+    }
 
     #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(&source_path, &target_path)
-        .map_err(|e| ToolError::Generic(format!("Failed to create symlink: {}", e)))?;
+    if let Err(e) = std::os::windows::fs::symlink_dir(&source_path, &target_path) {
+        let msg = format!("Failed to create symlink: {}", e);
+        println!("  {} {}", "✗".bright_red(), msg);
+        return InstallResult::Failed(msg);
+    }
 
     println!(
         "  {} Installed {} {}",
@@ -464,47 +701,101 @@ async fn install_local_tool(path: &str) -> ToolResult<()> {
         "(linked)".dimmed()
     );
 
-    Ok(())
+    InstallResult::InstalledLocal
 }
 
-/// Remove an installed tool.
-pub async fn remove_tool(name: &str) -> ToolResult<()> {
+/// Remove a single installed tool.
+async fn remove_tool(name: &str) -> (String, UninstallResult) {
     use tokio::fs;
 
     let resolver = FilePluginResolver::default();
 
     // First, find the tool
-    match resolver.resolve_tool(name).await? {
-        Some(resolved) => {
-            // Get the directory containing the tool
-            let tool_dir = resolved
-                .path
-                .parent()
-                .ok_or_else(|| ToolError::Generic("Failed to get tool directory".into()))?;
+    let resolved = match resolver.resolve_tool(name).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return (name.to_string(), UninstallResult::NotFound),
+        Err(e) => return (name.to_string(), UninstallResult::Failed(e.to_string())),
+    };
 
-            println!(
-                "  {} Removing tool {}...",
-                "→".bright_blue(),
-                resolved.plugin_ref.to_string().bright_cyan()
-            );
-
-            // Remove the directory
-            fs::remove_dir_all(tool_dir).await.map_err(|e| {
-                ToolError::Generic(format!("Failed to remove tool directory: {}", e))
-            })?;
-
-            println!(
-                "  {} Removed {}",
-                "✓".bright_green(),
-                resolved.plugin_ref.to_string().bright_cyan()
+    // Get the directory containing the tool
+    let tool_dir = match resolved.path.parent() {
+        Some(d) => d,
+        None => {
+            return (
+                name.to_string(),
+                UninstallResult::Failed("Failed to get tool directory".into()),
             );
         }
-        None => {
+    };
+
+    // Remove the directory
+    if let Err(e) = fs::remove_dir_all(tool_dir).await {
+        return (
+            resolved.plugin_ref.to_string(),
+            UninstallResult::Failed(format!("Failed to remove: {}", e)),
+        );
+    }
+
+    (resolved.plugin_ref.to_string(), UninstallResult::Removed)
+}
+
+/// Remove multiple installed tools.
+pub async fn remove_tools(names: &[String]) -> ToolResult<()> {
+    use futures_util::future::join_all;
+
+    // Run all removals concurrently
+    let futures: Vec<_> = names.iter().map(|name| remove_tool(name)).collect();
+    let results = join_all(futures).await;
+
+    let mut removed_count = 0usize;
+    let mut not_found_count = 0usize;
+    let mut failed_count = 0usize;
+
+    // Print results
+    for (tool_name, result) in &results {
+        match result {
+            UninstallResult::Removed => {
+                println!(
+                    "  {} Removed {}",
+                    "✓".bright_green(),
+                    tool_name.bright_cyan()
+                );
+                removed_count += 1;
+            }
+            UninstallResult::NotFound => {
+                println!(
+                    "  {} Tool {} not found",
+                    "✗".bright_red(),
+                    tool_name.bright_white().bold()
+                );
+                not_found_count += 1;
+            }
+            UninstallResult::Failed(msg) => {
+                println!("  {} {}: {}", "✗".bright_red(), tool_name, msg);
+                failed_count += 1;
+            }
+        }
+    }
+
+    // Print summary if multiple tools were requested
+    if names.len() > 1 {
+        println!();
+        if removed_count > 0 {
             println!(
-                "  {} Tool {} not found",
-                "✗".bright_red(),
-                name.bright_white().bold()
+                "Removed {} {}",
+                removed_count.to_string().bright_green(),
+                if removed_count == 1 {
+                    "package"
+                } else {
+                    "packages"
+                }
             );
+        }
+        if not_found_count > 0 {
+            println!("Not found: {}", not_found_count.to_string().bright_yellow());
+        }
+        if failed_count > 0 {
+            println!("Failed: {}", failed_count.to_string().bright_red());
         }
     }
 
