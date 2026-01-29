@@ -889,10 +889,15 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
     }
 
     println!();
+    let install_ref = if results.len() == 1 {
+        format!("{}/{}", results[0].namespace, results[0].name)
+    } else {
+        "<namespace>/<name>".to_string()
+    };
     println!(
         "    {} {}",
         "Install with:".dimmed(),
-        "tool install <namespace>/<name>".bright_white()
+        format!("tool install {}", install_ref).bright_white()
     );
 
     Ok(())
