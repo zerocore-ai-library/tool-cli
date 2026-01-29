@@ -8,7 +8,7 @@
 <br />
 
 <div align="center">
-  <video autoplay src="https://github.com/user-attachments/assets/23618f92-5897-44d1-bfa6-1058f30c09ef" width="800" controls></video>
+  <video autoplay src="https://github.com/user-attachments/assets/6a5042e6-0a34-4b2a-bfc9-8e05cb1c12ac" width="100%" controls></video>
 </div>
 
 <br />
