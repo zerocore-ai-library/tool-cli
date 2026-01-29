@@ -27,12 +27,8 @@
 > [MCP](https://github.com/modelcontextprotocol) solved how AI agents integrate with other systems. [MCPB](https://github.com/modelcontextprotocol/mcpb) solved how users install them. But if you're building MCP tools, you're still copying JSON configs, wrestling with dependencies, and manually testing against clients.
 >
 > `tool-cli` is the missing piece. It handles the entire lifecycle from scaffolding to publishing, so you can focus on building your tool.
-
-<br />
-
-<div align="center">
-    <a href="https://tool.store/blog/building-context-efficient-agents" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://tool.store/blog/building-context-efficient-agents" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
-</div>
+>
+> See how to [build context-efficient agents with tool-cli](https://tool.store/blog/building-context-efficient-agents)
 
 <br />
 
@@ -352,6 +348,12 @@ Once you've installed some tools, you probably want to use them in your favorite
 | `login`     | Log in to the registry                              |
 
 Check out the [CLI docs](https://tool.store/docs/cli) for the full details.
+
+<br />
+
+<div align="center">
+    <a href="https://tool.store/blog/building-context-efficient-agents" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://tool.store/blog/building-context-efficient-agents" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
+</div>
 
 <br />
 
