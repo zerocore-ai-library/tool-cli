@@ -352,18 +352,18 @@ async fn init_migrate(
     // Run detection with verbose signal reporting
     let registry = DetectorRegistry::new();
 
-    println!("\n    {}", "Signals".dimmed());
+    println!("\n  {}", "Signals".dimmed());
     let on_signal = |label: &str, passed: bool, weight: &str| {
         if passed {
             println!(
-                "      {} {:<40} {}",
+                "  {} {:<40} {}",
                 "✓".bright_green(),
                 label,
                 format!("+{}", weight).dimmed()
             );
         } else {
             println!(
-                "      {} {:<40} {}",
+                "  {} {:<40} {}",
                 "✗".bright_red(),
                 label,
                 format!("-{}", weight).bright_red()
@@ -375,12 +375,12 @@ async fn init_migrate(
         .detect_verbose(&target_dir, &on_signal)
         .ok_or_else(|| {
             ToolError::Generic(
-                "No MCP server project detected in this directory.\n\n    \
-             If this is a new project, remove existing files or use an empty directory.\n\n    \
-             Checked for:\n    \
-             - Node.js with @modelcontextprotocol/sdk\n    \
-             - Python with mcp package\n    \
-             - Rust with rmcp crate"
+                "No MCP server project detected in this directory.\n\n  \
+             · If this is a new project, remove existing files or use an empty directory.\n\n  \
+             Checked for:\n  \
+             · Node.js with @modelcontextprotocol/sdk\n  \
+             · Python with mcp package\n  \
+             · Rust with rmcp crate"
                     .into(),
             )
         })?;
@@ -423,9 +423,9 @@ async fn init_migrate(
         detection.display_name.bold()
     );
 
-    println!("    {:<12} {}", "Type".dimmed(), detection.display_name);
+    println!("  · {:<12} {}", "Type".dimmed(), detection.display_name);
     println!(
-        "    {:<12} {}",
+        "  · {:<12} {}",
         "Transport".dimmed(),
         transport_display.to_string().to_lowercase()
     );
@@ -433,10 +433,10 @@ async fn init_migrate(
     if let Some(ep) = entry_display {
         let ep_exists = target_dir.join(ep).exists();
         if ep_exists {
-            println!("    {:<12} {}", "Entry".dimmed(), ep);
+            println!("  · {:<12} {}", "Entry".dimmed(), ep);
         } else {
             println!(
-                "    {:<12} {} {}",
+                "  · {:<12} {} {}",
                 "Entry".dimmed(),
                 ep,
                 "(inferred)".bright_yellow()
@@ -444,25 +444,25 @@ async fn init_migrate(
         }
     } else {
         println!(
-            "    {:<12} {}",
+            "  · {:<12} {}",
             "Entry".dimmed(),
             "(not detected)".bright_yellow()
         );
     }
 
     if let Some(pm) = &detection.result.details.package_manager {
-        println!("    {:<12} {}", "Package".dimmed(), pm);
+        println!("  · {:<12} {}", "Package".dimmed(), pm);
     }
 
     println!(
-        "    {:<12} {:.0}%",
+        "  · {:<12} {:.0}%",
         "Confidence".dimmed(),
         detection.result.confidence * 100.0
     );
 
     // Show build command
     if let Some(build_cmd) = &detection.result.details.build_command {
-        println!("    {:<12} {}", "Build".dimmed(), build_cmd.dimmed());
+        println!("  · {:<12} {}", "Build".dimmed(), build_cmd.dimmed());
     }
 
     // Verify: start server and send MCP initialize
@@ -475,7 +475,7 @@ async fn init_migrate(
             detection.result.confidence * 100.0
         };
         println!(
-            "\n    {:<12} {:.0}%",
+            "\n  · {:<12} {:.0}%",
             "Confidence".dimmed(),
             final_confidence
         );
@@ -483,7 +483,7 @@ async fn init_migrate(
 
     // Show notes/warnings
     for note in &detection.result.details.notes {
-        println!("\n    {} {}", "⚠".bright_yellow(), note.bright_yellow());
+        println!("\n  {} {}", "⚠".bright_yellow(), note.bright_yellow());
     }
 
     // Parse .env.example for env vars
@@ -541,8 +541,8 @@ async fn init_migrate(
 
     // Show preview of files to create
     println!("\n  {}:", "Files to create".dimmed());
-    println!("    manifest.json");
-    println!("    .mcpbignore");
+    println!("  · manifest.json");
+    println!("  · .mcpbignore");
 
     // Confirmation prompt (unless --yes)
     if !yes && std::io::stdin().is_terminal() {
@@ -721,7 +721,7 @@ fn print_migrate_next_steps(
 
     if has_build && entry_missing {
         println!(
-            "    {}. {}",
+            "  {}. {}",
             step,
             format!("tool build {}", display_path).bright_white(),
         );
@@ -729,14 +729,14 @@ fn print_migrate_next_steps(
     }
 
     println!(
-        "    {}. {}",
+        "  {}. {}",
         step,
         format!("tool info {}", display_path).bright_white(),
     );
     step += 1;
 
     println!(
-        "    {}. {}",
+        "  {}. {}",
         step,
         format!("tool run {}", display_path).bright_white(),
     );
@@ -748,7 +748,7 @@ fn print_migrate_next_steps(
         ".mcpb".bright_green().to_string()
     };
     println!(
-        "    {}. {}  {}",
+        "  {}. {}  {}",
         step,
         format!("tool pack {}", display_path).bright_white(),
         format!("# create {} bundle", pack_ext).dimmed(),
@@ -816,30 +816,30 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
     let transport_display = if mode.is_http() { "http" } else { "stdio" };
     let is_mcpbx = mode.is_reference() || mode.is_http();
 
-    println!("    {}       {}", "Type".dimmed(), type_display);
-    println!("    {}  {}", "Transport".dimmed(), transport_display);
+    println!("  · {}       {}", "Type".dimmed(), type_display);
+    println!("  · {}  {}", "Transport".dimmed(), transport_display);
     if is_mcpbx {
-        println!("    {}     {}", "Format".dimmed(), "mcpbx".bright_yellow());
+        println!("  · {}     {}", "Format".dimmed(), "mcpbx".bright_yellow());
     } else {
-        println!("    {}     {}", "Format".dimmed(), "mcpb".bright_green());
+        println!("  · {}     {}", "Format".dimmed(), "mcpb".bright_green());
     }
 
     if !mode.is_reference() {
         if is_rust {
-            println!("    {}      target/release/{}", "Entry".dimmed(), name);
+            println!("  · {}      target/release/{}", "Entry".dimmed(), name);
         } else {
             match mode.server_type() {
                 Some(McpbServerType::Node) => {
-                    println!("    {}      server/index.js", "Entry".dimmed());
+                    println!("  · {}      server/index.js", "Entry".dimmed());
                 }
                 Some(McpbServerType::Python) => {
-                    println!("    {}      server/main.py", "Entry".dimmed());
+                    println!("  · {}      server/main.py", "Entry".dimmed());
                 }
                 Some(McpbServerType::Binary) | None => {}
             }
         }
     }
-    println!("    {}    0.1.0\n", "Version".dimmed());
+    println!("  · {}    0.1.0\n", "Version".dimmed());
 
     // Tree structure
     let prefix = match dir_path {
@@ -847,49 +847,49 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
         None => "./".to_string(),
     };
 
-    println!("    {}", prefix.bold());
+    println!("  {}", prefix.bold());
 
     if mode.is_reference() {
-        println!("    ├── manifest.json");
-        println!("    ├── README.md");
-        println!("    └── .mcpbignore");
+        println!("  ├── manifest.json");
+        println!("  ├── README.md");
+        println!("  └── .mcpbignore");
     } else if is_rust {
-        println!("    ├── manifest.json");
-        println!("    ├── README.md");
-        println!("    ├── Cargo.toml");
-        println!("    ├── .gitignore");
-        println!("    ├── .mcpbignore");
-        println!("    └── src/");
-        println!("        ├── main.rs");
-        println!("        └── lib.rs");
+        println!("  ├── manifest.json");
+        println!("  ├── README.md");
+        println!("  ├── Cargo.toml");
+        println!("  ├── .gitignore");
+        println!("  ├── .mcpbignore");
+        println!("  └── src/");
+        println!("      ├── main.rs");
+        println!("      └── lib.rs");
     } else {
         match mode.server_type() {
             Some(McpbServerType::Node) => {
-                println!("    ├── manifest.json");
-                println!("    ├── README.md");
-                println!("    ├── package.json");
-                println!("    ├── .gitignore");
-                println!("    ├── .mcpbignore");
-                println!("    └── server/");
-                println!("        └── index.js");
+                println!("  ├── manifest.json");
+                println!("  ├── README.md");
+                println!("  ├── package.json");
+                println!("  ├── .gitignore");
+                println!("  ├── .mcpbignore");
+                println!("  └── server/");
+                println!("      └── index.js");
             }
             Some(McpbServerType::Python) => {
                 let project_file = match mode.python_package_manager() {
                     Some(PythonPackageManager::Pip) => "requirements.txt",
                     _ => "pyproject.toml",
                 };
-                println!("    ├── manifest.json");
-                println!("    ├── README.md");
-                println!("    ├── {}", project_file);
-                println!("    ├── .gitignore");
-                println!("    ├── .mcpbignore");
-                println!("    └── server/");
-                println!("        └── main.py");
+                println!("  ├── manifest.json");
+                println!("  ├── README.md");
+                println!("  ├── {}", project_file);
+                println!("  ├── .gitignore");
+                println!("  ├── .mcpbignore");
+                println!("  └── server/");
+                println!("      └── main.py");
             }
             Some(McpbServerType::Binary) | None => {
-                println!("    ├── manifest.json");
-                println!("    ├── README.md");
-                println!("    └── .mcpbignore");
+                println!("  ├── manifest.json");
+                println!("  ├── README.md");
+                println!("  └── .mcpbignore");
             }
         }
     }
@@ -900,47 +900,47 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
     let mut step = 1;
 
     if let Some(p) = dir_path {
-        println!("    {}. cd {}", step, p);
+        println!("  {}. cd {}", step, p);
         step += 1;
     }
 
     if mode.is_reference() {
         if mode.is_http() {
             println!(
-                "    {}. {}",
+                "  {}. {}",
                 step,
                 "# Set url and credentials in manifest.json".dimmed()
             );
         } else {
             println!(
-                "    {}. {}",
+                "  {}. {}",
                 step,
                 "# Set command path in manifest.json".dimmed()
             );
         }
         println!(
-            "    {}. tool info               {}",
+            "  {}. tool info               {}",
             step + 1,
             "# verify connection".dimmed()
         );
     } else if is_rust {
         println!(
-            "    {}. tool build              {}",
+            "  {}. tool build              {}",
             step,
             "# build binary".dimmed()
         );
         println!(
-            "    {}. tool info               {}",
+            "  {}. tool info               {}",
             step + 1,
             "# list tools".dimmed()
         );
         println!(
-            "    {}. tool call -m hello      {}",
+            "  {}. tool call -m hello      {}",
             step + 2,
             "# test a tool".dimmed()
         );
         println!(
-            "    {}. tool run                {}",
+            "  {}. tool run                {}",
             step + 3,
             "# run server interactively".dimmed()
         );
@@ -950,28 +950,28 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
             format!("# create {} bundle", ".mcpb".bright_green())
         };
         println!(
-            "    {}. tool pack               {}",
+            "  {}. tool pack               {}",
             step + 4,
             pack_hint.dimmed()
         );
     } else {
         println!(
-            "    {}. tool build              {}",
+            "  {}. tool build              {}",
             step,
             "# install dependencies".dimmed()
         );
         println!(
-            "    {}. tool info               {}",
+            "  {}. tool info               {}",
             step + 1,
             "# list tools".dimmed()
         );
         println!(
-            "    {}. tool call -m hello      {}",
+            "  {}. tool call -m hello      {}",
             step + 2,
             "# test a tool".dimmed()
         );
         println!(
-            "    {}. tool run                {}",
+            "  {}. tool run                {}",
             step + 3,
             "# run server interactively".dimmed()
         );
@@ -981,7 +981,7 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
             format!("# create {} bundle", ".mcpb".bright_green())
         };
         println!(
-            "    {}. tool pack               {}",
+            "  {}. tool pack               {}",
             step + 4,
             pack_hint.dimmed()
         );

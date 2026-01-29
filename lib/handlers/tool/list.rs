@@ -69,13 +69,13 @@ pub async fn list_tools(
                 );
             } else {
                 println!("  {} No tools installed", "✗".bright_red());
-                println!("\n    {}", "Searched:".dimmed());
+                println!("\n  {}", "Searched:".dimmed());
                 if let Ok(cwd) = std::env::current_dir() {
-                    println!("      {}", cwd.join("tools").display().to_string().dimmed());
+                    println!("  · {}", cwd.join("tools").display().to_string().dimmed());
                 }
                 if let Some(home) = dirs::home_dir() {
                     println!(
-                        "      {}",
+                        "  · {}",
                         home.join(".tool/tools").display().to_string().dimmed()
                     );
                 }
@@ -318,10 +318,10 @@ pub async fn list_tools(
                 .and_then(|d| format_description(d, false, ""))
                 .map(|d| format!("  {}", d.dimmed()))
                 .unwrap_or_default();
-            println!("    {}{}", entry.name.bright_cyan().bold(), desc);
-            println!("        {}       {}", "Type".dimmed(), entry.tool_type);
+            println!("  {}{}", entry.name.bright_cyan().bold(), desc);
+            println!("  · {}       {}", "Type".dimmed(), entry.tool_type);
             println!(
-                "        {}   {}",
+                "  · {}   {}",
                 "Location".dimmed(),
                 entry.path.display().to_string().dimmed()
             );
@@ -330,7 +330,7 @@ pub async fn list_tools(
             let resolved_plugin = match load_tool_from_path(&entry.path) {
                 Ok(p) => p,
                 Err(_) => {
-                    println!("    {} Could not load manifest\n", "✗".bright_red());
+                    println!("  {} Could not load manifest\n", "✗".bright_red());
                     continue;
                 }
             };
@@ -340,10 +340,7 @@ pub async fn list_tools(
                 match allocate_system_config(resolved_plugin.template.system_config.as_ref()) {
                     Ok(c) => c,
                     Err(_) => {
-                        println!(
-                            "    {} Could not allocate system config\n",
-                            "✗".bright_red()
-                        );
+                        println!("  {} Could not allocate system config\n", "✗".bright_red());
                         continue;
                     }
                 };
@@ -354,7 +351,7 @@ pub async fn list_tools(
             {
                 Ok(r) => r,
                 Err(_) => {
-                    println!("    {} Could not resolve manifest\n", "✗".bright_red());
+                    println!("  {} Could not resolve manifest\n", "✗".bright_red());
                     continue;
                 }
             };
@@ -373,7 +370,7 @@ pub async fn list_tools(
                     // Show tools
                     if !capabilities.tools.is_empty() {
                         println!();
-                        println!("    {}:", "Tools".dimmed());
+                        println!("  {}:", "Tools".dimmed());
                         for tool_info in &capabilities.tools {
                             let tool_desc = tool_info
                                 .description
@@ -381,14 +378,14 @@ pub async fn list_tools(
                                 .and_then(|d| format_description(d, false, ""))
                                 .map(|d| format!("  {}", d.dimmed()))
                                 .unwrap_or_default();
-                            println!("      {}{}", tool_info.name.bright_white(), tool_desc);
+                            println!("  · {}{}", tool_info.name.bright_white(), tool_desc);
                         }
                     }
 
                     // Show prompts
                     if !capabilities.prompts.is_empty() {
                         println!();
-                        println!("    {}:", "Prompts".dimmed());
+                        println!("  {}:", "Prompts".dimmed());
                         for prompt in &capabilities.prompts {
                             let prompt_desc = prompt
                                 .description
@@ -397,7 +394,7 @@ pub async fn list_tools(
                                 .map(|d| format!("  {}", d.dimmed()))
                                 .unwrap_or_default();
                             println!(
-                                "      {}{}",
+                                "  · {}{}",
                                 prompt.name.to_string().bright_magenta(),
                                 prompt_desc
                             );
@@ -407,7 +404,7 @@ pub async fn list_tools(
                     // Show resources
                     if !capabilities.resources.is_empty() {
                         println!();
-                        println!("    {}:", "Resources".dimmed());
+                        println!("  {}:", "Resources".dimmed());
                         for resource in &capabilities.resources {
                             let resource_desc = resource
                                 .description
@@ -416,7 +413,7 @@ pub async fn list_tools(
                                 .map(|d| format!("  {}", d.dimmed()))
                                 .unwrap_or_default();
                             println!(
-                                "      {}{}",
+                                "  · {}{}",
                                 resource.uri.to_string().bright_yellow(),
                                 resource_desc
                             );
@@ -424,7 +421,7 @@ pub async fn list_tools(
                     }
                 }
                 Err(_) => {
-                    println!("    {} Could not connect to server", "✗".bright_red());
+                    println!("  {} Could not connect to server", "✗".bright_red());
                 }
             }
             println!();
@@ -438,10 +435,10 @@ pub async fn list_tools(
                 .and_then(|d| format_description(d, false, ""))
                 .map(|d| format!("  {}", d.dimmed()))
                 .unwrap_or_default();
-            println!("    {}{}", entry.name.bright_cyan(), desc);
-            println!("        {}       {}", "Type".dimmed(), entry.tool_type);
+            println!("  {}{}", entry.name.bright_cyan(), desc);
+            println!("  · {}       {}", "Type".dimmed(), entry.tool_type);
             println!(
-                "        {}   {}",
+                "  · {}   {}",
                 "Location".dimmed(),
                 entry.path.display().to_string().dimmed()
             );

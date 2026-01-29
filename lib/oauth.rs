@@ -399,18 +399,18 @@ pub async fn run_interactive_oauth(
 
     // Open browser
     eprintln!(
-        "    {} Opening browser for authorization...",
+        "  {} Opening browser for authorization...",
         "→".bright_blue()
     );
     eprintln!(
-        "    {} If browser doesn't open, visit:\n      {}\n",
+        "  {} If browser doesn't open, visit:\n  · {}\n",
         "?".bright_yellow(),
         auth_url.dimmed()
     );
 
     if let Err(e) = open::that(auth_url.as_str()) {
-        eprintln!("    {} Failed to open browser: {}", "!".bright_yellow(), e);
-        eprintln!("      Please manually open the URL above.");
+        eprintln!("  {} Failed to open browser: {}", "!".bright_yellow(), e);
+        eprintln!("  · Please manually open the URL above.");
     }
 
     // Wait for callback with timeout

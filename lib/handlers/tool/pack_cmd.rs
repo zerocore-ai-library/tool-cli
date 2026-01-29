@@ -36,15 +36,10 @@ pub async fn pack_mcpb(
                     issue.location.bold()
                 );
                 if let Some(help) = &issue.help {
-                    println!("      {} {}", "├─".dimmed(), issue.details.dimmed());
-                    println!(
-                        "      {} {}: {}",
-                        "└─".dimmed(),
-                        "help".bright_green().dimmed(),
-                        help.dimmed()
-                    );
+                    println!("  · {}", issue.details.dimmed());
+                    println!("  · {}: {}", "help".bright_green().dimmed(), help.dimmed());
                 } else {
-                    println!("      {} {}", "└─".dimmed(), issue.details.dimmed());
+                    println!("  · {}", issue.details.dimmed());
                 }
                 println!();
             }
@@ -80,7 +75,7 @@ pub async fn pack_mcpb(
             if verbose {
                 for ignored in &result.ignored_files {
                     println!(
-                        "    {} {} {}",
+                        "  {} {} {}",
                         "-".dimmed(),
                         ignored.dimmed(),
                         "(ignored)".dimmed()
@@ -101,7 +96,7 @@ pub async fn pack_mcpb(
                 format_size(result.compressed_size)
             );
             println!(
-                "    Files: {}, Compressed: {} (from {})",
+                "  · Files: {}, Compressed: {} (from {})",
                 result.file_count,
                 format_size(result.compressed_size),
                 format_size(result.total_size)
@@ -117,15 +112,10 @@ pub async fn pack_mcpb(
                     error.location.bold()
                 );
                 if let Some(help) = &error.help {
-                    println!("      {} {}", "├─".dimmed(), error.details.dimmed());
-                    println!(
-                        "      {} {}: {}",
-                        "└─".dimmed(),
-                        "help".bright_green().dimmed(),
-                        help.dimmed()
-                    );
+                    println!("  · {}", error.details.dimmed());
+                    println!("  · {}: {}", "help".bright_green().dimmed(), help.dimmed());
                 } else {
-                    println!("      {} {}", "└─".dimmed(), error.details.dimmed());
+                    println!("  · {}", error.details.dimmed());
                 }
                 println!();
             }

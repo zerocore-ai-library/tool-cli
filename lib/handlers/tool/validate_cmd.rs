@@ -115,17 +115,9 @@ fn output_full(result: &ValidationResult, strict: bool, format_name: &str, is_mc
             format!("warning[{}]", issue.code).bright_yellow().bold()
         };
         println!("  {}: → {}", label, issue.location.bold());
-
+        println!("  · {}", issue.details.dimmed());
         if let Some(help) = &issue.help {
-            println!("      {} {}", "├─".dimmed(), issue.details.dimmed());
-            println!(
-                "      {} {}: {}",
-                "└─".dimmed(),
-                "help".bright_green().dimmed(),
-                help.dimmed()
-            );
-        } else {
-            println!("      {} {}", "└─".dimmed(), issue.details.dimmed());
+            println!("  · {}: {}", "help".bright_green().dimmed(), help.dimmed());
         }
 
         println!();

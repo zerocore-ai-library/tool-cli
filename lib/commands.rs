@@ -102,7 +102,8 @@ const CALL_EXAMPLES: &str = examples![
 const DOWNLOAD_EXAMPLES: &str = examples![
     "tool download appcypher/bash      " # "Download to current dir",
     "tool download appcypher/bash@1.0.0" # "Download specific version",
-    "tool download bash -o my-tool.mcpb" # "Custom output filename",
+    "tool download bash terminal       " # "Download multiple packages",
+    "tool download bash -o ./downloads " # "Download to specific directory",
 ];
 
 const VALIDATE_EXAMPLES: &str = examples![
@@ -228,7 +229,7 @@ const CLI_EXAMPLES: &str = concat!(
 
 /// Tool CLI - Manage MCP tools.
 #[derive(Debug, Parser)]
-#[command(name = "tool", author, styles=styles())]
+#[command(name = "tool", author, version, styles=styles())]
 #[command(about = "Manage MCP tools and packages", after_help = CLI_EXAMPLES)]
 pub struct Cli {
     /// Concise output for AI agents (minimal formatting, machine-parseable).
@@ -530,11 +531,12 @@ pub enum Command {
         json: bool,
     },
 
-    /// Download a tool from the registry.
+    /// Download tools from the registry.
     #[command(after_help = DOWNLOAD_EXAMPLES)]
     Download {
-        /// Tool reference (`namespace/name[@version]`).
-        name: String,
+        /// Tool references (`namespace/name[@version]`).
+        #[arg(required = true)]
+        names: Vec<String>,
 
         /// Download to this directory (defaults to current directory).
         #[arg(short, long)]

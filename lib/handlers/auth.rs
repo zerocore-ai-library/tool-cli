@@ -3,6 +3,7 @@
 use crate::constants::{REGISTRY_AUTH_DIR, REGISTRY_TOKEN_ENV, get_registry_url};
 use crate::error::ToolResult;
 use crate::registry::RegistryClient;
+use crate::styles::Spinner;
 use colored::Colorize;
 use console::Term;
 use serde::{Deserialize, Serialize};
@@ -142,7 +143,8 @@ pub async fn auth_login(token: Option<&str>) -> ToolResult<()> {
     }
 
     // Validate the token
-    println!("\n  {} Validating token...", "→".bright_blue());
+    println!();
+    let spinner = Spinner::with_indent("Validating token", 2);
 
     let client = RegistryClient::new()
         .with_url(&registry_url)
@@ -159,22 +161,18 @@ pub async fn auth_login(token: Option<&str>) -> ToolResult<()> {
 
             save_credentials(&creds).await?;
 
-            println!(
-                "  {} Authenticated as {}",
-                "✓".bright_green(),
+            spinner.succeed(Some(&format!(
+                "Authenticated as {}",
                 format!("@{}", user_info.username).bright_cyan()
-            );
+            )));
             println!(
-                "    Token stored in {}",
+                "  · Token stored in {}",
                 get_credentials_path().display().to_string().dimmed()
             );
         }
         Err(e) => {
-            println!(
-                "  {} Authentication failed: {}",
-                "✗".bright_red(),
-                e.to_string().dimmed()
-            );
+            spinner.fail(Some("Authentication failed"));
+            println!("  · {}", e.to_string().dimmed());
         }
     }
 
@@ -232,17 +230,17 @@ pub async fn auth_status(concise: bool, no_header: bool) -> ToolResult<()> {
                     "✓".bright_green()
                 );
                 println!(
-                    "    {}: @{}",
+                    "  · {}: @{}",
                     "User".dimmed(),
                     user_info.username.bright_cyan()
                 );
                 println!(
-                    "    {}: {}",
+                    "  · {}: {}",
                     "Registry".dimmed(),
                     registry_url.bright_blue()
                 );
                 println!(
-                    "    {}: {}...{}",
+                    "  · {}: {}...{}",
                     "Token".dimmed(),
                     &token[..15.min(token.len())],
                     &token[token.len().saturating_sub(4)..]
@@ -254,7 +252,7 @@ pub async fn auth_status(concise: bool, no_header: bool) -> ToolResult<()> {
                     return Ok(());
                 }
                 println!("  {} Environment token is invalid", "✗".bright_red());
-                println!("    {}: {}", "Variable".dimmed(), REGISTRY_TOKEN_ENV);
+                println!("  · {}: {}", "Variable".dimmed(), REGISTRY_TOKEN_ENV);
             }
         }
         return Ok(());
@@ -278,15 +276,15 @@ pub async fn auth_status(concise: bool, no_header: bool) -> ToolResult<()> {
                     return Ok(());
                 }
                 println!("  {} Authenticated", "✓".bright_green());
-                println!("    {}: @{}", "User".dimmed(), creds.username.bright_cyan());
+                println!("  · {}: @{}", "User".dimmed(), creds.username.bright_cyan());
                 println!(
-                    "    {}: {}",
+                    "  · {}: {}",
                     "Registry".dimmed(),
                     creds.registry_url.bright_blue()
                 );
                 let token = &creds.token;
                 println!(
-                    "    {}: {}...{}",
+                    "  · {}: {}...{}",
                     "Token".dimmed(),
                     &token[..15.min(token.len())],
                     &token[token.len().saturating_sub(4)..]
@@ -305,7 +303,7 @@ pub async fn auth_status(concise: bool, no_header: bool) -> ToolResult<()> {
                     "  {} Stored token is invalid or expired",
                     "✗".bright_yellow()
                 );
-                println!("    Run {} to re-authenticate", "tool login".bright_cyan());
+                println!("  · Run {} to re-authenticate", "tool login".bright_cyan());
             }
         }
     } else {
@@ -316,12 +314,12 @@ pub async fn auth_status(concise: bool, no_header: bool) -> ToolResult<()> {
         println!("  {} Not authenticated", "✗".bright_yellow());
         println!();
         println!(
-            "    Run {} to authenticate with {}",
+            "  · Run {} to authenticate with {}",
             "tool login".bright_cyan(),
             registry_url.bright_blue()
         );
         println!(
-            "    Or set {} environment variable",
+            "  · Or set {} environment variable",
             REGISTRY_TOKEN_ENV.bright_white()
         );
     }

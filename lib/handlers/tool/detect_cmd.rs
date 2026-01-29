@@ -54,20 +54,20 @@ pub async fn detect_mcpb(
     // For non-concise mode, use verbose detection to print signals as they happen
     let is_verbose = !concise;
     if is_verbose {
-        println!("\n    {}", "Signals".dimmed());
+        println!("\n  {}", "Signals".dimmed());
     }
     let on_signal = |label: &str, passed: bool, weight: &str| {
         if is_verbose {
             if passed {
                 println!(
-                    "      {} {:<40} {}",
+                    "  {} {:<40} {}",
                     "✓".bright_green(),
                     label,
                     format!("+{}", weight).dimmed()
                 );
             } else {
                 println!(
-                    "      {} {:<40} {}",
+                    "  {} {:<40} {}",
                     "✗".bright_red(),
                     label,
                     format!("-{}", weight).bright_red()
@@ -78,11 +78,11 @@ pub async fn detect_mcpb(
 
     let detection = registry.detect_verbose(&dir, &on_signal).ok_or_else(|| {
         ToolError::Generic(
-            "No MCP server project detected.\n\n    \
-             Checked for:\n    \
-             • Node.js with @modelcontextprotocol/sdk\n    \
-             • Python with mcp package\n    \
-             • Rust with rmcp crate"
+            "No MCP server project detected.\n\n  \
+             Checked for:\n  \
+             · Node.js with @modelcontextprotocol/sdk\n  \
+             · Python with mcp package\n  \
+             · Rust with rmcp crate"
                 .into(),
         )
     })?;
@@ -150,9 +150,9 @@ pub async fn detect_mcpb(
         detection.display_name.bold()
     );
 
-    println!("    {:<12} {}", "Type".dimmed(), detection.display_name);
+    println!("  · {:<12} {}", "Type".dimmed(), detection.display_name);
     println!(
-        "    {:<12} {}",
+        "  · {:<12} {}",
         "Transport".dimmed(),
         transport_display.to_string().to_lowercase()
     );
@@ -160,10 +160,10 @@ pub async fn detect_mcpb(
     if let Some(ep) = entry_display {
         let ep_exists = dir.join(ep).exists();
         if ep_exists {
-            println!("    {:<12} {}", "Entry".dimmed(), ep);
+            println!("  · {:<12} {}", "Entry".dimmed(), ep);
         } else {
             println!(
-                "    {:<12} {} {}",
+                "  · {:<12} {} {}",
                 "Entry".dimmed(),
                 ep,
                 "(inferred)".bright_yellow()
@@ -171,25 +171,25 @@ pub async fn detect_mcpb(
         }
     } else {
         println!(
-            "    {:<12} {}",
+            "  · {:<12} {}",
             "Entry".dimmed(),
             "(not detected)".bright_yellow()
         );
     }
 
     if let Some(pm) = &detection.result.details.package_manager {
-        println!("    {:<12} {}", "Package".dimmed(), pm);
+        println!("  · {:<12} {}", "Package".dimmed(), pm);
     }
 
     println!(
-        "    {:<12} {:.0}%",
+        "  · {:<12} {:.0}%",
         "Confidence".dimmed(),
         detection.result.confidence * 100.0
     );
 
     // Show build command
     if let Some(build_cmd) = &detection.result.details.build_command {
-        println!("    {:<12} {}", "Build".dimmed(), build_cmd.dimmed());
+        println!("  · {:<12} {}", "Build".dimmed(), build_cmd.dimmed());
     }
 
     // Verify: start server and send MCP initialize
@@ -201,7 +201,7 @@ pub async fn detect_mcpb(
             detection.result.confidence * 100.0
         };
         println!(
-            "\n    {:<12} {:.0}%",
+            "\n  · {:<12} {:.0}%",
             "Confidence".dimmed(),
             final_confidence
         );
@@ -209,7 +209,7 @@ pub async fn detect_mcpb(
 
     // Show notes/warnings
     for note in &detection.result.details.notes {
-        println!("\n    {} {}", "⚠".bright_yellow(), note.bright_yellow());
+        println!("\n  {} {}", "⚠".bright_yellow(), note.bright_yellow());
     }
 
     // Format path for display in commands
@@ -222,8 +222,8 @@ pub async fn detect_mcpb(
     if !write {
         // Dry-run mode - show what would be created
         println!("\n  {}:", "Files to create".dimmed());
-        println!("    manifest.json");
-        println!("    .mcpbignore");
+        println!("  · manifest.json");
+        println!("  · .mcpbignore");
 
         println!(
             "\n  Run {} to generate files.",
@@ -265,7 +265,7 @@ pub async fn detect_mcpb(
 
     if has_build && entry_missing {
         println!(
-            "    {}. {}",
+            "  {}. {}",
             step,
             format!("tool build {}", display_path).bright_white(),
         );
@@ -273,21 +273,21 @@ pub async fn detect_mcpb(
     }
 
     println!(
-        "    {}. {}",
+        "  {}. {}",
         step,
         format!("tool info {}", display_path).bright_white(),
     );
     step += 1;
 
     println!(
-        "    {}. {}",
+        "  {}. {}",
         step,
         format!("tool run {}", display_path).bright_white(),
     );
     step += 1;
 
     println!(
-        "    {}. {}",
+        "  {}. {}",
         step,
         format!("tool pack {}", display_path).bright_white(),
     );
@@ -321,7 +321,7 @@ pub(super) async fn verify_server(
         if let Some(build_cmd) = &detection.result.details.build_command {
             if !std::io::stdin().is_terminal() {
                 println!(
-                    "\n      {} {:<40} {}",
+                    "\n  {} {:<40} {}",
                     "–".dimmed(),
                     "Server responds to initialize",
                     "skipped (build first)".bright_yellow()
@@ -360,7 +360,7 @@ pub(super) async fn verify_server(
 
                             if !entry_exists {
                                 println!(
-                                    "\n      {} {:<40} {}",
+                                    "\n  {} {:<40} {}",
                                     "✗".bright_red(),
                                     "Server responds to initialize",
                                     "entry point still not found after build".bright_red()
@@ -370,7 +370,7 @@ pub(super) async fn verify_server(
                         }
                         Ok(_) => {
                             println!(
-                                "\n      {} {:<40} {}",
+                                "\n  {} {:<40} {}",
                                 "✗".bright_red(),
                                 "Server responds to initialize",
                                 "build failed".bright_red()
@@ -379,7 +379,7 @@ pub(super) async fn verify_server(
                         }
                         Err(e) => {
                             println!(
-                                "\n      {} {:<40} {}",
+                                "\n  {} {:<40} {}",
                                 "✗".bright_red(),
                                 "Server responds to initialize",
                                 format!("build error: {}", e).bright_red()
@@ -391,7 +391,7 @@ pub(super) async fn verify_server(
                 Ok(false) => {
                     let _ = cliclack::outro_cancel("Build skipped.");
                     println!(
-                        "\n      {} {:<40} {}",
+                        "\n  {} {:<40} {}",
                         "–".dimmed(),
                         "Server responds to initialize",
                         "skipped (build first)".bright_yellow()
@@ -404,7 +404,7 @@ pub(super) async fn verify_server(
             }
         } else {
             println!(
-                "\n      {} {:<40} {}",
+                "\n  {} {:<40} {}",
                 "–".dimmed(),
                 "Server responds to initialize",
                 "skipped (entry point not found)".bright_yellow()
@@ -429,7 +429,7 @@ pub(super) async fn verify_server(
             Ok(false) => {
                 let _ = cliclack::outro_cancel("Verification skipped.");
                 println!(
-                    "\n      {} {:<40} {}",
+                    "\n  {} {:<40} {}",
                     "–".dimmed(),
                     "Server responds to initialize",
                     "skipped".dimmed()
@@ -511,7 +511,7 @@ pub(super) async fn verify_server(
     match result {
         Ok(Ok(crate::mcp::ConnectResult::Connected(_conn))) => {
             println!(
-                "      {} {:<40} {}",
+                "  {} {:<40} {}",
                 "✓".bright_green(),
                 "Server responds to initialize",
                 "+20%".dimmed()
@@ -522,7 +522,7 @@ pub(super) async fn verify_server(
         Ok(Ok(_)) => {
             // Auth required or other non-connected state
             println!(
-                "      {} {:<40} {}",
+                "  {} {:<40} {}",
                 "✗".bright_red(),
                 "Server responds to initialize",
                 "auth required".bright_red()
@@ -531,7 +531,7 @@ pub(super) async fn verify_server(
         }
         Ok(Err(e)) => {
             println!(
-                "      {} {:<40} {}",
+                "  {} {:<40} {}",
                 "✗".bright_red(),
                 "Server responds to initialize",
                 format!("failed: {}", e).bright_red()
@@ -540,7 +540,7 @@ pub(super) async fn verify_server(
         }
         Err(_) => {
             println!(
-                "      {} {:<40} {}",
+                "  {} {:<40} {}",
                 "✗".bright_red(),
                 "Server responds to initialize",
                 "timed out (30s)".bright_red()

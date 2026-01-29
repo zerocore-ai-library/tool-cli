@@ -7,11 +7,11 @@ use crate::mcpb::McpbManifest;
 use crate::references::PluginRef;
 use crate::registry::RegistryClient;
 use crate::resolver::FilePluginResolver;
+use crate::styles::Spinner;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 
 use super::pack_cmd::format_size;
 
@@ -53,6 +53,7 @@ struct RegistryPreflight {
     tool_name: String,
     version: String,
     bundle_size: u64,
+    bundle_url: String,
     target_dir: PathBuf,
     temp_file: PathBuf,
 }
@@ -74,125 +75,292 @@ enum PreflightResult {
 //--------------------------------------------------------------------------------------------------
 
 /// Download a tool from the registry.
-pub async fn download_tool(name: &str, output: Option<&str>) -> ToolResult<()> {
-    // Parse tool reference
+/// Preflight info for download.
+struct DownloadPreflight {
+    namespace: String,
+    tool_name: String,
+    version: String,
+    bundle_size: u64,
+    bundle_url: String,
+    output_path: PathBuf,
+}
+
+/// Run preflight for a download.
+async fn preflight_download(
+    name: &str,
+    output_dir: Option<&Path>,
+) -> Result<DownloadPreflight, String> {
     let plugin_ref = name
         .parse::<PluginRef>()
-        .map_err(|e| ToolError::Generic(format!("Invalid tool reference '{}': {}", name, e)))?;
+        .map_err(|e| format!("Invalid tool reference '{}': {}", name, e))?;
 
     if plugin_ref.namespace().is_none() {
-        println!(
-            "  {} Tool reference must include a namespace for registry fetch",
-            "✗".bright_red()
-        );
-        println!(
-            "    Example: {} or {}",
-            "namespace/tool".bright_cyan(),
-            "namespace/tool@1.0.0".bright_cyan()
-        );
-        return Ok(());
+        return Err(format!(
+            "{}: missing namespace (use namespace/name format)",
+            name
+        ));
     }
 
-    let namespace = plugin_ref.namespace().unwrap();
-    let tool_name = plugin_ref.name();
+    let namespace = plugin_ref.namespace().unwrap().to_string();
+    let tool_name = plugin_ref.name().to_string();
 
-    // Create registry client
     let client = RegistryClient::new();
 
-    // Determine version and get bundle size from artifact metadata
-    println!(
-        "  {} Resolving {}...",
-        "→".bright_blue(),
-        plugin_ref.to_string().bright_cyan()
-    );
-
-    let artifact = client.get_artifact(namespace, tool_name).await?;
-    let version_info = artifact.latest_version.ok_or_else(|| {
-        ToolError::Generic(format!(
-            "No versions published for {}/{}",
-            namespace, tool_name
-        ))
-    })?;
-
+    // Determine the version
     let version = if let Some(v) = plugin_ref.version_str() {
         v.to_string()
     } else {
-        version_info.version.clone()
+        let artifact = client
+            .get_artifact(&namespace, &tool_name)
+            .await
+            .map_err(|_| format!("Tool {}/{} not found in registry", namespace, tool_name))?;
+        artifact
+            .latest_version
+            .ok_or_else(|| format!("No versions published for {}/{}", namespace, tool_name))?
+            .version
     };
 
-    // Get bundle size from version info (may be None for older versions)
-    let bundle_size = version_info.bundle_size.unwrap_or(0);
+    // Get full version info
+    let version_info = client
+        .get_version(&namespace, &tool_name, &version)
+        .await
+        .map_err(|e| format!("Failed to fetch version info: {}", e))?;
 
-    // Use bundle_format from API response, default to "mcpb" for older versions
+    let bundle_url = version_info
+        .bundle_url
+        .ok_or_else(|| format!("No bundle URL for {}/{}@{}", namespace, tool_name, version))?;
+
+    let bundle_size = version_info.bundle_size.unwrap_or(0);
     let ext = version_info.bundle_format.as_deref().unwrap_or("mcpb");
 
     // Determine output path
     let bundle_name = format!("{}@{}.{}", tool_name, version, ext);
-    let output_path = match output {
+    let output_path = match output_dir {
+        Some(dir) => dir.join(&bundle_name),
+        None => std::env::current_dir()
+            .map_err(|e| format!("Failed to get current dir: {}", e))?
+            .join(&bundle_name),
+    };
+
+    Ok(DownloadPreflight {
+        namespace,
+        tool_name,
+        version,
+        bundle_size,
+        bundle_url,
+        output_path,
+    })
+}
+
+/// Download multiple tools from the registry.
+pub async fn download_tools(names: &[String], output: Option<&str>) -> ToolResult<()> {
+    use futures_util::future::join_all;
+
+    let is_single = names.len() == 1;
+
+    // Resolve output directory
+    let output_dir = match output {
         Some(p) => {
             let path = PathBuf::from(p);
-            if path.is_absolute() {
+            let abs_path = if path.is_absolute() {
                 path
             } else {
                 std::env::current_dir()?.join(path)
+            };
+            // Create directory if it doesn't exist
+            if !abs_path.exists() {
+                std::fs::create_dir_all(&abs_path)?;
             }
+            Some(abs_path)
         }
-        None => std::env::current_dir()?.join(&bundle_name),
+        None => None,
     };
 
-    // Create parent directory if it doesn't exist
-    if let Some(parent) = output_path.parent()
-        && !parent.exists()
-    {
-        std::fs::create_dir_all(parent)?;
+    // Phase 1: Resolve
+    if is_single {
+        println!(
+            "  {} Resolving {}",
+            "→".bright_blue(),
+            names[0].bright_cyan()
+        );
+    } else {
+        println!(
+            "  {} Resolving {} packages",
+            "→".bright_blue(),
+            names.len().to_string().bright_cyan()
+        );
     }
 
-    let download_ref = format!("{}/{}@{}", namespace, tool_name, version);
-    println!(
-        "  {} Downloading {}...",
-        "→".bright_blue(),
-        download_ref.bright_cyan()
-    );
+    let preflight_futures: Vec<_> = names
+        .iter()
+        .map(|name| preflight_download(name, output_dir.as_deref()))
+        .collect();
+    let preflight_results = join_all(preflight_futures).await;
 
-    // Create progress bar with known bundle size
-    let pb = ProgressBar::new(bundle_size);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("    [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
-            .unwrap()
-            .progress_chars("█░░"),
-    );
+    // Separate successes from failures
+    let mut preflights = Vec::new();
+    let mut failed = Vec::new();
 
-    let pb_clone = pb.clone();
-    let download_size = client
-        .download_artifact_with_progress(
-            namespace,
-            tool_name,
-            &version,
-            &output_path,
-            move |downloaded, total| {
-                // Use Content-Length if available and bundle_size was 0
-                if total > 0 && pb_clone.length() == Some(0) {
-                    pb_clone.set_length(total);
+    for (name, result) in names.iter().zip(preflight_results) {
+        match result {
+            Ok(pf) => preflights.push(pf),
+            Err(msg) => failed.push((name.clone(), msg)),
+        }
+    }
+
+    // Print preflight failures
+    for (name, msg) in &failed {
+        println!("  {} {}: {}", "✗".bright_red(), name, msg);
+    }
+
+    // Phase 2: Download
+    if !preflights.is_empty() {
+        let client = RegistryClient::new();
+
+        if is_single && preflights.len() == 1 {
+            // Single package: match original format
+            let pf = preflights.remove(0);
+            println!(
+                "  {} Downloading {}/{}@{}",
+                "→".bright_blue(),
+                pf.namespace.bright_cyan(),
+                pf.tool_name.bright_cyan(),
+                pf.version.bright_cyan()
+            );
+
+            let pb = ProgressBar::new(pf.bundle_size);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("  [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
+                    .unwrap()
+                    .progress_chars("█░░"),
+            );
+            pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+            match client
+                .download_from_url_with_progress_pb(&pf.bundle_url, &pf.output_path, &pb)
+                .await
+            {
+                Ok(size) => {
+                    pb.finish_and_clear();
+                    let path_str = pf.output_path.display().to_string();
+                    let colored_path = if path_str.ends_with(".mcpbx") {
+                        path_str.bright_yellow()
+                    } else {
+                        path_str.bright_green()
+                    };
+                    println!(
+                        "  {} Downloaded {} ({})",
+                        "✓".bright_green(),
+                        colored_path,
+                        format_size(size)
+                    );
                 }
-                pb_clone.set_position(downloaded);
-            },
-        )
-        .await?;
+                Err(e) => {
+                    pb.finish_and_clear();
+                    println!("  {} Download failed: {}", "✗".bright_red(), e);
+                }
+            }
+        } else {
+            // Multiple packages: parallel download
+            let count = preflights.len();
+            println!(
+                "  {} Downloading {} packages",
+                "→".bright_blue(),
+                count.to_string().bright_cyan()
+            );
 
-    pb.finish_and_clear();
-    let path_str = output_path.display().to_string();
-    let colored_path = if path_str.ends_with(".mcpbx") {
-        path_str.bright_yellow()
-    } else {
-        path_str.bright_green()
-    };
-    println!(
-        "  {} Downloaded {} ({})",
-        "✓".bright_green(),
-        colored_path,
-        format_size(download_size)
-    );
+            let mp = MultiProgress::new();
+            let style = ProgressStyle::default_bar()
+                .template("  {msg:<30} [{bar:25.cyan/dim}] {bytes:>10}/{total_bytes:<10}")
+                .unwrap()
+                .progress_chars("█░░");
+
+            let handles: Vec<_> = preflights
+                .into_iter()
+                .map(|pf| {
+                    let pb = mp.add(ProgressBar::new(pf.bundle_size));
+                    pb.set_style(style.clone());
+                    pb.set_message(format!("{}/{}", pf.namespace, pf.tool_name));
+                    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+                    let client = RegistryClient::new();
+                    tokio::spawn(async move {
+                        let result = client
+                            .download_from_url_with_progress_pb(
+                                &pf.bundle_url,
+                                &pf.output_path,
+                                &pb,
+                            )
+                            .await;
+                        pb.finish_and_clear();
+                        (pf, result)
+                    })
+                })
+                .collect();
+
+            let results = join_all(handles).await;
+
+            // Print results
+            let mut downloaded_count = 0usize;
+            let mut failed_count = failed.len();
+
+            for result in results {
+                match result {
+                    Ok((pf, Ok(size))) => {
+                        let path_str = pf.output_path.display().to_string();
+                        let colored_path = if path_str.ends_with(".mcpbx") {
+                            path_str.bright_yellow()
+                        } else {
+                            path_str.bright_green()
+                        };
+                        println!(
+                            "  {} Downloaded {} ({})",
+                            "✓".bright_green(),
+                            colored_path,
+                            format_size(size)
+                        );
+                        downloaded_count += 1;
+                    }
+                    Ok((pf, Err(e))) => {
+                        println!(
+                            "  {} {}/{}: {}",
+                            "✗".bright_red(),
+                            pf.namespace,
+                            pf.tool_name,
+                            e
+                        );
+                        failed_count += 1;
+                    }
+                    Err(_) => {
+                        println!("  {} Task panicked", "✗".bright_red());
+                        failed_count += 1;
+                    }
+                }
+            }
+
+            // Summary
+            println!();
+            if downloaded_count > 0 {
+                print!(
+                    "Downloaded {} {}",
+                    downloaded_count.to_string().bright_green(),
+                    if downloaded_count == 1 {
+                        "package"
+                    } else {
+                        "packages"
+                    }
+                );
+            }
+            if failed_count > 0 {
+                if downloaded_count > 0 {
+                    print!(", ");
+                }
+                print!("{} failed", failed_count.to_string().bright_red());
+            }
+            println!();
+        }
+    }
 
     Ok(())
 }
@@ -236,15 +404,32 @@ async fn preflight_tool(name: &str) -> PreflightResult {
         }
     };
 
-    // Get version info
-    let version_info = match artifact.latest_version {
-        Some(v) => v,
+    // Get latest version string
+    let version = match &artifact.latest_version {
+        Some(v) => v.version.clone(),
         None => {
             return PreflightResult::Failed(format!("No published version for {}", name));
         }
     };
-    let version = version_info.version.clone();
+
+    // Fetch full version info (includes bundle_url)
+    let version_info = match client.get_version(&namespace, &tool_name, &version).await {
+        Ok(v) => v,
+        Err(e) => {
+            return PreflightResult::Failed(format!("Failed to fetch version info: {}", e));
+        }
+    };
+
     let bundle_size = version_info.bundle_size.unwrap_or(0);
+    let bundle_url = match version_info.bundle_url {
+        Some(url) => url,
+        None => {
+            return PreflightResult::Failed(format!(
+                "No bundle URL for {}/{}@{}",
+                namespace, tool_name, version
+            ));
+        }
+    };
 
     // Check if already installed
     let target_dir = DEFAULT_TOOLS_PATH
@@ -265,111 +450,83 @@ async fn preflight_tool(name: &str) -> PreflightResult {
         tool_name,
         version,
         bundle_size,
+        bundle_url,
         target_dir,
         temp_file,
     })
 }
 
+/// Result of download_and_install with size info.
+struct InstallSuccess {
+    namespace: String,
+    tool_name: String,
+    version: String,
+    size: u64,
+}
+
 /// Download and install a tool with a progress bar.
-async fn download_and_install(preflight: RegistryPreflight, pb: ProgressBar) -> InstallResult {
+/// Returns the install result and size on success.
+async fn download_and_install(
+    preflight: RegistryPreflight,
+    pb: ProgressBar,
+) -> Result<InstallSuccess, String> {
     let client = RegistryClient::new();
 
-    // Style for finished state (clean, aligned)
-    let finish_style = ProgressStyle::default_bar().template("  {msg}").unwrap();
-
-    // Download with progress
-    let pb_clone = pb.clone();
-    if let Err(e) = client
-        .download_artifact_with_progress(
-            &preflight.namespace,
-            &preflight.tool_name,
-            &preflight.version,
-            &preflight.temp_file,
-            move |downloaded, total| {
-                if total > 0 && pb_clone.length() == Some(0) {
-                    pb_clone.set_length(total);
-                }
-                pb_clone.set_position(downloaded);
-            },
-        )
+    // Download from CDN bundle_url with progress
+    let size = client
+        .download_from_url_with_progress_pb(&preflight.bundle_url, &preflight.temp_file, &pb)
         .await
-    {
-        pb.set_style(finish_style);
-        pb.finish_with_message(format!(
-            "{} {:<30} Failed to download",
-            "✗".bright_red(),
-            format!("{}/{}", preflight.namespace, preflight.tool_name)
-        ));
-        return InstallResult::Failed(format!("Failed to download: {}", e));
-    }
-
-    pb.set_message(format!("{}/{}", preflight.namespace, preflight.tool_name));
+        .map_err(|e| format!("Failed to download: {}", e))?;
 
     // Create target directory
-    if let Err(e) = tokio::fs::create_dir_all(&preflight.target_dir).await {
-        pb.set_style(finish_style);
-        pb.finish_with_message(format!(
-            "{} {:<30} Failed to create directory",
-            "✗".bright_red(),
-            format!("{}/{}", preflight.namespace, preflight.tool_name)
-        ));
-        return InstallResult::Failed(format!("Failed to create directory: {}", e));
-    }
+    tokio::fs::create_dir_all(&preflight.target_dir)
+        .await
+        .map_err(|e| format!("Failed to create directory: {}", e))?;
 
     // Extract the bundle
-    if let Err(e) = extract_bundle(&preflight.temp_file, &preflight.target_dir) {
-        pb.set_style(finish_style);
-        pb.finish_with_message(format!(
-            "{} {:<30} Failed to extract",
-            "✗".bright_red(),
-            format!("{}/{}", preflight.namespace, preflight.tool_name)
-        ));
-        return InstallResult::Failed(format!("Failed to extract: {}", e));
-    }
+    extract_bundle(&preflight.temp_file, &preflight.target_dir)
+        .map_err(|e| format!("Failed to extract: {}", e))?;
 
     // Clean up temp file
     let _ = std::fs::remove_file(&preflight.temp_file);
 
-    // Determine format display
-    let is_mcpbx = McpbManifest::load(&preflight.target_dir)
-        .map(|m| m.requires_mcpbx())
-        .unwrap_or(false);
-    let format_tag = if is_mcpbx { "mcpbx" } else { "mcpb" };
-    let format_display = if is_mcpbx {
-        format_tag.bright_yellow()
-    } else {
-        format_tag.bright_green()
-    };
-
-    pb.set_style(finish_style);
-    pb.finish_with_message(format!(
-        "{} {}/{}@{} ({})",
-        "✓".bright_green(),
-        preflight.namespace.bright_cyan(),
-        preflight.tool_name.bright_cyan(),
-        preflight.version.bright_cyan(),
-        format_display
-    ));
-
-    InstallResult::InstalledRegistry
+    Ok(InstallSuccess {
+        namespace: preflight.namespace,
+        tool_name: preflight.tool_name,
+        version: preflight.version,
+        size,
+    })
 }
 
 /// Install multiple tools from the registry or local paths.
 pub async fn add_tools(names: &[String]) -> ToolResult<()> {
     use futures_util::future::join_all;
 
-    let mut registry_count = 0usize;
-    let mut local_count = 0usize;
-    let mut already_count = 0usize;
-    let mut failed_count = 0usize;
+    // Phase 1: Run preflight checks
+    let is_single = names.len() == 1;
 
-    // Phase 1: Run preflight checks concurrently
+    if is_single {
+        println!(
+            "  {} Resolving {}",
+            "→".bright_blue(),
+            names[0].bright_cyan()
+        );
+    } else {
+        println!(
+            "  {} Resolving {} packages",
+            "→".bright_blue(),
+            names.len().to_string().bright_cyan()
+        );
+    }
+
     let preflight_futures: Vec<_> = names.iter().map(|name| preflight_tool(name)).collect();
     let preflight_results = join_all(preflight_futures).await;
 
     // Separate registry downloads from immediate results
     let mut registry_preflights = Vec::new();
-    let mut immediate_messages = Vec::new();
+    let mut local_count = 0usize;
+    let mut already_installed = Vec::new();
+    let mut failed = Vec::new();
 
     for (name, result) in names.iter().zip(preflight_results) {
         match result {
@@ -378,115 +535,164 @@ pub async fn add_tools(names: &[String]) -> ToolResult<()> {
             }
             PreflightResult::Local(install_result) => match install_result {
                 InstallResult::InstalledLocal => local_count += 1,
-                InstallResult::AlreadyInstalled => already_count += 1,
-                InstallResult::Failed(msg) => {
-                    immediate_messages.push(format!("  {} {}: {}", "✗".bright_red(), name, msg));
-                    failed_count += 1;
-                }
+                InstallResult::AlreadyInstalled => already_installed.push(name.clone()),
+                InstallResult::Failed(msg) => failed.push((name.clone(), msg)),
                 _ => {}
             },
             PreflightResult::AlreadyInstalled => {
-                immediate_messages.push(format!(
-                    "  {} Already installed {}",
-                    "✓".bright_green(),
-                    name.bright_cyan()
-                ));
-                already_count += 1;
+                already_installed.push(name.clone());
             }
             PreflightResult::Failed(msg) => {
-                immediate_messages.push(format!("  {} {}", "✗".bright_red(), msg));
-                failed_count += 1;
+                failed.push((name.clone(), msg));
             }
         }
     }
 
-    // Print immediate messages (local installs, already installed, preflight failures)
-    for msg in &immediate_messages {
-        println!("{}", msg);
+    // Print already installed (non-error)
+    for name in &already_installed {
+        println!(
+            "  {} Already installed {}",
+            "✓".bright_green(),
+            name.bright_cyan()
+        );
     }
 
-    // Phase 2: Download registry packages in parallel with progress bars
+    // Print preflight failures
+    for (name, msg) in &failed {
+        println!("  {} {}: {}", "✗".bright_red(), name, msg);
+    }
+
+    // Phase 2: Download and install registry packages
     if !registry_preflights.is_empty() {
-        let mp = MultiProgress::new();
-        let style = ProgressStyle::default_bar()
-            .template(
-                "  {msg:<30} [{bar:25.cyan/dim}] {bytes:>10}/{total_bytes:<10} {bytes_per_sec:>12}",
-            )
-            .unwrap()
-            .progress_chars("█░░");
+        let count = registry_preflights.len();
 
-        // Create progress bars and spawn download tasks
-        let handles: Vec<JoinHandle<InstallResult>> = registry_preflights
-            .into_iter()
-            .map(|preflight| {
-                let pb = mp.add(ProgressBar::new(preflight.bundle_size));
-                pb.set_style(style.clone());
-                pb.set_message(format!("{}/{}", preflight.namespace, preflight.tool_name));
+        if is_single {
+            // Single package: match download format exactly
+            let preflight = registry_preflights.remove(0);
+            println!(
+                "  {} Downloading {}/{}@{}",
+                "→".bright_blue(),
+                preflight.namespace.bright_cyan(),
+                preflight.tool_name.bright_cyan(),
+                preflight.version.bright_cyan()
+            );
 
-                tokio::spawn(async move { download_and_install(preflight, pb).await })
-            })
-            .collect();
+            let pb = ProgressBar::new(preflight.bundle_size);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("  [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
+                    .unwrap()
+                    .progress_chars("█░░"),
+            );
+            pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
-        // Wait for all downloads to complete
-        let results = join_all(handles).await;
-
-        for result in results {
-            match result {
-                Ok(InstallResult::InstalledRegistry) => registry_count += 1,
-                Ok(InstallResult::Failed(_)) => failed_count += 1,
-                Err(_) => failed_count += 1, // Task panicked
-                _ => {}
+            match download_and_install(preflight, pb.clone()).await {
+                Ok(success) => {
+                    pb.finish_and_clear();
+                    println!(
+                        "  {} Installed {}/{}@{} ({})",
+                        "✓".bright_green(),
+                        success.namespace.bright_cyan(),
+                        success.tool_name.bright_cyan(),
+                        success.version.bright_cyan(),
+                        format_size(success.size)
+                    );
+                }
+                Err(msg) => {
+                    pb.finish_and_clear();
+                    println!("  {} Install failed: {}", "✗".bright_red(), msg);
+                }
             }
-        }
-    }
-
-    // Print summary if multiple packages were requested
-    if names.len() > 1 {
-        println!();
-        let total_installed = registry_count + local_count;
-        let mut parts = Vec::new();
-
-        if registry_count > 0 {
-            parts.push(format!("{} from registry", registry_count));
-        }
-        if local_count > 0 {
-            parts.push(format!("{} linked", local_count));
-        }
-
-        if total_installed > 0 {
-            let details = if parts.is_empty() {
-                String::new()
-            } else {
-                format!(" ({})", parts.join(", "))
-            };
+        } else {
+            // Multiple packages: parallel download with multi-progress
             println!(
-                "Installed {} {}{details}",
-                total_installed.to_string().bright_green(),
-                if total_installed == 1 {
-                    "package"
-                } else {
-                    "packages"
+                "  {} Downloading {} packages",
+                "→".bright_blue(),
+                count.to_string().bright_cyan()
+            );
+
+            let mp = MultiProgress::new();
+            let style = ProgressStyle::default_bar()
+                .template("  {msg:<30} [{bar:25.cyan/dim}] {bytes:>10}/{total_bytes:<10}")
+                .unwrap()
+                .progress_chars("█░░");
+
+            // Create progress bars and spawn download tasks
+            let handles: Vec<_> = registry_preflights
+                .into_iter()
+                .map(|preflight| {
+                    let pb = mp.add(ProgressBar::new(preflight.bundle_size));
+                    pb.set_style(style.clone());
+                    pb.set_message(format!("{}/{}", preflight.namespace, preflight.tool_name));
+                    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+                    tokio::spawn(async move {
+                        let result = download_and_install(preflight, pb.clone()).await;
+                        pb.finish_and_clear();
+                        result
+                    })
+                })
+                .collect();
+
+            // Wait for all downloads to complete
+            let results = join_all(handles).await;
+
+            // Print results
+            let mut installed_count = 0usize;
+            let mut failed_count = 0usize;
+
+            for result in results {
+                match result {
+                    Ok(Ok(success)) => {
+                        println!(
+                            "  {} Installed {}/{}@{} ({})",
+                            "✓".bright_green(),
+                            success.namespace.bright_cyan(),
+                            success.tool_name.bright_cyan(),
+                            success.version.bright_cyan(),
+                            format_size(success.size)
+                        );
+                        installed_count += 1;
+                    }
+                    Ok(Err(msg)) => {
+                        println!("  {} {}", "✗".bright_red(), msg);
+                        failed_count += 1;
+                    }
+                    Err(_) => {
+                        println!("  {} Task panicked", "✗".bright_red());
+                        failed_count += 1;
+                    }
                 }
-            );
-        }
+            }
 
-        if already_count > 0 {
-            println!(
-                "Skipped {} already installed",
-                already_count.to_string().bright_cyan()
-            );
-        }
-
-        if failed_count > 0 {
-            println!(
-                "Failed {} {}",
-                failed_count.to_string().bright_red(),
-                if failed_count == 1 {
-                    "package"
-                } else {
-                    "packages"
+            // Summary line for multiple packages
+            let total = installed_count + local_count;
+            if total > 0 || failed_count > 0 || !already_installed.is_empty() {
+                println!();
+                if total > 0 {
+                    print!(
+                        "Installed {} {}",
+                        total.to_string().bright_green(),
+                        if total == 1 { "package" } else { "packages" }
+                    );
                 }
-            );
+                if !already_installed.is_empty() {
+                    if total > 0 {
+                        print!(", ");
+                    }
+                    print!(
+                        "{} already installed",
+                        already_installed.len().to_string().bright_cyan()
+                    );
+                }
+                if failed_count > 0 {
+                    if total > 0 || !already_installed.is_empty() {
+                        print!(", ");
+                    }
+                    print!("{} failed", failed_count.to_string().bright_red());
+                }
+                println!();
+            }
         }
     }
 
@@ -635,7 +841,7 @@ async fn install_local_tool(path: &str) -> InstallResult {
     let target_path = DEFAULT_TOOLS_PATH.join(&target_name);
 
     println!(
-        "  {} Linking {} from {}...",
+        "  {} Linking {} from {}",
         "→".bright_blue(),
         target_name.bright_cyan(),
         source_path.display().to_string().dimmed()
@@ -806,24 +1012,27 @@ pub async fn remove_tools(names: &[String]) -> ToolResult<()> {
 pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolResult<()> {
     let client = RegistryClient::new();
 
-    if !concise {
-        println!(
-            "  {} Searching registry for tools matching: {}",
-            "→".bright_blue(),
-            query.bright_cyan()
-        );
-    }
-
-    let results = client.search(query, Some(20)).await?;
+    let results = if concise {
+        client.search(query, Some(20)).await?
+    } else {
+        let spinner = Spinner::with_indent(format!("Searching for \"{}\"", query), 2);
+        match client.search(query, Some(20)).await {
+            Ok(results) => {
+                if results.is_empty() {
+                    spinner.fail(Some(&format!("No tools found matching: {}", query)));
+                } else {
+                    spinner.succeed(Some(&format!("Found {} tool(s)", results.len())));
+                }
+                results
+            }
+            Err(e) => {
+                spinner.fail(Some("Search failed"));
+                return Err(e);
+            }
+        }
+    };
 
     if results.is_empty() {
-        if !concise {
-            println!(
-                "  {} No tools found matching: {}",
-                "✗".bright_red(),
-                query.bright_white().bold()
-            );
-        }
         return Ok(());
     }
 
@@ -872,7 +1081,7 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
             .unwrap_or_default();
 
         println!(
-            "    {}/{}{} {}",
+            "  {}/{}{} {}",
             result.namespace.bright_blue(),
             result.name.bright_cyan(),
             version_str.dimmed(),
@@ -884,7 +1093,7 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
             .as_deref()
             .and_then(|d| format_description(d, false, ""))
         {
-            println!("      {}", desc.dimmed());
+            println!("  · {}", desc.dimmed());
         }
     }
 
@@ -895,7 +1104,7 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
         "<namespace>/<name>".to_string()
     };
     println!(
-        "    {} {}",
+        "  · {} {}",
         "Install with:".dimmed(),
         format!("tool install {}", install_ref).bright_white()
     );
@@ -967,28 +1176,28 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
 
     if dry_run {
         println!(
-            "  {} Dry run: validating tool {}/{}...",
+            "  {} Dry run: validating tool {}/{}",
             "→".bright_blue(),
             namespace.bright_blue(),
             tool_name.bright_cyan()
         );
     } else {
         println!(
-            "  {} Publishing tool {}/{}...",
+            "  {} Publishing tool {}/{}",
             "→".bright_blue(),
             namespace.bright_blue(),
             tool_name.bright_cyan()
         );
     }
 
-    println!("    {}: {}", "Version".dimmed(), version.bright_white());
+    println!("  · {}: {}", "Version".dimmed(), version.bright_white());
     println!(
-        "    {}: {}",
+        "  · {}: {}",
         "Source".dimmed(),
         dir.display().to_string().dimmed()
     );
     if let Some(desc) = description {
-        println!("    {}: {}", "Description".dimmed(), desc.dimmed());
+        println!("  · {}: {}", "Description".dimmed(), desc.dimmed());
     }
 
     // Strict validation: treat warnings as errors
@@ -1003,16 +1212,9 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
                     format!("error[{}]", issue.code).bright_red().bold(),
                     issue.location.bold()
                 );
+                println!("  · {}", issue.details.dimmed());
                 if let Some(help) = &issue.help {
-                    println!("      {} {}", "├─".dimmed(), issue.details.dimmed());
-                    println!(
-                        "      {} {}: {}",
-                        "└─".dimmed(),
-                        "help".bright_green().dimmed(),
-                        help.dimmed()
-                    );
-                } else {
-                    println!("      {} {}", "└─".dimmed(), issue.details.dimmed());
+                    println!("  · {}: {}", "help".bright_green().dimmed(), help.dimmed());
                 }
                 println!();
             }
@@ -1031,24 +1233,31 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
     }
 
     // Bundle the tool
-    println!("\n    {} Creating bundle...", "→".bright_blue());
+    println!();
+    let spinner = Spinner::new("Creating bundle");
+
     let pack_options = PackOptions {
         validate: true,
         output: None,
         verbose: false,
         include_dotfiles: false,
     };
-    let pack_result = pack_bundle(&dir, &pack_options)
-        .map_err(|e| ToolError::Generic(format!("Pack failed: {}", e)))?;
+    let pack_result = match pack_bundle(&dir, &pack_options) {
+        Ok(result) => {
+            spinner.succeed(Some("Bundle created"));
+            result
+        }
+        Err(e) => {
+            spinner.fail(None);
+            return Err(ToolError::Generic(format!("Pack failed: {}", e)));
+        }
+    };
 
     // Read the bundle
     let bundle = std::fs::read(&pack_result.output_path)
         .map_err(|e| ToolError::Generic(format!("Failed to read bundle: {}", e)))?;
     let bundle_size = bundle.len() as u64;
-    println!(
-        "    Bundle size: {}",
-        format_size(bundle_size).bright_white()
-    );
+    println!("  · Size: {}", format_size(bundle_size).bright_white());
 
     // Clean up temp bundle
     let _ = std::fs::remove_file(&pack_result.output_path);
@@ -1069,22 +1278,33 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
     let client = RegistryClient::new().with_auth_token(&token);
 
     // Check if artifact exists
-    println!(
-        "\n    {} Checking registry ({})...",
-        "→".bright_blue(),
-        client.registry_url().bright_white()
-    );
-    if !client.artifact_exists(&namespace, tool_name).await? {
-        println!("    Creating new artifact entry...");
-        client
+    println!();
+    let spinner = Spinner::new(format!("Checking registry ({})", client.registry_url()));
+    let artifact_exists = match client.artifact_exists(&namespace, tool_name).await {
+        Ok(exists) => {
+            spinner.succeed(Some("Registry checked"));
+            exists
+        }
+        Err(e) => {
+            spinner.fail(None);
+            return Err(e);
+        }
+    };
+
+    if !artifact_exists {
+        let spinner = Spinner::new("Creating artifact entry");
+        match client
             .create_artifact(&namespace, tool_name, description)
-            .await?;
-        println!(
-            "    {} Created {}/{}",
-            "✓".bright_green(),
-            namespace.bright_blue(),
-            tool_name.bright_cyan()
-        );
+            .await
+        {
+            Ok(()) => {
+                spinner.succeed(Some(&format!("Created {}/{}", namespace, tool_name)));
+            }
+            Err(e) => {
+                spinner.fail(None);
+                return Err(e);
+            }
+        }
     }
 
     // Compute SHA-256
@@ -1095,7 +1315,7 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
     // Initiate upload
     let bundle_format = manifest.bundle_extension();
     println!(
-        "\n    {} Uploading bundle ({})...",
+        "\n  {} Uploading bundle ({})",
         "→".bright_blue(),
         bundle_format
     );
@@ -1114,10 +1334,11 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
     let pb = ProgressBar::new(bundle_size);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("    [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
+            .template("  [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
             .unwrap()
             .progress_chars("█░░"),
     );
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
     // Upload to presigned URL with progress
     let pb_arc = Arc::new(pb);
@@ -1129,14 +1350,21 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
         .await?;
 
     pb_arc.finish_and_clear();
-    println!("    {} Upload complete", "✓".bright_green());
+    println!("  {} Upload complete", "✓".bright_green());
 
     // Publish the version
-    println!("\n    {} Publishing version...", "→".bright_blue());
+    println!();
+    let spinner = Spinner::new("Publishing version");
 
-    let manifest_json: serde_json::Value = serde_json::from_str(&manifest_content)?;
+    let manifest_json: serde_json::Value = match serde_json::from_str(&manifest_content) {
+        Ok(json) => json,
+        Err(e) => {
+            spinner.fail(Some("Publishing failed"));
+            return Err(e.into());
+        }
+    };
 
-    let result = client
+    let result = match client
         .publish_version(
             &namespace,
             tool_name,
@@ -1145,7 +1373,17 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
             manifest_json,
             description,
         )
-        .await?;
+        .await
+    {
+        Ok(result) => {
+            spinner.succeed(Some("Version published"));
+            result
+        }
+        Err(e) => {
+            spinner.fail(Some("Publishing failed"));
+            return Err(e);
+        }
+    };
 
     let format_display = if manifest.requires_mcpbx() {
         "mcpbx".bright_yellow()
@@ -1161,7 +1399,7 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
         format_display
     );
     println!(
-        "    {}/plugins/{}/{}",
+        "  · {}/plugins/{}/{}",
         client.registry_url(),
         namespace,
         tool_name

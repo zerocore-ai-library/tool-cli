@@ -120,6 +120,8 @@ pub struct VersionInfo {
     pub bundle_checksum: Option<String>,
     /// Bundle format: "mcpb" or "mcpbx".
     pub bundle_format: Option<String>,
+    /// CDN URL for the bundle.
+    pub bundle_url: Option<String>,
 }
 
 /// Upload initiation response.
@@ -354,40 +356,63 @@ impl RegistryClient {
         Ok(versions_response.data)
     }
 
-    /// Get the download URL for an artifact version.
-    pub fn get_download_url(&self, namespace: &str, name: &str, version: &str) -> String {
-        format!(
-            "{}{}/artifacts/{}/{}/versions/{}/download",
+    /// Get a specific version of an artifact.
+    pub async fn get_version(
+        &self,
+        namespace: &str,
+        name: &str,
+        version: &str,
+    ) -> ToolResult<VersionInfo> {
+        let url = format!(
+            "{}{}/artifacts/{}/{}/versions/{}",
             self.url, API_PREFIX, namespace, name, version
-        )
+        );
+
+        let mut request = self.http.get(&url);
+        if let Some(token) = &self.auth_token {
+            request = request.bearer_auth(token);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| ToolError::Generic(format!("Failed to fetch version: {}", e)))?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(ToolError::Generic(format!(
+                "Version {} not found for {}/{}",
+                version, namespace, name
+            )));
+        }
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ToolError::Generic(format!(
+                "Failed to fetch version ({}): {}",
+                status, body
+            )));
+        }
+
+        response
+            .json::<VersionInfo>()
+            .await
+            .map_err(|e| ToolError::Generic(format!("Failed to parse version info: {}", e)))
     }
 
-    /// Download an artifact bundle to a file.
-    pub async fn download_artifact(
+    /// Download from a direct URL (e.g., CDN bundle_url) with progress bar.
+    pub async fn download_from_url_with_progress_pb(
         &self,
-        namespace: &str,
-        name: &str,
-        version: &str,
+        url: &str,
         output_path: &Path,
+        pb: &indicatif::ProgressBar,
     ) -> ToolResult<u64> {
-        let url = self.get_download_url(namespace, name, version);
-
-        let mut request = self.http.get(&url);
-        if let Some(token) = &self.auth_token {
-            request = request.bearer_auth(token);
-        }
-
-        let response = request
+        let response = self
+            .http
+            .get(url)
             .send()
             .await
             .map_err(|e| ToolError::Generic(format!("Download failed: {}", e)))?;
-
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(ToolError::Generic(format!(
-                "Version {} not found for {}/{}",
-                version, namespace, name
-            )));
-        }
 
         if !response.status().is_success() {
             let status = response.status();
@@ -398,77 +423,17 @@ impl RegistryClient {
             )));
         }
 
-        // Stream the response to a file
-        let mut file = tokio::fs::File::create(output_path)
-            .await
-            .map_err(|e| ToolError::Generic(format!("Failed to create file: {}", e)))?;
-
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| ToolError::Generic(format!("Failed to read response: {}", e)))?;
-
-        let size = bytes.len() as u64;
-
-        file.write_all(&bytes)
-            .await
-            .map_err(|e| ToolError::Generic(format!("Failed to write file: {}", e)))?;
-
-        file.flush()
-            .await
-            .map_err(|e| ToolError::Generic(format!("Failed to flush file: {}", e)))?;
-
-        Ok(size)
-    }
-
-    /// Download an artifact bundle to a file with progress reporting.
-    pub async fn download_artifact_with_progress<F>(
-        &self,
-        namespace: &str,
-        name: &str,
-        version: &str,
-        output_path: &Path,
-        on_progress: F,
-    ) -> ToolResult<u64>
-    where
-        F: Fn(u64, u64), // (bytes_downloaded, total_size)
-    {
-        let url = self.get_download_url(namespace, name, version);
-
-        let mut request = self.http.get(&url);
-        if let Some(token) = &self.auth_token {
-            request = request.bearer_auth(token);
-        }
-
-        let response = request
-            .send()
-            .await
-            .map_err(|e| ToolError::Generic(format!("Download failed: {}", e)))?;
-
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(ToolError::Generic(format!(
-                "Version {} not found for {}/{}",
-                version, namespace, name
-            )));
-        }
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(ToolError::Generic(format!(
-                "Download failed ({}): {}",
-                status, body
-            )));
-        }
-
+        // Update progress bar length if we get content-length
         let total_size = response.content_length().unwrap_or(0);
+        if total_size > 0 && pb.length() == Some(0) {
+            pb.set_length(total_size);
+        }
 
         // Stream the response to a file with progress
         let mut file = tokio::fs::File::create(output_path)
             .await
             .map_err(|e| ToolError::Generic(format!("Failed to create file: {}", e)))?;
 
-        let mut downloaded: u64 = 0;
         let mut stream = response.bytes_stream();
 
         while let Some(chunk) = stream.next().await {
@@ -477,15 +442,14 @@ impl RegistryClient {
             file.write_all(&chunk)
                 .await
                 .map_err(|e| ToolError::Generic(format!("Failed to write chunk: {}", e)))?;
-            downloaded += chunk.len() as u64;
-            on_progress(downloaded, total_size);
+            pb.inc(chunk.len() as u64);
         }
 
         file.flush()
             .await
             .map_err(|e| ToolError::Generic(format!("Failed to flush file: {}", e)))?;
 
-        Ok(downloaded)
+        Ok(pb.position())
     }
 
     /// Check if an artifact exists in the registry.

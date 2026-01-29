@@ -388,8 +388,8 @@ async fn run() -> ToolResult<()> {
             handlers::list_tools(filter.as_deref(), json, full, cli.concise, cli.no_header).await
         }
 
-        Command::Download { name, output } => {
-            handlers::download_tool(&name, output.as_deref()).await
+        Command::Download { names, output } => {
+            handlers::download_tools(&names, output.as_deref()).await
         }
 
         Command::Install { names } => handlers::add_tools(&names).await,
