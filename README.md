@@ -31,7 +31,7 @@
 <br />
 
 <div align="center">
-    <a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://asciinema.org/a/itQE92vIJiyq1PAPnaGURzDpv" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
+    <a href="https://tool.store/blog/building-context-efficient-agents" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://tool.store/blog/building-context-efficient-agents" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
 </div>
 
 <br />
@@ -151,7 +151,7 @@ Get your first MCP tool published in three steps.
 
 ## Using Tools
 
-`tool-cli` essentially turns your MCP servers into CLIs. You can inspect, call, and compose tools directly from the terminal — no client needed. This is also the foundation for building [context-efficient agents](#context-efficient-agents-with-tool-cli).
+`tool-cli` essentially turns your MCP servers into CLIs. You can inspect, call, and compose tools directly from the terminal — no client needed. This is also the foundation for building [context-efficient agents](cookbooks/).
 
 ### Find Tools
 
@@ -326,11 +326,9 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 <br />
 
-<div align='center'>• • •</div>
-
-<br />
-
-## Context-Efficient Agents with tool-cli
+<div align="center">
+    <a href="https://tool.store/blog/building-context-efficient-agents" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://tool.store/blog/building-context-efficient-agents" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
+</div>
 
 <br />
 
