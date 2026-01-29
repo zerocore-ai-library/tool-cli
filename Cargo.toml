@@ -1,7 +1,7 @@
 [package]
 name = "tool-cli"
 description = "`tool-cli` implements a CLI tool for managing MCP tools."
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 authors = ["Steve Akinyemi"]
 license = "MIT"
