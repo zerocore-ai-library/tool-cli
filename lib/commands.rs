@@ -40,11 +40,13 @@ const INSTALL_EXAMPLES: &str = examples![
     "tool install appcypher/bash@1.0.0 " # "Install specific version",
     "tool install ./my-local-tool      " # "Install from local directory",
     "tool install ~/tools/custom       " # "Install from home directory",
+    "tool install ./local ns/a ns/b    " # "Install multiple packages",
 ];
 
 const UNINSTALL_EXAMPLES: &str = examples![
     "tool uninstall appcypher/bash     " # "Remove installed tool",
     "tool uninstall my-local-tool      " # "Remove local tool",
+    "tool uninstall tool1 tool2 tool3  " # "Remove multiple tools",
 ];
 
 const LIST_EXAMPLES: &str = examples![
@@ -339,18 +341,20 @@ pub enum Command {
         query: String,
     },
 
-    /// Install a tool from the registry or a local path.
+    /// Install tools from the registry or local paths.
     #[command(after_help = INSTALL_EXAMPLES)]
     Install {
-        /// Tool reference (`namespace/name[@version]`) or local path.
-        name: String,
+        /// Tool references (`namespace/name[@version]`) or local paths.
+        #[arg(required = true)]
+        names: Vec<String>,
     },
 
-    /// Uninstall an installed tool.
+    /// Uninstall installed tools.
     #[command(after_help = UNINSTALL_EXAMPLES)]
     Uninstall {
-        /// Tool reference.
-        name: String,
+        /// Tool references.
+        #[arg(required = true)]
+        names: Vec<String>,
     },
 
     /// List installed tools.
