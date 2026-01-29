@@ -87,7 +87,7 @@ Get your first MCP tool published in three steps.
 > Shows you what your server exposes. Tools, prompts, resources. This is what clients will see when they connect.
 >
 > ```sh
-> tool call my_tool -m get_weather location="San Francisco"
+> tool call my_tool -m get_weather -p location="San Francisco"
 > ```
 >
 > You can call any method directly. No client needed.
@@ -98,11 +98,11 @@ Get your first MCP tool published in three steps.
 > MCP tools often use `toolname__method` naming. You can use `.` as shorthand.
 >
 > ```sh
-> tool call bash -m .exec command="ls -la"     # expands to bash__exec
+> tool call bash -m .exec -p command="ls -la"     # expands to bash__exec
 > ```
 >
 > ```sh
-> tool call files -m .fs.read path="/tmp"      # expands to files__fs__read
+> tool call files -m .fs.read -p path="/tmp"      # expands to files__fs__read
 > ```
 >
 > </blockquote>
@@ -230,7 +230,7 @@ Get your first MCP tool published in three steps.
 > See what a tool exposes. Tools, prompts, resources.
 >
 > ```sh
-> tool call radical/bash -m .exec command="echo hello"
+> tool call radical/bash -m .exec -p command="echo hello"
 > ```
 >
 > Call a method directly. Great for testing things out.

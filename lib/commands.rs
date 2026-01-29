@@ -89,14 +89,14 @@ const INFO_EXAMPLES: &str = examples![
 ];
 
 const CALL_EXAMPLES: &str = examples![
-    "tool call . -m exec command=\"ls\" " # "Call method in current dir",
-    "tool call bash -m .exec cmd=\"pwd\"" # "Shorthand: .exec -> bash__exec",
-    "tool call bash -m .exec -p cmd=ls " # "Use -p flag for params",
-    "tool call weather -m get loc=NYC  " # "Trailing args as params",
-    "tool call api -m query -k KEY=xxx " # "Pass config inline",
-    "tool call . -m test --config-file " # "Config from file",
-    "tool call . -m run -y             " # "Skip interactive prompts",
-    "tool call . -m debug -v           " # "Verbose output",
+    "tool call . -m exec -p command=\"ls\" " # "Call method in current dir",
+    "tool call bash -m .exec -p cmd=\"pwd\"" # "Shorthand: .exec -> bash__exec",
+    "tool call bash -m .exec -p cmd=ls   " # "Use -p flag for params",
+    "tool call weather -m get -p loc=NYC " # "Unquoted param value",
+    "tool call api -m query -k KEY=xxx   " # "Pass config inline",
+    "tool call . -m test --config-file   " # "Config from file",
+    "tool call . -m run -y               " # "Skip interactive prompts",
+    "tool call . -m debug -v             " # "Verbose output",
 ];
 
 const DOWNLOAD_EXAMPLES: &str = examples![
@@ -205,14 +205,14 @@ const HOST_PATH_EXAMPLES: &str = examples![
 
 const CLI_EXAMPLES: &str = concat!(
     examples![
-        "tool init                         " # "Create a new MCP server (interactive)",
-        "tool install appcypher/bash       " # "Install a tool from the registry",
-        "tool list                         " # "List installed tools",
-        "tool info appcypher/bash          " # "Inspect a tool's capabilities",
-        "tool call bash -m .exec cmd=\"ls\"  " # "Call a tool method",
-        "tool grep file                    " # "Search tool schemas",
-        "tool host add claude-desktop      " # "Register tools with Claude Desktop",
-        "tool run . --expose http          " # "Run tool as HTTP server",
+        "tool init                              " # "Create a new MCP server (interactive)",
+        "tool install appcypher/bash            " # "Install a tool from the registry",
+        "tool list                              " # "List installed tools",
+        "tool info appcypher/bash               " # "Inspect a tool's capabilities",
+        "tool call bash -m .exec -p cmd=\"ls\"    " # "Call a tool method",
+        "tool grep file                         " # "Search tool schemas",
+        "tool host add claude-desktop           " # "Register tools with Claude Desktop",
+        "tool run . --expose http               " # "Run tool as HTTP server",
     ],
     "\n\n",
     examples_section!["Getting started:";
