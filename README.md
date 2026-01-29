@@ -9,7 +9,7 @@
 
 > [MCP](https://github.com/modelcontextprotocol) solved how AI agents integrate with other systems. [MCPB](https://github.com/modelcontextprotocol/mcpb) solved how users install them. But if you're building MCP tools, you're still copying JSON configs, wrestling with dependencies, and manually testing against clients.
 >
-> `tool-cli` is the missing piece. It handles the entire lifecycle from scaffolding to publishing, so you can focus on building your tool.
+> `tool-cli` is the missing piece. It handles the entire lifecycle from scaffolding to publishing, so you can focus on building your tool. It also turns MCP servers into CLIs, enabling you to build context-efficient agents with dynamic tool loading.
 
 <br />
 
