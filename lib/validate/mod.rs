@@ -2,7 +2,8 @@
 
 mod codes;
 mod result;
-mod validators;
+
+pub mod validators;
 
 #[cfg(test)]
 mod tests;
@@ -13,4 +14,4 @@ mod tests;
 
 pub use codes::{ErrorCode, ValidationCode, WarningCode};
 pub use result::{ValidationIssue, ValidationResult};
-pub use validators::validate_manifest;
+pub use validators::{is_valid_package_name, validate_manifest};

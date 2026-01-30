@@ -10,6 +10,7 @@ use crate::scaffold::{
     mcpbignore_template, node_gitignore_template, node_scaffold, python_gitignore_template,
     python_scaffold, rust_gitignore_template, rust_mcpbignore_template, rust_scaffold,
 };
+use crate::validate::validators::fields::is_valid_package_name;
 use colored::Colorize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -162,7 +163,7 @@ pub async fn init_mcpb(
     // Validate name format
     if !is_valid_package_name(&pkg_name) {
         return Err(ToolError::Generic(format!(
-            "Invalid package name \"{}\"\nName must be lowercase and contain only letters, numbers, and hyphens.",
+            "Invalid package name \"{}\"\nName must be 3-64 characters, start with a lowercase letter, and contain only lowercase letters, numbers, and hyphens.",
             pkg_name
         )));
     }
@@ -753,19 +754,6 @@ fn print_migrate_next_steps(
         format!("tool pack {}", display_path).bright_white(),
         format!("# create {} bundle", pack_ext).dimmed(),
     );
-}
-
-/// Validate package name format.
-pub(super) fn is_valid_package_name(name: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_lowercase() => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Try to get author info from git config.

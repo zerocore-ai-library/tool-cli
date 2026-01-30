@@ -15,10 +15,12 @@ use std::sync::LazyLock;
 //--------------------------------------------------------------------------------------------------
 
 /// Regex pattern for validating namespace segments.
-const NAMESPACE_PATTERN: &str = r"^[a-z][a-z0-9_-]{1,49}$";
+/// Rules: 3-64 chars, starts with lowercase letter, contains only lowercase letters, digits, hyphens
+const NAMESPACE_PATTERN: &str = r"^[a-z][a-z0-9-]{2,63}$";
 
 /// Regex pattern for validating name segments.
-const NAME_PATTERN: &str = r"^[a-z][a-z0-9_-]{0,99}$";
+/// Rules: 3-64 chars, starts with lowercase letter, contains only lowercase letters, digits, hyphens
+const NAME_PATTERN: &str = r"^[a-z][a-z0-9-]{2,63}$";
 
 /// Compiled namespace regex.
 static NAMESPACE_REGEX: LazyLock<Regex> =
@@ -181,21 +183,21 @@ impl PluginRef {
 
     /// Validate a namespace segment.
     fn validate_namespace(namespace: &str) -> ToolResult<()> {
-        if namespace.len() < 2 {
+        if namespace.len() < 3 {
             return Err(ToolError::InvalidReference(format!(
-                "Namespace '{}' must be at least 2 characters",
+                "Namespace '{}' must be at least 3 characters",
                 namespace
             )));
         }
-        if namespace.len() > 50 {
+        if namespace.len() > 64 {
             return Err(ToolError::InvalidReference(format!(
-                "Namespace '{}' exceeds 50 character limit",
+                "Namespace '{}' exceeds 64 character limit",
                 namespace
             )));
         }
         if !NAMESPACE_REGEX.is_match(namespace) {
             return Err(ToolError::InvalidReference(format!(
-                "Namespace '{}' must start with lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores",
+                "Namespace '{}' must start with lowercase letter and contain only lowercase letters, numbers, and hyphens",
                 namespace
             )));
         }
@@ -204,18 +206,21 @@ impl PluginRef {
 
     /// Validate a name segment.
     fn validate_name(name: &str) -> ToolResult<()> {
-        if name.is_empty() {
-            return Err(ToolError::InvalidReference("Name cannot be empty".into()));
-        }
-        if name.len() > 100 {
+        if name.len() < 3 {
             return Err(ToolError::InvalidReference(format!(
-                "Name '{}' exceeds 100 character limit",
+                "Name '{}' must be at least 3 characters",
+                name
+            )));
+        }
+        if name.len() > 64 {
+            return Err(ToolError::InvalidReference(format!(
+                "Name '{}' exceeds 64 character limit",
                 name
             )));
         }
         if !NAME_REGEX.is_match(name) {
             return Err(ToolError::InvalidReference(format!(
-                "Name '{}' must start with lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores",
+                "Name '{}' must start with lowercase letter and contain only lowercase letters, numbers, and hyphens",
                 name
             )));
         }
