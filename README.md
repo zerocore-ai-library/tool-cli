@@ -55,7 +55,7 @@ Get your first MCP tool published in three steps.
 <h4>1&nbsp;&nbsp;⏵&nbsp;&nbsp;Create</h4>
 
 > ```sh
-> tool init my_tool
+> tool init my-tool
 > ```
 >
 > This gives you a working MCP server with a valid `manifest.json`. Just follow the prompts to pick your language and transport.
@@ -66,11 +66,11 @@ Get your first MCP tool published in three steps.
 > Run `tool detect` in your project to see what tool-cli finds. Then `tool init` will generate a manifest from your existing code.
 >
 > ```sh
-> tool detect my_tool      # shows detected type, transport, entry point
+> tool detect my-tool      # shows detected type, transport, entry point
 > ```
 >
 > ```sh
-> tool init my_tool        # generates manifest.json
+> tool init my-tool        # generates manifest.json
 > ```
 >
 > </blockquote>
@@ -81,13 +81,13 @@ Get your first MCP tool published in three steps.
 <h4>2&nbsp;&nbsp;⏵&nbsp;&nbsp;Test</h4>
 
 > ```sh
-> tool info my_tool
+> tool info my-tool
 > ```
 >
 > Shows you what your server exposes. Tools, prompts, resources. This is what clients will see when they connect.
 >
 > ```sh
-> tool call my_tool -m get_weather -p location="San Francisco"
+> tool call my-tool -m hello -p name="Steve"
 > ```
 >
 > You can call any method directly. No client needed.
@@ -111,7 +111,7 @@ Get your first MCP tool published in three steps.
 > <br />
 >
 > ```sh
-> tool run my_tool
+> tool run my-tool
 > ```
 >
 > Starts the mcp server for connection.
@@ -125,7 +125,7 @@ Get your first MCP tool published in three steps.
 > ```
 >
 > ```sh
-> tool publish my_tool --strict
+> tool publish my-tool --strict
 > ```
 >
 > Log in once, then publish. Now anyone can install your tool.
@@ -172,7 +172,7 @@ Get your first MCP tool published in three steps.
 ### Install Tools
 
 > ```sh
-> tool install radical/bash
+> tool install library/bash
 > ```
 >
 > Installs a tool from the registry. You can also install from a local path.
@@ -188,7 +188,7 @@ Get your first MCP tool published in three steps.
 ### Run Tools
 
 > ```sh
-> tool run radical/bash
+> tool run library/bash
 > ```
 >
 > Starts the tool with its native transport. Connect your MCP client to it.
@@ -196,11 +196,11 @@ Get your first MCP tool published in three steps.
 > You can also use `--expose` to bridge between transports.
 >
 > ```sh
-> tool run radical/asana --expose stdio             # HTTP backend to stdio
+> tool run appcypher/service --expose stdio             # HTTP backend to stdio
 > ```
 >
 > ```sh
-> tool run radical/bash --expose http --port 3000   # stdio backend to HTTP
+> tool run library/bash --expose http --port 3000   # stdio backend to HTTP
 > ```
 
 ##
@@ -208,13 +208,13 @@ Get your first MCP tool published in three steps.
 ### Configure Tools
 
 > ```sh
-> tool config set radical/bash
+> tool config set library/bash
 > ```
 >
 > Some tools need configuration like API keys. This walks you through setting them up interactively.
 >
 > ```sh
-> tool config get radical/bash
+> tool config get library/bash
 > ```
 >
 > Check what config values are set.
@@ -224,13 +224,13 @@ Get your first MCP tool published in three steps.
 ### Use Tools
 
 > ```sh
-> tool info radical/bash
+> tool info library/bash
 > ```
 >
 > See what a tool exposes. Tools, prompts, resources.
 >
 > ```sh
-> tool call radical/bash -m .exec -p command="echo hello"
+> tool call library/bash -m .exec -p command="echo hello"
 > ```
 >
 > Call a method directly. Great for testing things out.
@@ -246,7 +246,7 @@ Get your first MCP tool published in three steps.
 Once you've installed some tools, you probably want to use them in your favorite AI app. Instead of manually editing JSON configs, just run:
 
 > ```sh
-> tool host add claude-desktop radical/weather
+> tool host add claude-desktop library/weather
 > ```
 >
 > This registers the tool with the host. Works with Claude Desktop, Cursor, VS Code, Claude Code, Codex, Windsurf, Zed, Gemini CLI, Kiro, and Roo Code.
@@ -316,7 +316,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 > ```sh
 > tool host list                             # see all supported hosts
-> tool host add cursor radical/weather       # add a tool to Cursor
+> tool host add cursor library/weather       # add a tool to Cursor
 > tool host add vscode                       # add all installed tools
 > tool host remove claude-desktop            # remove tools from a host
 > tool host preview cursor                   # preview the generated config

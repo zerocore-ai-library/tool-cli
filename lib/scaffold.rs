@@ -60,6 +60,10 @@ const server = new McpServer({{
   version: "0.1.0",
 }});
 
+const HelloInputSchema = z.object({{
+  name: z.string().optional().describe("Name to greet"),
+}});
+
 const HelloOutputSchema = z.object({{
   message: z.string().describe("The greeting message"),
 }});
@@ -68,10 +72,12 @@ server.registerTool(
   "hello",
   {{
     description: "Say hello",
+    inputSchema: HelloInputSchema,
     outputSchema: HelloOutputSchema,
   }},
-  async () => {{
-    const output = {{ message: "Hello from {name}!" }};
+  async ({{ name: inputName }}) => {{
+    const message = inputName ? `Hello, ${{inputName}}!` : "Hello from {name}!";
+    const output = {{ message }};
     return {{
       content: [{{ type: "text", text: JSON.stringify(output) }}],
       structuredContent: output,
@@ -124,6 +130,10 @@ const server = new McpServer({{
   version: "0.1.0",
 }});
 
+const HelloInputSchema = z.object({{
+  name: z.string().optional().describe("Name to greet"),
+}});
+
 const HelloOutputSchema = z.object({{
   message: z.string().describe("The greeting message"),
 }});
@@ -132,10 +142,12 @@ server.registerTool(
   "hello",
   {{
     description: "Say hello",
+    inputSchema: HelloInputSchema,
     outputSchema: HelloOutputSchema,
   }},
-  async () => {{
-    const output = {{ message: "Hello from {name}!" }};
+  async ({{ name: inputName }}) => {{
+    const message = inputName ? `Hello, ${{inputName}}!` : "Hello from {name}!";
+    const output = {{ message }};
     return {{
       content: [{{ type: "text", text: JSON.stringify(output) }}],
       structuredContent: output,
@@ -260,9 +272,10 @@ class HelloOutput(BaseModel):
 
 
 @mcp.tool()
-def hello() -> HelloOutput:
+def hello(name: str | None = None) -> HelloOutput:
     """Say hello."""
-    return HelloOutput(message="Hello from {name}!")
+    message = f"Hello, {{name}}!" if name else "Hello from {name}!"
+    return HelloOutput(message=message)
 
 
 if __name__ == "__main__":
@@ -331,9 +344,10 @@ class HelloOutput(BaseModel):
 
 
 @mcp.tool()
-def hello() -> HelloOutput:
+def hello(name: str | None = None) -> HelloOutput:
     """Say hello."""
-    return HelloOutput(message="Hello from {name}!")
+    message = f"Hello, {{name}}!" if name else "Hello from {name}!"
+    return HelloOutput(message=message)
 
 
 @contextlib.asynccontextmanager
@@ -442,12 +456,19 @@ async fn main() -> Result<()> {{
     let lib_rs = format!(
         r#"use rmcp::{{
     ErrorData as McpError, Json, ServerHandler,
-    handler::server::tool::ToolRouter,
+    handler::server::{{tool::ToolRouter, wrapper::Parameters}},
     model::{{ServerCapabilities, ServerInfo, Implementation, ProtocolVersion}},
     tool, tool_router, tool_handler,
 }};
 use schemars::JsonSchema;
 use serde::{{Deserialize, Serialize}};
+
+/// Input structure for the hello tool.
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+pub struct HelloInput {{
+    /// Name to greet.
+    pub name: Option<String>,
+}}
 
 /// Output structure for the hello tool.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -470,10 +491,12 @@ impl Server {{
     }}
 
     #[tool(description = "Say hello")]
-    fn hello(&self) -> Result<Json<HelloOutput>, McpError> {{
-        Ok(Json(HelloOutput {{
-            message: "Hello from {name}!".to_string(),
-        }}))
+    fn hello(&self, Parameters(input): Parameters<HelloInput>) -> Result<Json<HelloOutput>, McpError> {{
+        let message = match input.name {{
+            Some(name) => format!("Hello, {{}}!", name),
+            None => "Hello from {name}!".to_string(),
+        }};
+        Ok(Json(HelloOutput {{ message }}))
     }}
 }}
 
@@ -500,7 +523,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rmcp = {{ version = "0.12", features = ["server", "macros", "transport-io"] }}
+rmcp = {{ version = "0.14", features = ["server", "macros", "transport-io"] }}
 tokio = {{ version = "1", features = ["macros", "rt-multi-thread", "io-std"] }}
 serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
@@ -576,12 +599,19 @@ async fn main() -> Result<()> {{
     let lib_rs = format!(
         r#"use rmcp::{{
     ErrorData as McpError, Json, ServerHandler,
-    handler::server::tool::ToolRouter,
+    handler::server::{{tool::ToolRouter, wrapper::Parameters}},
     model::{{ServerCapabilities, ServerInfo, Implementation, ProtocolVersion}},
     tool, tool_router, tool_handler,
 }};
 use schemars::JsonSchema;
 use serde::{{Deserialize, Serialize}};
+
+/// Input structure for the hello tool.
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+pub struct HelloInput {{
+    /// Name to greet.
+    pub name: Option<String>,
+}}
 
 /// Output structure for the hello tool.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -604,10 +634,12 @@ impl Server {{
     }}
 
     #[tool(description = "Say hello")]
-    fn hello(&self) -> Result<Json<HelloOutput>, McpError> {{
-        Ok(Json(HelloOutput {{
-            message: "Hello from {name}!".to_string(),
-        }}))
+    fn hello(&self, Parameters(input): Parameters<HelloInput>) -> Result<Json<HelloOutput>, McpError> {{
+        let message = match input.name {{
+            Some(name) => format!("Hello, {{}}!", name),
+            None => "Hello from {name}!".to_string(),
+        }};
+        Ok(Json(HelloOutput {{ message }}))
     }}
 }}
 
@@ -634,7 +666,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rmcp = {{ version = "0.12", features = ["server", "macros", "transport-streamable-http-server"] }}
+rmcp = {{ version = "0.14", features = ["server", "macros", "transport-streamable-http-server"] }}
 tokio = {{ version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }}
 axum = "0.8"
 serde = {{ version = "1.0", features = ["derive"] }}

@@ -973,13 +973,10 @@ pub async fn call_tool(
     }
 
     // Call the tool
+    // Always send arguments as an object (even empty) to satisfy input schema validation
     let params = CallToolRequestParam {
         name: method.to_string().into(),
-        arguments: if arguments.is_empty() {
-            None
-        } else {
-            Some(arguments.into_iter().collect())
-        },
+        arguments: Some(arguments.into_iter().collect()),
     };
 
     if verbose {
