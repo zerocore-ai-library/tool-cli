@@ -38,17 +38,17 @@ Where path is an array representing the hierarchy of tool->method->field that ma
 Here are breakdowns of sample paths:
 
 ```jsonc
-["namespace/my_tool"/* tool name */,"tools","my_method"/* method name */,"input_schema","properties","my_param"/* input field name */]
+["library/my-tool"/* tool name */,"tools","my_method"/* method name */,"input_schema","properties","my_param"/* input field name */]
 ```
 
 ```jsonc
-["namespace/my_tool"/* tool name */,"tools","my_method"/* method name */,"description"/* method description */]
+["library/my-tool"/* tool name */,"tools","my_method"/* method name */,"description"/* method description */]
 ```
 
 It basically greps along the following tool/method JSON schema structure.
 
 ```jsonc
-{"namespace/my_tool":{"type":"stdio","manifest_path":"<path-to>/.tool/tools/namespace/my_tool/manifest.json","tools":{"my_method":{"description":"<decription>","input_schema":{"$defs":{"my_type":{"properties":{"my_param":{"type":"string","description":"Parameter description..."}},"required":["my_param"]}}},"output_schema":{/* similar structure as input_schema */}}}}}
+{"library/my-tool":{"type":"stdio","manifest_path":"<path-to>/.tool/tools/library/my-tool/manifest.json","tools":{"my_method":{"description":"<decription>","input_schema":{"$defs":{"my_type":{"properties":{"my_param":{"type":"string","description":"Parameter description..."}},"required":["my_param"]}}},"output_schema":{/* similar structure as input_schema */}}}}}
 ```
 
 ## `tool info`
@@ -69,7 +69,7 @@ Example output:
 #type   location
 <type>  <location>
 #tool
-namespace/my_tool:my_method(<param><modifier>: <type>, ...) -> {<key><modifier>: <type>, ...}
+library/my-tool:my_method(<param><modifier>: <type>, ...) -> {<key><modifier>: <type>, ...}
 ```
 
 You can also try it with --json if you are not getting enough details (like description) from concise form.
@@ -81,7 +81,7 @@ tool info <tool> --method <method> --concise --json
 Example output:
 
 ```json
-{"server":{...},"type":"stdio","manifest_path":"<path-to>/.tool/tools/namespace/my_tool/manifest.json","tools":{"my_method":{"description":"<decription>","input_schema":{...},"output_schema":{...}}}}
+{"server":{...},"type":"stdio","manifest_path":"<path-to>/.tool/tools/library/my-tool/manifest.json","tools":{"my_method":{"description":"<decription>","input_schema":{...},"output_schema":{...}}}}
 ```
 
 ## `tool call`
