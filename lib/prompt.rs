@@ -13,6 +13,7 @@ use crate::mcpb::{
     InitMode, McpbServerType, McpbTransport, NodePackageManager, PackageManager,
     PythonPackageManager,
 };
+use crate::validate::validators::fields::is_valid_package_name;
 
 //--------------------------------------------------------------------------------------------------
 // Constants
@@ -180,24 +181,6 @@ fn prompt_transport(prefill: Option<McpbTransport>) -> ToolResult<McpbTransport>
     })
 }
 
-/// Validate package name format.
-fn is_valid_package_name(name: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-
-    let mut chars = name.chars();
-
-    // Must start with lowercase letter
-    match chars.next() {
-        Some(c) if c.is_ascii_lowercase() => {}
-        _ => return false,
-    }
-
-    // Rest must be lowercase letters, numbers, or hyphens
-    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
 /// Run interactive prompts for MCPB package initialization.
 ///
 /// Skips prompts for any values already provided in the prefill struct.
@@ -222,7 +205,7 @@ pub fn prompt_init_mcpb(
                     if input.is_empty() {
                         Err("Package name is required")
                     } else if !is_valid_package_name(input) {
-                        Err("Must be lowercase letters, numbers, and hyphens, starting with a letter")
+                        Err("Must be 3-64 lowercase letters, numbers, and hyphens, starting with a letter")
                     } else {
                         Ok(())
                     }

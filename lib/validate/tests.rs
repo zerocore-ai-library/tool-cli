@@ -1,31 +1,44 @@
 //! Validation tests.
 
 use super::codes::{ErrorCode, ValidationCode};
+use super::validators::fields::is_valid_package_name;
 use super::validators::validate_manifest;
 use tempfile::TempDir;
 
-fn is_valid_package_name(name: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_lowercase() => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
 #[test]
 fn test_valid_package_name() {
+    // Valid
     assert!(is_valid_package_name("my-tool"));
     assert!(is_valid_package_name("tool123"));
-    assert!(is_valid_package_name("a"));
+    assert!(is_valid_package_name("abc"));
+    assert!(is_valid_package_name(&"a".repeat(64)));
+
+    // Invalid - too short
+    assert!(!is_valid_package_name("ab"));
+    assert!(!is_valid_package_name("a"));
+
+    // Invalid - too long
+    assert!(!is_valid_package_name(&"a".repeat(65)));
+
+    // Invalid - empty
     assert!(!is_valid_package_name(""));
+
+    // Invalid - uppercase
     assert!(!is_valid_package_name("My-Tool"));
+    assert!(!is_valid_package_name("TOOL"));
+
+    // Invalid - starts with digit
     assert!(!is_valid_package_name("123tool"));
+
+    // Invalid - starts with hyphen
     assert!(!is_valid_package_name("-tool"));
+
+    // Invalid - underscore
     assert!(!is_valid_package_name("tool_name"));
+
+    // Invalid - special chars
+    assert!(!is_valid_package_name("tool@name"));
+    assert!(!is_valid_package_name("tool.name"));
 }
 
 #[test]

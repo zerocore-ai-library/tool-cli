@@ -9,6 +9,16 @@ use super::core::missing_field;
 use super::paths::{is_path_safe, validate_file_path};
 
 //--------------------------------------------------------------------------------------------------
+// Constants
+//--------------------------------------------------------------------------------------------------
+
+/// Minimum package name length
+pub const MIN_PACKAGE_NAME_LENGTH: usize = 3;
+
+/// Maximum package name length
+pub const MAX_PACKAGE_NAME_LENGTH: usize = 64;
+
+//--------------------------------------------------------------------------------------------------
 // Functions
 //--------------------------------------------------------------------------------------------------
 
@@ -81,8 +91,8 @@ pub fn validate_formats(manifest: &McpbManifest, result: &mut ValidationResult) 
             code: ErrorCode::InvalidPackageName.into(),
             message: "invalid package name".into(),
             location: "manifest.json:name".into(),
-            details: format!("`{}` must be lowercase alphanumeric with hyphens", name),
-            help: Some("use format: my-package-name".into()),
+            details: format!("`{}` must be 3-64 lowercase alphanumeric chars with hyphens, starting with a letter", name),
+            help: Some("use format: my-package-name (3-64 chars)".into()),
         });
     }
 
@@ -162,8 +172,10 @@ pub fn validate_file_references(
 }
 
 /// Check if a package name is valid.
+/// Rules: 3-64 chars, starts with lowercase letter, contains only lowercase letters, digits, hyphens
 pub fn is_valid_package_name(name: &str) -> bool {
-    if name.is_empty() {
+    let len = name.len();
+    if !(MIN_PACKAGE_NAME_LENGTH..=MAX_PACKAGE_NAME_LENGTH).contains(&len) {
         return false;
     }
     let mut chars = name.chars();
