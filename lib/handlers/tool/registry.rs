@@ -1605,9 +1605,14 @@ pub async fn publish_mcpb(
     let pb_arc = Arc::new(pb);
     let pb_clone = Arc::clone(&pb_arc);
     client
-        .upload_bundle_with_progress(&upload_target.upload_url, &bundle, move |bytes| {
-            pb_clone.set_position(bytes);
-        })
+        .upload_bundle_with_progress(
+            &upload_target.upload_url,
+            &bundle,
+            &upload_target.content_type,
+            move |bytes| {
+                pb_clone.set_position(bytes);
+            },
+        )
         .await?;
 
     pb_arc.finish_and_clear();
@@ -2073,6 +2078,7 @@ async fn publish_multi_artifact_impl(
                     .upload_bundle_with_progress(
                         &upload_target.upload_url,
                         &bytes,
+                        &upload_target.content_type,
                         move |uploaded| {
                             pb_clone.set_position(uploaded);
                         },

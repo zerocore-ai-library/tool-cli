@@ -155,6 +155,13 @@ pub struct UploadTarget {
     pub upload_url: String,
     /// Storage key for this file.
     pub storage_key: String,
+    /// Content-Type to use when uploading.
+    #[serde(default = "default_content_type")]
+    pub content_type: String,
+}
+
+fn default_content_type() -> String {
+    "application/octet-stream".to_string()
 }
 
 /// Upload initiation response.
@@ -592,11 +599,16 @@ impl RegistryClient {
     }
 
     /// Upload a bundle to the presigned URL.
-    pub async fn upload_bundle(&self, upload_url: &str, content: &[u8]) -> ToolResult<()> {
+    pub async fn upload_bundle(
+        &self,
+        upload_url: &str,
+        content: &[u8],
+        content_type: &str,
+    ) -> ToolResult<()> {
         let response = self
             .http
             .put(upload_url)
-            .header("Content-Type", "application/gzip")
+            .header("Content-Type", content_type)
             .body(content.to_vec())
             .send()
             .await
@@ -619,6 +631,7 @@ impl RegistryClient {
         &self,
         upload_url: &str,
         content: &[u8],
+        content_type: &str,
         on_progress: F,
     ) -> ToolResult<()>
     where
@@ -636,7 +649,7 @@ impl RegistryClient {
         let response = self
             .http
             .put(upload_url)
-            .header("Content-Type", "application/gzip")
+            .header("Content-Type", content_type)
             .header("Content-Length", total_size)
             .body(body)
             .send()
