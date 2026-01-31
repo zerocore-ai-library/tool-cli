@@ -4,12 +4,15 @@ use crate::constants::MCPB_MANIFEST_FILE;
 use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
 use crate::mcpb::McpbManifest;
+use crate::pack::{PackOptions, compute_sha256, pack_bundle};
 use crate::references::PluginRef;
 use crate::registry::RegistryClient;
 use crate::resolver::FilePluginResolver;
 use crate::styles::Spinner;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use serde::Serialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -45,6 +48,40 @@ pub enum UninstallResult {
     Failed(String),
 }
 
+/// Options for multi-artifact publishing.
+#[derive(Debug, Clone, Default)]
+pub struct MultiArtifactOptions {
+    /// Platform-specific bundles to create (e.g., "darwin-arm64", "linux-x86_64").
+    pub platforms: Vec<String>,
+    /// Also create a universal bundle containing all platform binaries.
+    pub include_universal: bool,
+    /// Explicit artifact paths: platform -> path (e.g., "darwin-arm64" -> "./dist/darwin.mcpb").
+    pub explicit_artifacts: HashMap<String, PathBuf>,
+}
+
+/// Version manifest for multi-artifact versions.
+/// This is uploaded as `version.json` and becomes the main_file.
+#[derive(Debug, Serialize)]
+pub struct VersionManifest {
+    /// Package name.
+    pub name: String,
+    /// Package version.
+    pub version: String,
+    /// Map of platform key to artifact info.
+    pub artifacts: HashMap<String, ArtifactEntry>,
+}
+
+/// Entry for a single artifact in the version manifest.
+#[derive(Debug, Serialize)]
+pub struct ArtifactEntry {
+    /// Filename of the artifact.
+    pub filename: String,
+    /// Size in bytes.
+    pub size: u64,
+    /// Checksum with algorithm prefix (e.g., "sha256:abc123...").
+    pub checksum: String,
+}
+
 /// Pre-flight information for a registry download.
 #[allow(dead_code)]
 struct RegistryPreflight {
@@ -52,8 +89,8 @@ struct RegistryPreflight {
     namespace: String,
     tool_name: String,
     version: String,
-    bundle_size: u64,
-    bundle_url: String,
+    download_size: u64,
+    download_url: String,
     target_dir: PathBuf,
     temp_file: PathBuf,
 }
@@ -74,21 +111,46 @@ enum PreflightResult {
 // Functions
 //--------------------------------------------------------------------------------------------------
 
+/// Get the current platform identifier (e.g., "darwin-arm64", "linux-x64").
+fn get_current_platform() -> String {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+
+    // Map OS names
+    let os_name = match os {
+        "macos" => "darwin",
+        "windows" => "win32",
+        _ => os,
+    };
+
+    // Map architecture names
+    let arch_name = match arch {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        _ => arch,
+    };
+
+    format!("{}-{}", os_name, arch_name)
+}
+
 /// Download a tool from the registry.
 /// Preflight info for download.
 struct DownloadPreflight {
     namespace: String,
     tool_name: String,
     version: String,
-    bundle_size: u64,
-    bundle_url: String,
+    download_size: u64,
+    download_url: String,
     output_path: PathBuf,
+    #[allow(dead_code)]
+    platform: Option<String>,
 }
 
 /// Run preflight for a download.
 async fn preflight_download(
     name: &str,
     output_dir: Option<&Path>,
+    platform: Option<&str>,
 ) -> Result<DownloadPreflight, String> {
     let plugin_ref = name
         .parse::<PluginRef>()
@@ -126,15 +188,16 @@ async fn preflight_download(
         .await
         .map_err(|e| format!("Failed to fetch version info: {}", e))?;
 
-    let bundle_url = version_info
-        .bundle_url
-        .ok_or_else(|| format!("No bundle URL for {}/{}@{}", namespace, tool_name, version))?;
+    // Determine which bundle to download based on platform preference
+    let (download_url, download_size, selected_platform, bundle_ext) =
+        select_platform_bundle(&version_info, platform, &tool_name, &version)?;
 
-    let bundle_size = version_info.bundle_size.unwrap_or(0);
-    let ext = version_info.bundle_format.as_deref().unwrap_or("mcpb");
+    // Determine output path with correct extension
+    let bundle_name = match &selected_platform {
+        Some(p) => format!("{}@{}-{}.{}", tool_name, version, p, bundle_ext),
+        None => format!("{}@{}.{}", tool_name, version, bundle_ext),
+    };
 
-    // Determine output path
-    let bundle_name = format!("{}@{}.{}", tool_name, version, ext);
     let output_path = match output_dir {
         Some(dir) => dir.join(&bundle_name),
         None => std::env::current_dir()
@@ -146,14 +209,148 @@ async fn preflight_download(
         namespace,
         tool_name,
         version,
-        bundle_size,
-        bundle_url,
+        download_size,
+        download_url,
         output_path,
+        platform: selected_platform,
     })
 }
 
+/// Select the appropriate bundle based on platform preference.
+/// Returns (download_url, size, selected_platform, extension).
+fn select_platform_bundle(
+    version_info: &crate::registry::VersionInfo,
+    platform: Option<&str>,
+    tool_name: &str,
+    version: &str,
+) -> Result<(String, u64, Option<String>, String), String> {
+    let files = version_info.files.as_ref();
+
+    // Helper to check if a filename is a platform-specific bundle
+    fn is_platform_specific(filename: &str) -> bool {
+        filename.contains("-darwin-")
+            || filename.contains("-linux-")
+            || filename.contains("-win32-")
+    }
+
+    // Helper to find universal bundle in files
+    fn find_universal_bundle(
+        files: &std::collections::HashMap<String, crate::registry::FileInfo>,
+    ) -> Option<(&String, &crate::registry::FileInfo)> {
+        files.iter().find(|(filename, _)| {
+            (filename.ends_with(".mcpb") || filename.ends_with(".mcpbx"))
+                && !is_platform_specific(filename)
+        })
+    }
+
+    // If explicit "universal" requested, look for universal bundle in files first
+    if platform == Some("universal") {
+        if let Some(files) = files
+            && let Some((filename, info)) = find_universal_bundle(files)
+        {
+            let ext = if filename.ends_with(".mcpbx") {
+                "mcpbx"
+            } else {
+                "mcpb"
+            };
+            return Ok((info.url.clone(), info.size, None, ext.to_string()));
+        }
+        // Fall back to main_download_url only if it's actually a bundle
+        if let Some(url) = &version_info.main_download_url
+            && (url.ends_with(".mcpb") || url.ends_with(".mcpbx"))
+        {
+            let size = version_info.main_download_size.unwrap_or(0);
+            let ext = if url.ends_with(".mcpbx") {
+                "mcpbx"
+            } else {
+                "mcpb"
+            };
+            return Ok((url.clone(), size, None, ext.to_string()));
+        }
+        return Err(format!("No universal bundle for {}@{}", tool_name, version));
+    }
+
+    // Check if we have platform-specific files
+    if let Some(files) = files {
+        let current_platform = get_current_platform();
+        let target_platform = platform.unwrap_or(&current_platform);
+
+        // Generate platform variants (x64 <-> x86_64 aliasing)
+        let platform_variants: Vec<String> = {
+            let mut variants = vec![target_platform.to_string()];
+            if target_platform.ends_with("-x64") {
+                variants.push(target_platform.replace("-x64", "-x86_64"));
+            } else if target_platform.ends_with("-x86_64") {
+                variants.push(target_platform.replace("-x86_64", "-x64"));
+            }
+            variants
+        };
+
+        // Look for platform-specific bundle in files
+        for (filename, info) in files {
+            for variant in &platform_variants {
+                if filename.contains(&format!("-{}", variant))
+                    && (filename.ends_with(".mcpb") || filename.ends_with(".mcpbx"))
+                {
+                    let ext = if filename.ends_with(".mcpbx") {
+                        "mcpbx"
+                    } else {
+                        "mcpb"
+                    };
+                    return Ok((
+                        info.url.clone(),
+                        info.size,
+                        Some(variant.to_string()),
+                        ext.to_string(),
+                    ));
+                }
+            }
+        }
+
+        // If platform was explicitly requested but not found, error
+        if platform.is_some() {
+            return Err(format!(
+                "Platform '{}' not available for {}@{}. Use --platform universal for universal bundle.",
+                target_platform, tool_name, version
+            ));
+        }
+
+        // Auto-detect: No platform match found, try universal bundle from files
+        if let Some((filename, info)) = find_universal_bundle(files) {
+            let ext = if filename.ends_with(".mcpbx") {
+                "mcpbx"
+            } else {
+                "mcpb"
+            };
+            return Ok((info.url.clone(), info.size, None, ext.to_string()));
+        }
+    }
+
+    // Fall back to main_download_url only if it's actually a bundle
+    if let Some(url) = &version_info.main_download_url
+        && (url.ends_with(".mcpb") || url.ends_with(".mcpbx"))
+    {
+        let size = version_info.main_download_size.unwrap_or(0);
+        let ext = if url.ends_with(".mcpbx") {
+            "mcpbx"
+        } else {
+            "mcpb"
+        };
+        return Ok((url.clone(), size, None, ext.to_string()));
+    }
+
+    Err(format!(
+        "No download available for {}@{}",
+        tool_name, version
+    ))
+}
+
 /// Download multiple tools from the registry.
-pub async fn download_tools(names: &[String], output: Option<&str>) -> ToolResult<()> {
+pub async fn download_tools(
+    names: &[String],
+    output: Option<&str>,
+    platform: Option<&str>,
+) -> ToolResult<()> {
     use futures_util::future::join_all;
 
     let is_single = names.len() == 1;
@@ -193,7 +390,7 @@ pub async fn download_tools(names: &[String], output: Option<&str>) -> ToolResul
 
     let preflight_futures: Vec<_> = names
         .iter()
-        .map(|name| preflight_download(name, output_dir.as_deref()))
+        .map(|name| preflight_download(name, output_dir.as_deref(), platform))
         .collect();
     let preflight_results = join_all(preflight_futures).await;
 
@@ -228,7 +425,7 @@ pub async fn download_tools(names: &[String], output: Option<&str>) -> ToolResul
                 pf.version.bright_cyan()
             );
 
-            let pb = ProgressBar::new(pf.bundle_size);
+            let pb = ProgressBar::new(pf.download_size);
             pb.set_style(
                 ProgressStyle::default_bar()
                     .template("  [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
@@ -238,7 +435,7 @@ pub async fn download_tools(names: &[String], output: Option<&str>) -> ToolResul
             pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
             match client
-                .download_from_url_with_progress_pb(&pf.bundle_url, &pf.output_path, &pb)
+                .download_from_url_with_progress_pb(&pf.download_url, &pf.output_path, &pb)
                 .await
             {
                 Ok(size) => {
@@ -279,7 +476,7 @@ pub async fn download_tools(names: &[String], output: Option<&str>) -> ToolResul
             let handles: Vec<_> = preflights
                 .into_iter()
                 .map(|pf| {
-                    let pb = mp.add(ProgressBar::new(pf.bundle_size));
+                    let pb = mp.add(ProgressBar::new(pf.download_size));
                     pb.set_style(style.clone());
                     pb.set_message(format!("{}/{}", pf.namespace, pf.tool_name));
                     pb.enable_steady_tick(std::time::Duration::from_millis(100));
@@ -288,7 +485,7 @@ pub async fn download_tools(names: &[String], output: Option<&str>) -> ToolResul
                     tokio::spawn(async move {
                         let result = client
                             .download_from_url_with_progress_pb(
-                                &pf.bundle_url,
+                                &pf.download_url,
                                 &pf.output_path,
                                 &pb,
                             )
@@ -366,7 +563,7 @@ pub async fn download_tools(names: &[String], output: Option<&str>) -> ToolResul
 }
 
 /// Run pre-flight checks for a tool (validation, metadata fetch, already-installed check).
-async fn preflight_tool(name: &str) -> PreflightResult {
+async fn preflight_tool(name: &str, platform: Option<&str>) -> PreflightResult {
     use crate::constants::DEFAULT_TOOLS_PATH;
 
     // Check if this looks like a local path
@@ -412,7 +609,7 @@ async fn preflight_tool(name: &str) -> PreflightResult {
         }
     };
 
-    // Fetch full version info (includes bundle_url)
+    // Fetch full version info (includes download URL)
     let version_info = match client.get_version(&namespace, &tool_name, &version).await {
         Ok(v) => v,
         Err(e) => {
@@ -420,16 +617,12 @@ async fn preflight_tool(name: &str) -> PreflightResult {
         }
     };
 
-    let bundle_size = version_info.bundle_size.unwrap_or(0);
-    let bundle_url = match version_info.bundle_url {
-        Some(url) => url,
-        None => {
-            return PreflightResult::Failed(format!(
-                "No bundle URL for {}/{}@{}",
-                namespace, tool_name, version
-            ));
-        }
-    };
+    // Select the appropriate platform bundle
+    let (download_url, download_size, _selected_platform, _ext) =
+        match select_platform_bundle(&version_info, platform, &tool_name, &version) {
+            Ok(result) => result,
+            Err(msg) => return PreflightResult::Failed(msg),
+        };
 
     // Check if already installed
     let target_dir = DEFAULT_TOOLS_PATH
@@ -449,8 +642,8 @@ async fn preflight_tool(name: &str) -> PreflightResult {
         namespace,
         tool_name,
         version,
-        bundle_size,
-        bundle_url,
+        download_size,
+        download_url,
         target_dir,
         temp_file,
     })
@@ -472,9 +665,9 @@ async fn download_and_install(
 ) -> Result<InstallSuccess, String> {
     let client = RegistryClient::new();
 
-    // Download from CDN bundle_url with progress
+    // Download from CDN URL with progress
     let size = client
-        .download_from_url_with_progress_pb(&preflight.bundle_url, &preflight.temp_file, &pb)
+        .download_from_url_with_progress_pb(&preflight.download_url, &preflight.temp_file, &pb)
         .await
         .map_err(|e| format!("Failed to download: {}", e))?;
 
@@ -499,7 +692,11 @@ async fn download_and_install(
 }
 
 /// Install multiple tools from the registry or local paths.
-pub async fn add_tools(names: &[String]) -> ToolResult<()> {
+///
+/// If `platform` is specified, it will be used to select a platform-specific
+/// artifact when installing multi-artifact versions. Use "universal" to
+/// explicitly select the universal bundle.
+pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<()> {
     use futures_util::future::join_all;
 
     // Phase 1: Run preflight checks
@@ -519,7 +716,10 @@ pub async fn add_tools(names: &[String]) -> ToolResult<()> {
         );
     }
 
-    let preflight_futures: Vec<_> = names.iter().map(|name| preflight_tool(name)).collect();
+    let preflight_futures: Vec<_> = names
+        .iter()
+        .map(|name| preflight_tool(name, platform))
+        .collect();
     let preflight_results = join_all(preflight_futures).await;
 
     // Separate registry downloads from immediate results
@@ -577,7 +777,7 @@ pub async fn add_tools(names: &[String]) -> ToolResult<()> {
                 preflight.version.bright_cyan()
             );
 
-            let pb = ProgressBar::new(preflight.bundle_size);
+            let pb = ProgressBar::new(preflight.download_size);
             pb.set_style(
                 ProgressStyle::default_bar()
                     .template("  [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
@@ -621,7 +821,7 @@ pub async fn add_tools(names: &[String]) -> ToolResult<()> {
             let handles: Vec<_> = registry_preflights
                 .into_iter()
                 .map(|preflight| {
-                    let pb = mp.add(ProgressBar::new(preflight.bundle_size));
+                    let pb = mp.add(ProgressBar::new(preflight.download_size));
                     pb.set_style(style.clone());
                     pb.set_message(format!("{}/{}", preflight.namespace, preflight.tool_name));
                     pb.enable_steady_tick(std::time::Duration::from_millis(100));
@@ -1113,9 +1313,14 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
 }
 
 /// Publish a tool to the registry.
-pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult<()> {
+pub async fn publish_mcpb(
+    path: &str,
+    dry_run: bool,
+    strict: bool,
+    multi_platform: bool,
+    prebuilt_artifacts: HashMap<String, PathBuf>,
+) -> ToolResult<()> {
     use crate::handlers::auth::{get_registry_token, load_credentials};
-    use crate::pack::{PackOptions, pack_bundle};
     use crate::validate::validate_manifest;
     use sha2::{Digest, Sha256};
 
@@ -1232,6 +1437,57 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
         }
     }
 
+    // Check if we should use multi-platform mode
+    let use_multi_platform = multi_platform || !prebuilt_artifacts.is_empty();
+
+    if use_multi_platform {
+        // Build multi-artifact options
+        let options = if !prebuilt_artifacts.is_empty() {
+            // Use prebuilt artifacts
+            MultiArtifactOptions {
+                platforms: prebuilt_artifacts.keys().cloned().collect(),
+                include_universal: prebuilt_artifacts.contains_key("universal"),
+                explicit_artifacts: prebuilt_artifacts,
+            }
+        } else {
+            // Auto-detect platforms from manifest
+            let platforms = detect_available_platforms(&manifest);
+            if platforms.is_empty() {
+                println!(
+                    "  {} No platform overrides found in manifest.",
+                    "⚠".bright_yellow()
+                );
+                println!("  Publishing as single universal bundle instead.");
+                // Fall through to single-artifact mode
+                MultiArtifactOptions::default()
+            } else {
+                MultiArtifactOptions {
+                    platforms,
+                    include_universal: true, // Always include universal bundle
+                    explicit_artifacts: HashMap::new(),
+                }
+            }
+        };
+
+        // Only use multi-artifact if we have platforms or explicit artifacts
+        if !options.platforms.is_empty() || !options.explicit_artifacts.is_empty() {
+            return publish_multi_artifact_impl(
+                &dir,
+                &manifest,
+                &manifest_content,
+                &namespace,
+                tool_name,
+                version,
+                description,
+                options,
+                dry_run,
+                token,
+            )
+            .await;
+        }
+    }
+
+    // Single-artifact mode (original logic)
     // Bundle the tool
     println!();
     let spinner = Spinner::new("Creating bundle");
@@ -1312,23 +1568,28 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
     hasher.update(&bundle);
     let sha256 = format!("{:x}", hasher.finalize());
 
-    // Initiate upload
-    let bundle_format = manifest.bundle_extension();
+    // Initiate upload with file spec
+    let file_name = format!("{}.{}", tool_name, manifest.bundle_extension());
+    let files = vec![crate::registry::FileSpec {
+        name: file_name.clone(),
+        size: bundle_size as i64,
+        sha256: sha256.clone(),
+    }];
+
     println!(
         "\n  {} Uploading bundle ({})",
         "→".bright_blue(),
-        bundle_format
+        manifest.bundle_extension()
     );
     let upload_info = client
-        .init_upload(
-            &namespace,
-            tool_name,
-            version,
-            bundle_size,
-            &sha256,
-            bundle_format,
-        )
+        .init_upload(&namespace, tool_name, version, files)
         .await?;
+
+    // Get the upload target for our file
+    let upload_target = upload_info
+        .uploads
+        .first()
+        .ok_or_else(|| ToolError::Generic("No upload target returned".into()))?;
 
     // Create progress bar for upload
     let pb = ProgressBar::new(bundle_size);
@@ -1344,7 +1605,7 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
     let pb_arc = Arc::new(pb);
     let pb_clone = Arc::clone(&pb_arc);
     client
-        .upload_bundle_with_progress(&upload_info.upload_url, &bundle, move |bytes| {
+        .upload_bundle_with_progress(&upload_target.upload_url, &bundle, move |bytes| {
             pb_clone.set_position(bytes);
         })
         .await?;
@@ -1370,6 +1631,7 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
             tool_name,
             &upload_info.upload_id,
             version,
+            &file_name,
             manifest_json,
             description,
         )
@@ -1397,6 +1659,482 @@ pub async fn publish_mcpb(path: &str, dry_run: bool, strict: bool) -> ToolResult
         tool_name.bright_cyan(),
         result.version.bright_white(),
         format_display
+    );
+    println!(
+        "  · {}/plugins/{}/{}",
+        client.registry_url(),
+        namespace,
+        tool_name
+    );
+
+    Ok(())
+}
+
+//--------------------------------------------------------------------------------------------------
+// Functions: Multi-Artifact Publishing
+//--------------------------------------------------------------------------------------------------
+
+/// Check if a platform key is a valid OS-arch format (e.g., "darwin-arm64", "linux-x64").
+/// OS-only keys like "darwin", "linux", "win32" are invalid for multi-platform packing.
+fn is_valid_os_arch_platform(platform: &str) -> bool {
+    // Valid formats: {os}-{arch} where os is darwin/linux/win32 and arch is arm64/x64/x86_64
+    let valid_patterns = [
+        "darwin-arm64",
+        "darwin-x64",
+        "darwin-x86_64",
+        "linux-arm64",
+        "linux-x64",
+        "linux-x86_64",
+        "win32-arm64",
+        "win32-x64",
+        "win32-x86_64",
+    ];
+    valid_patterns.contains(&platform)
+}
+
+/// Detect available platforms from manifest's platform_overrides.
+/// Only returns valid OS-arch platforms (e.g., "darwin-arm64"), not OS-only (e.g., "darwin").
+fn detect_available_platforms(manifest: &McpbManifest) -> Vec<String> {
+    let mut platforms = Vec::new();
+
+    // Check _meta.store.tool.mcpb.mcp_config.platform_overrides
+    if let Some(meta) = &manifest.meta
+        && let Some(store_meta) = meta.get("store.tool.mcpb")
+        && let Some(mcp_config) = store_meta.get("mcp_config")
+        && let Some(overrides) = mcp_config.get("platform_overrides")
+        && let Some(obj) = overrides.as_object()
+    {
+        // Only include valid OS-arch platforms
+        platforms.extend(obj.keys().filter(|k| is_valid_os_arch_platform(k)).cloned());
+    }
+
+    // Note: We don't fall back to server.mcp_config.platform_overrides here
+    // because those are typically OS-only keys (darwin, linux, win32) meant for
+    // runtime resolution, not for creating separate bundles.
+
+    // Deduplicate
+    platforms.sort();
+    platforms.dedup();
+    platforms
+}
+
+/// Implementation of multi-artifact publish.
+#[allow(clippy::too_many_arguments)]
+async fn publish_multi_artifact_impl(
+    dir: &Path,
+    _manifest: &McpbManifest,
+    manifest_content: &str,
+    namespace: &str,
+    tool_name: &str,
+    version: &str,
+    description: Option<&str>,
+    options: MultiArtifactOptions,
+    dry_run: bool,
+    token: Option<String>,
+) -> ToolResult<()> {
+    println!();
+    println!(
+        "  {} Multi-artifact publish: {} platforms{}",
+        "→".bright_blue(),
+        options.platforms.len().to_string().bright_cyan(),
+        if options.include_universal {
+            " + universal"
+        } else {
+            ""
+        }
+    );
+
+    // Collect all files to upload
+    let mut files_to_upload: Vec<(String, Vec<u8>, String)> = Vec::new(); // (name, bytes, checksum)
+    let mut version_manifest_artifacts: HashMap<String, ArtifactEntry> = HashMap::new();
+
+    // Process explicit artifacts or pack bundles
+    if !options.explicit_artifacts.is_empty() {
+        // Use explicit artifact files
+        for (platform, path) in &options.explicit_artifacts {
+            let bytes = std::fs::read(path).map_err(|e| {
+                ToolError::Generic(format!("Failed to read {}: {}", path.display(), e))
+            })?;
+            let checksum = compute_sha256(&bytes);
+            let filename = path
+                .file_name()
+                .ok_or_else(|| ToolError::Generic(format!("Invalid path: {}", path.display())))?
+                .to_string_lossy()
+                .to_string();
+
+            println!(
+                "  · {}: {} ({})",
+                platform.bright_cyan(),
+                filename,
+                format_size(bytes.len() as u64)
+            );
+
+            version_manifest_artifacts.insert(
+                platform.clone(),
+                ArtifactEntry {
+                    filename: filename.clone(),
+                    size: bytes.len() as u64,
+                    checksum: format!("sha256:{}", checksum),
+                },
+            );
+            files_to_upload.push((filename, bytes, checksum));
+        }
+    } else {
+        // Pack bundles for each platform in parallel
+        use crate::pack::pack_bundle_for_platform;
+
+        let pack_options = PackOptions {
+            validate: true,
+            output: None,
+            verbose: false,
+            include_dotfiles: false,
+        };
+
+        // Create pack tasks for all platforms
+        let mut pack_handles = Vec::new();
+        for platform in &options.platforms {
+            let dir_clone = dir.to_path_buf();
+            let opts = pack_options.clone();
+            let platform_clone = platform.clone();
+            let handle = tokio::task::spawn_blocking(move || {
+                (
+                    platform_clone.clone(),
+                    pack_bundle_for_platform(&dir_clone, &opts, Some(&platform_clone)),
+                )
+            });
+            pack_handles.push(handle);
+        }
+
+        // Also pack universal bundle if requested
+        let universal_handle = if options.include_universal {
+            let dir_clone = dir.to_path_buf();
+            let opts = pack_options.clone();
+            Some(tokio::task::spawn_blocking(move || {
+                pack_bundle(&dir_clone, &opts)
+            }))
+        } else {
+            None
+        };
+
+        // Wait for all packs to complete with spinner
+        let spinner = Spinner::new("Packing bundles");
+        let pack_results = futures_util::future::join_all(pack_handles).await;
+        let universal_result = match universal_handle {
+            Some(h) => Some(h.await),
+            None => None,
+        };
+        spinner.succeed(Some("Bundles packed"));
+
+        // Process pack results
+        let mut icon_info: Option<(PathBuf, Vec<u8>, String)> = None;
+
+        for result in pack_results {
+            let (platform, pack_result) =
+                result.map_err(|e| ToolError::Generic(format!("Pack task failed: {}", e)))?;
+            match pack_result {
+                Ok(pack_result) => {
+                    let bundle_bytes = std::fs::read(&pack_result.output_path)
+                        .map_err(|e| ToolError::Generic(format!("Failed to read bundle: {}", e)))?;
+                    let bundle_checksum = compute_sha256(&bundle_bytes);
+                    let bundle_filename = pack_result
+                        .output_path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string();
+
+                    println!(
+                        "  · {}: {} ({})",
+                        platform.bright_cyan(),
+                        bundle_filename,
+                        format_size(bundle_bytes.len() as u64)
+                    );
+
+                    version_manifest_artifacts.insert(
+                        platform,
+                        ArtifactEntry {
+                            filename: bundle_filename.clone(),
+                            size: bundle_bytes.len() as u64,
+                            checksum: format!("sha256:{}", bundle_checksum),
+                        },
+                    );
+                    files_to_upload.push((bundle_filename, bundle_bytes, bundle_checksum));
+
+                    // Keep track of icon from first successful pack
+                    if icon_info.is_none()
+                        && let Some(icon_path) = &pack_result.icon_path
+                        && let Ok(icon_bytes) = std::fs::read(icon_path)
+                    {
+                        let icon_checksum = compute_sha256(&icon_bytes);
+                        icon_info = Some((icon_path.clone(), icon_bytes, icon_checksum));
+                    }
+
+                    let _ = std::fs::remove_file(&pack_result.output_path);
+                    if let Some(icon_path) = &pack_result.icon_path {
+                        let _ = std::fs::remove_file(icon_path);
+                    }
+                }
+                Err(e) => {
+                    return Err(ToolError::Generic(format!(
+                        "Pack failed for {}: {}",
+                        platform, e
+                    )));
+                }
+            }
+        }
+
+        // Process universal bundle
+        if let Some(result) = universal_result {
+            let pack_result =
+                result.map_err(|e| ToolError::Generic(format!("Pack task failed: {}", e)))?;
+            match pack_result {
+                Ok(pack_result) => {
+                    let bundle_bytes = std::fs::read(&pack_result.output_path)
+                        .map_err(|e| ToolError::Generic(format!("Failed to read bundle: {}", e)))?;
+                    let bundle_checksum = compute_sha256(&bundle_bytes);
+                    let bundle_filename = pack_result
+                        .output_path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string();
+
+                    println!(
+                        "  · {}: {} ({})",
+                        "universal".bright_cyan(),
+                        bundle_filename,
+                        format_size(bundle_bytes.len() as u64)
+                    );
+
+                    version_manifest_artifacts.insert(
+                        "universal".to_string(),
+                        ArtifactEntry {
+                            filename: bundle_filename.clone(),
+                            size: bundle_bytes.len() as u64,
+                            checksum: format!("sha256:{}", bundle_checksum),
+                        },
+                    );
+                    files_to_upload.push((bundle_filename, bundle_bytes, bundle_checksum));
+
+                    // Use icon from universal bundle if not already set
+                    if icon_info.is_none()
+                        && let Some(icon_path) = &pack_result.icon_path
+                        && let Ok(icon_bytes) = std::fs::read(icon_path)
+                    {
+                        let icon_checksum = compute_sha256(&icon_bytes);
+                        icon_info = Some((icon_path.clone(), icon_bytes, icon_checksum));
+                    }
+
+                    let _ = std::fs::remove_file(&pack_result.output_path);
+                    if let Some(icon_path) = &pack_result.icon_path {
+                        let _ = std::fs::remove_file(icon_path);
+                    }
+                }
+                Err(e) => {
+                    return Err(ToolError::Generic(format!(
+                        "Pack failed for universal: {}",
+                        e
+                    )));
+                }
+            }
+        }
+
+        // Add icon if found
+        if let Some((_icon_path, icon_bytes, icon_checksum)) = icon_info {
+            let icon_filename = "icon.png".to_string(); // Standardize icon filename
+            println!(
+                "  · icon: {} ({})",
+                icon_filename,
+                format_size(icon_bytes.len() as u64)
+            );
+            files_to_upload.push((icon_filename, icon_bytes, icon_checksum));
+        }
+    }
+
+    // Generate version.json manifest
+    let version_manifest = VersionManifest {
+        name: tool_name.to_string(),
+        version: version.to_string(),
+        artifacts: version_manifest_artifacts,
+    };
+    let version_json = serde_json::to_string_pretty(&version_manifest)
+        .map_err(|e| ToolError::Generic(format!("Failed to serialize version manifest: {}", e)))?;
+    let version_json_bytes = version_json.as_bytes().to_vec();
+    let version_json_checksum = compute_sha256(&version_json_bytes);
+
+    println!(
+        "  · version.json ({})",
+        format_size(version_json_bytes.len() as u64)
+    );
+
+    files_to_upload.insert(
+        0,
+        (
+            "version.json".to_string(),
+            version_json_bytes,
+            version_json_checksum,
+        ),
+    );
+
+    if dry_run {
+        println!(
+            "\n  {} Dry run complete. Would upload {} files for {}/{}@{}",
+            "✓".bright_green(),
+            files_to_upload.len(),
+            namespace.bright_blue(),
+            tool_name.bright_cyan(),
+            version.bright_white()
+        );
+        return Ok(());
+    }
+
+    // Create registry client with auth
+    let token = token.ok_or_else(|| ToolError::Generic("Authentication required".into()))?;
+    let client = RegistryClient::new().with_auth_token(&token);
+
+    // Check if artifact exists
+    println!();
+    let spinner = Spinner::new(format!("Checking registry ({})", client.registry_url()));
+    let artifact_exists = match client.artifact_exists(namespace, tool_name).await {
+        Ok(exists) => {
+            spinner.succeed(Some("Registry checked"));
+            exists
+        }
+        Err(e) => {
+            spinner.fail(None);
+            return Err(e);
+        }
+    };
+
+    if !artifact_exists {
+        let spinner = Spinner::new("Creating artifact entry");
+        match client
+            .create_artifact(namespace, tool_name, description)
+            .await
+        {
+            Ok(()) => {
+                spinner.succeed(Some(&format!("Created {}/{}", namespace, tool_name)));
+            }
+            Err(e) => {
+                spinner.fail(None);
+                return Err(e);
+            }
+        }
+    }
+
+    // Build file specs for upload
+    let file_specs: Vec<crate::registry::FileSpec> = files_to_upload
+        .iter()
+        .map(|(name, bytes, checksum)| crate::registry::FileSpec {
+            name: name.clone(),
+            size: bytes.len() as i64,
+            sha256: checksum.clone(),
+        })
+        .collect();
+
+    // Initiate upload
+    println!(
+        "\n  {} Uploading {} files in parallel",
+        "→".bright_blue(),
+        files_to_upload.len()
+    );
+
+    let upload_info = client
+        .init_upload(namespace, tool_name, version, file_specs)
+        .await?;
+
+    // Upload all files in parallel
+    let mp = MultiProgress::new();
+    let style = ProgressStyle::default_bar()
+        .template("  {msg:<25} [{bar:25.cyan/dim}] {bytes:>10}/{total_bytes:<10}")
+        .unwrap()
+        .progress_chars("█░░");
+
+    let upload_handles: Vec<_> = files_to_upload
+        .into_iter()
+        .map(|(name, bytes, _checksum)| {
+            let upload_target = upload_info.uploads.iter().find(|t| t.name == name).cloned();
+
+            let pb = mp.add(ProgressBar::new(bytes.len() as u64));
+            pb.set_style(style.clone());
+            pb.set_message(name.clone());
+            pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+            let client = client.clone();
+            tokio::spawn(async move {
+                let upload_target = match upload_target {
+                    Some(t) => t,
+                    None => return Err(format!("No upload target for file: {}", name)),
+                };
+
+                let pb_arc = Arc::new(pb);
+                let pb_clone = Arc::clone(&pb_arc);
+                let result = client
+                    .upload_bundle_with_progress(
+                        &upload_target.upload_url,
+                        &bytes,
+                        move |uploaded| {
+                            pb_clone.set_position(uploaded);
+                        },
+                    )
+                    .await;
+
+                pb_arc.finish_and_clear();
+                result.map_err(|e| format!("Upload failed for {}: {}", name, e))
+            })
+        })
+        .collect();
+
+    // Wait for all uploads to complete
+    let upload_results = futures_util::future::join_all(upload_handles).await;
+
+    // Check for failures
+    for result in upload_results {
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(ToolError::Generic(e)),
+            Err(e) => return Err(ToolError::Generic(format!("Upload task failed: {}", e))),
+        }
+    }
+
+    println!("  {} Upload complete", "✓".bright_green());
+
+    // Publish the version with version.json as main_file
+    println!();
+    let spinner = Spinner::new("Publishing version");
+
+    let manifest_json: serde_json::Value = serde_json::from_str(manifest_content)
+        .map_err(|e| ToolError::Generic(format!("Failed to parse manifest: {}", e)))?;
+
+    let result = match client
+        .publish_version(
+            namespace,
+            tool_name,
+            &upload_info.upload_id,
+            version,
+            "version.json",
+            manifest_json,
+            description,
+        )
+        .await
+    {
+        Ok(result) => {
+            spinner.succeed(Some("Version published"));
+            result
+        }
+        Err(e) => {
+            spinner.fail(Some("Publishing failed"));
+            return Err(e);
+        }
+    };
+
+    println!(
+        "\n  {} Published {}/{}@{} ({} artifacts)",
+        "✓".bright_green(),
+        namespace.bright_blue(),
+        tool_name.bright_cyan(),
+        result.version.bright_white(),
+        version_manifest.artifacts.len()
     );
     println!(
         "  · {}/plugins/{}/{}",
