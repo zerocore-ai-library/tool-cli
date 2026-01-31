@@ -151,6 +151,72 @@ Get your first MCP tool published in three steps.
 
 <br />
 
+## Multi-Platform Bundles
+
+If your tool includes platform-specific binaries (native executables, compiled code), you can publish separate bundles for each platform. Users automatically get the right bundle for their system.
+
+### Packing for Multiple Platforms
+
+> ```sh
+> tool pack --multi-platform
+> ```
+>
+> This creates separate bundles for each platform defined in your manifest's `platform_overrides`, plus a universal bundle:
+>
+> ```
+> my-tool-1.0.0-darwin-arm64.mcpb   # Apple Silicon Mac
+> my-tool-1.0.0-darwin-x64.mcpb     # Intel Mac
+> my-tool-1.0.0-linux-x64.mcpb      # Linux x64
+> my-tool-1.0.0.mcpb                # Universal (all platforms)
+> ```
+
+##
+
+### Publishing Multi-Platform
+
+> ```sh
+> tool publish --multi-platform
+> ```
+>
+> Packs and uploads all platform variants in parallel.
+>
+> <details>
+> <summary>Using pre-built bundles</summary>
+> <blockquote>
+> If you've already built the bundles (e.g., in CI), you can specify paths directly:
+>
+> ```sh
+> tool publish --multi-platform \
+>   --darwin-arm64 ./dist/mac-arm.mcpb \
+>   --linux-x64 ./dist/linux.mcpb \
+>   --universal ./dist/all.mcpb
+> ```
+>
+> </blockquote>
+> </details>
+
+##
+
+### Installing with Platform Selection
+
+> ```sh
+> tool install library/bash
+> ```
+>
+> Automatically downloads the bundle matching your system (e.g., `darwin-arm64` on Apple Silicon). Falls back to universal if no platform match.
+>
+> ```sh
+> tool install library/bash --platform=universal
+> ```
+>
+> Explicitly install the universal bundle instead.
+
+<br />
+
+<div align='center'>• • •</div>
+
+<br />
+
 ## Using Tools
 
 `tool-cli` essentially turns your MCP servers into CLIs. You can inspect, call, and compose tools directly from the terminal — no client needed. This is also the foundation for building [context-efficient agents](cookbooks/).
@@ -348,9 +414,10 @@ Once you've installed some tools, you probably want to use them in your favorite
 | `info`      | Show what a tool exposes                                    |
 | `call`      | Call a tool method directly                                 |
 | `run`       | Start a tool as a server                                    |
-| `pack`      | Bundle into a `.mcpb` or `.mcpbx` file                      |
-| `publish`   | Upload to the registry                                      |
-| `install`   | Install a tool from the registry                            |
+| `pack`      | Bundle into `.mcpb`/`.mcpbx` (supports multi-platform)      |
+| `publish`   | Upload to the registry (supports multi-platform)            |
+| `install`   | Install a tool (auto-detects platform)                      |
+| `download`  | Download a bundle without installing                        |
 | `uninstall` | Remove an installed tool                                    |
 | `list`      | Show installed tools                                        |
 | `search`    | Find tools in the registry                                  |

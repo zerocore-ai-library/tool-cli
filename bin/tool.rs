@@ -282,8 +282,18 @@ async fn run() -> ToolResult<()> {
             strict,
             include_dotfiles,
             verbose,
+            multi_platform,
         } => {
-            handlers::pack_mcpb(path, output, no_validate, strict, include_dotfiles, verbose).await
+            handlers::pack_mcpb(
+                path,
+                output,
+                no_validate,
+                strict,
+                include_dotfiles,
+                verbose,
+                multi_platform,
+            )
+            .await
         }
 
         Command::Run {
@@ -388,11 +398,15 @@ async fn run() -> ToolResult<()> {
             handlers::list_tools(filter.as_deref(), json, full, cli.concise, cli.no_header).await
         }
 
-        Command::Download { names, output } => {
-            handlers::download_tools(&names, output.as_deref()).await
-        }
+        Command::Download {
+            names,
+            output,
+            platform,
+        } => handlers::download_tools(&names, output.as_deref(), platform.as_deref()).await,
 
-        Command::Install { names } => handlers::add_tools(&names).await,
+        Command::Install { names, platform } => {
+            handlers::add_tools(&names, platform.as_deref()).await
+        }
 
         Command::Uninstall { names } => handlers::remove_tools(&names).await,
 
@@ -404,7 +418,44 @@ async fn run() -> ToolResult<()> {
             path,
             dry_run,
             strict,
-        } => handlers::publish_mcpb(path.as_deref().unwrap_or("."), dry_run, strict).await,
+            multi_platform,
+            darwin_arm64,
+            darwin_x64,
+            linux_x64,
+            linux_arm64,
+            win32_x64,
+            universal,
+        } => {
+            // Collect pre-built artifacts into a map
+            let mut prebuilt = std::collections::HashMap::new();
+            if let Some(p) = darwin_arm64 {
+                prebuilt.insert("darwin-arm64".to_string(), std::path::PathBuf::from(p));
+            }
+            if let Some(p) = darwin_x64 {
+                prebuilt.insert("darwin-x64".to_string(), std::path::PathBuf::from(p));
+            }
+            if let Some(p) = linux_x64 {
+                prebuilt.insert("linux-x64".to_string(), std::path::PathBuf::from(p));
+            }
+            if let Some(p) = linux_arm64 {
+                prebuilt.insert("linux-arm64".to_string(), std::path::PathBuf::from(p));
+            }
+            if let Some(p) = win32_x64 {
+                prebuilt.insert("win32-x64".to_string(), std::path::PathBuf::from(p));
+            }
+            if let Some(p) = universal {
+                prebuilt.insert("universal".to_string(), std::path::PathBuf::from(p));
+            }
+
+            handlers::publish_mcpb(
+                path.as_deref().unwrap_or("."),
+                dry_run,
+                strict,
+                multi_platform,
+                prebuilt,
+            )
+            .await
+        }
 
         Command::Login { token } => handlers::auth_login(token.as_deref()).await,
 

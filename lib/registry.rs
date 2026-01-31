@@ -109,19 +109,52 @@ pub struct ArtifactDetails {
     pub total_downloads: i64,
 }
 
+/// File info for a bundle in the version.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileInfo {
+    /// CDN URL for the file.
+    pub url: String,
+    /// File size in bytes.
+    pub size: u64,
+    /// SHA-256 checksum.
+    pub checksum: String,
+}
+
 /// Version info from the registry.
 #[derive(Debug, Clone, Deserialize)]
 pub struct VersionInfo {
     /// Version string.
     pub version: String,
-    /// Bundle size in bytes.
-    pub bundle_size: Option<u64>,
-    /// Bundle checksum.
-    pub bundle_checksum: Option<String>,
-    /// Bundle format: "mcpb" or "mcpbx".
-    pub bundle_format: Option<String>,
-    /// CDN URL for the bundle.
-    pub bundle_url: Option<String>,
+    /// Main download size in bytes.
+    pub main_download_size: Option<u64>,
+    /// Main download checksum.
+    pub main_download_checksum: Option<String>,
+    /// CDN URL for the main download.
+    pub main_download_url: Option<String>,
+    /// Map of filename to file info (for multi-platform bundles).
+    pub files: Option<std::collections::HashMap<String, FileInfo>>,
+}
+
+/// File specification for upload initiation.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileSpec {
+    /// File name (e.g., "bundle.mcpb").
+    pub name: String,
+    /// File size in bytes.
+    pub size: i64,
+    /// SHA-256 checksum.
+    pub sha256: String,
+}
+
+/// Upload target returned from initiation.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UploadTarget {
+    /// File name.
+    pub name: String,
+    /// Presigned URL for uploading.
+    pub upload_url: String,
+    /// Storage key for this file.
+    pub storage_key: String,
 }
 
 /// Upload initiation response.
@@ -129,8 +162,8 @@ pub struct VersionInfo {
 pub struct UploadInitResponse {
     /// Upload ID to reference when publishing.
     pub upload_id: String,
-    /// Presigned URL for uploading the bundle.
-    pub upload_url: String,
+    /// Upload targets for each file.
+    pub uploads: Vec<UploadTarget>,
 }
 
 /// Publish result.
@@ -138,22 +171,21 @@ pub struct UploadInitResponse {
 pub struct PublishResult {
     /// The published version.
     pub version: String,
-    /// CDN URL for the bundle.
-    pub bundle_url: String,
+    /// CDN URL for the main download.
+    pub main_download_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct UploadInitRequest {
     version: String,
-    bundle_size: u64,
-    sha256: String,
-    bundle_format: String,
+    files: Vec<FileSpec>,
 }
 
 #[derive(Debug, Serialize)]
 struct PublishVersionRequest {
     upload_id: String,
     version: String,
+    main_file: String,
     manifest: serde_json::Value,
     description: Option<String>,
 }
@@ -521,9 +553,7 @@ impl RegistryClient {
         namespace: &str,
         name: &str,
         version: &str,
-        bundle_size: u64,
-        sha256: &str,
-        bundle_format: &str,
+        files: Vec<FileSpec>,
     ) -> ToolResult<UploadInitResponse> {
         let token = self
             .auth_token
@@ -537,9 +567,7 @@ impl RegistryClient {
 
         let body = UploadInitRequest {
             version: version.to_string(),
-            bundle_size,
-            sha256: sha256.to_string(),
-            bundle_format: bundle_format.to_string(),
+            files,
         };
 
         let response = self
@@ -628,12 +656,14 @@ impl RegistryClient {
     }
 
     /// Publish a version after upload.
+    #[allow(clippy::too_many_arguments)]
     pub async fn publish_version(
         &self,
         namespace: &str,
         name: &str,
         upload_id: &str,
         version: &str,
+        main_file: &str,
         manifest: serde_json::Value,
         description: Option<&str>,
     ) -> ToolResult<PublishResult> {
@@ -650,6 +680,7 @@ impl RegistryClient {
         let body = PublishVersionRequest {
             upload_id: upload_id.to_string(),
             version: version.to_string(),
+            main_file: main_file.to_string(),
             manifest,
             description: description.map(String::from),
         };

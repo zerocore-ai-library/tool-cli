@@ -6,6 +6,7 @@ use crate::validate::{ValidationResult, validate_manifest};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -83,6 +84,9 @@ impl Default for PackOptions {
     }
 }
 
+/// Icon extraction result: (path, size, checksum).
+type IconResult = (Option<PathBuf>, Option<u64>, Option<String>);
+
 /// Result of packing operation.
 #[derive(Debug)]
 pub struct PackResult {
@@ -103,6 +107,18 @@ pub struct PackResult {
 
     /// Bundle format extension (`"mcpb"` or `"mcpbx"`).
     pub extension: String,
+
+    /// SHA-256 checksum of the bundle.
+    pub checksum: String,
+
+    /// Path to extracted icon file (if icon was present in manifest).
+    pub icon_path: Option<PathBuf>,
+
+    /// Size of the icon file in bytes.
+    pub icon_size: Option<u64>,
+
+    /// SHA-256 checksum of the icon file.
+    pub icon_checksum: Option<String>,
 }
 
 /// Options for collecting bundle files.
@@ -298,6 +314,13 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
 
     let compressed_size = std::fs::metadata(&output_path)?.len();
 
+    // Compute SHA-256 checksum of the bundle
+    let bundle_bytes = std::fs::read(&output_path)?;
+    let checksum = compute_sha256(&bundle_bytes);
+
+    // Extract icon as separate file if present
+    let (icon_path, icon_size, icon_checksum) = extract_icon(dir, &manifest, &output_path)?;
+
     Ok(PackResult {
         output_path,
         file_count,
@@ -305,7 +328,416 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
         compressed_size,
         ignored_files,
         extension: ext.to_string(),
+        checksum,
+        icon_path,
+        icon_size,
+        icon_checksum,
     })
+}
+
+/// Pack a directory into an MCPB bundle for a specific platform.
+///
+/// This creates a bundle with the manifest modified to contain only the
+/// platform-specific overrides for the given platform. The bundle filename
+/// includes the platform identifier (e.g., `tool-1.0.0-darwin-arm64.mcpb`).
+pub fn pack_bundle_for_platform(
+    dir: &Path,
+    options: &PackOptions,
+    platform: Option<&str>,
+) -> Result<PackResult, PackError> {
+    // 1. Check manifest exists
+    let manifest_path = dir.join(MCPB_MANIFEST_FILE);
+    if !manifest_path.exists() {
+        return Err(PackError::ManifestNotFound(dir.to_path_buf()));
+    }
+
+    // 2. Validate first (unless skipped)
+    if options.validate {
+        let validation = validate_manifest(dir);
+        if !validation.is_valid() {
+            return Err(PackError::ValidationFailed(validation));
+        }
+    }
+
+    // 3. Read and potentially modify manifest for platform
+    let manifest_content = std::fs::read_to_string(&manifest_path)?;
+    let mut manifest_json: serde_json::Value = serde_json::from_str(&manifest_content)?;
+
+    // Modify manifest to contain only the specific platform's mcp_config
+    if let Some(platform_key) = platform {
+        modify_manifest_for_platform(&mut manifest_json, platform_key);
+    }
+
+    let manifest: McpbManifest = serde_json::from_value(manifest_json.clone())?;
+    let name = manifest.name.as_deref().unwrap_or("bundle");
+    let version = manifest.version.as_deref().unwrap_or("0.0.0");
+    let ext = manifest.bundle_extension();
+
+    // 4. Determine output path with platform suffix
+    let output_filename = match platform {
+        Some(p) => format!("{}-{}-{}.{}", name, version, p, ext),
+        None => format!("{}-{}.{}", name, version, ext),
+    };
+    let output_path = options
+        .output
+        .clone()
+        .unwrap_or_else(|| dir.join(&output_filename));
+
+    // 5. Build ignore matcher
+    let ignore_matcher = build_ignore_matcher(dir)?;
+
+    // 6. Get platform-specific binary paths for filtering
+    let (all_binary_paths, target_binary_path) = if platform.is_some() {
+        let manifest_for_paths = serde_json::from_str::<serde_json::Value>(&manifest_content)?;
+        let all_paths = get_all_platform_binary_paths(&manifest_for_paths);
+        let target_path = platform.and_then(|p| get_platform_binary_path(&manifest_for_paths, p));
+        (all_paths, target_path)
+    } else {
+        (Vec::new(), None)
+    };
+
+    // 7. Create zip archive
+    let file = File::create(&output_path)?;
+    let mut zip = ZipWriter::new(file);
+
+    let zip_options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+
+    let mut file_count = 0;
+    let mut total_size = 0u64;
+    let mut ignored_files = Vec::new();
+
+    // 8. Walk directory and add files (with modified manifest)
+    for entry in WalkDir::new(dir)
+        .follow_links(true)
+        .into_iter()
+        .filter_entry(|e| !is_builtin_ignored(e.path(), dir))
+    {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path == dir {
+            continue;
+        }
+
+        let relative_path = path.strip_prefix(dir)?;
+        let path_str = relative_path.to_string_lossy().to_string();
+        let is_dir = entry.file_type().is_dir();
+
+        if ignore_matcher
+            .matched_path_or_any_parents(relative_path, is_dir)
+            .is_ignore()
+        {
+            if options.verbose {
+                ignored_files.push(path_str);
+            }
+            continue;
+        }
+
+        if !options.include_dotfiles && is_dotfile(&path_str) {
+            if options.verbose {
+                ignored_files.push(path_str);
+            }
+            continue;
+        }
+
+        // Skip binaries for other platforms when packing platform-specific bundle
+        if platform.is_some()
+            && !is_dir
+            && should_exclude_for_platform(
+                &path_str,
+                platform.unwrap_or_default(),
+                &all_binary_paths,
+                target_binary_path.as_deref(),
+            )
+        {
+            if options.verbose {
+                ignored_files.push(format!("{} (other platform binary)", path_str));
+            }
+            continue;
+        }
+
+        let file_options = if let Ok(metadata) = std::fs::metadata(path) {
+            let mut opts = zip_options;
+            if let Ok(modified) = metadata.modified()
+                && let Some(dt) = system_time_to_zip_datetime(modified)
+            {
+                opts = opts.last_modified_time(dt);
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = metadata.permissions().mode();
+                opts = opts.unix_permissions(mode);
+            }
+            opts
+        } else {
+            zip_options
+        };
+
+        if is_dir {
+            let dir_path = format!("{}/", path_str);
+            zip.add_directory(&dir_path, file_options)?;
+        } else {
+            // For manifest.json, use the modified content
+            let contents = if path_str == MCPB_MANIFEST_FILE {
+                serde_json::to_vec_pretty(&manifest_json)?
+            } else {
+                let mut file = File::open(path)?;
+                let mut contents = Vec::new();
+                file.read_to_end(&mut contents)?;
+                contents
+            };
+
+            total_size += contents.len() as u64;
+            file_count += 1;
+
+            zip.start_file(&path_str, file_options)?;
+            zip.write_all(&contents)?;
+        }
+    }
+
+    zip.finish()?;
+
+    let compressed_size = std::fs::metadata(&output_path)?.len();
+    let bundle_bytes = std::fs::read(&output_path)?;
+    let checksum = compute_sha256(&bundle_bytes);
+    let (icon_path, icon_size, icon_checksum) = extract_icon(dir, &manifest, &output_path)?;
+
+    Ok(PackResult {
+        output_path,
+        file_count,
+        total_size,
+        compressed_size,
+        ignored_files,
+        extension: ext.to_string(),
+        checksum,
+        icon_path,
+        icon_size,
+        icon_checksum,
+    })
+}
+
+/// Extract the binary path for a specific platform from the manifest.
+/// Returns the path relative to the bundle root (e.g., "dist/system-darwin-arm64").
+///
+/// Resolution order per mcpbx.md:
+/// 1. _meta["store.tool.mcpb"].mcp_config.platform_overrides["{os}-{arch}"] (exact match)
+/// 2. server.mcp_config.platform_overrides["{os}"] (os-only fallback)
+/// 3. server.mcp_config.command (base config)
+fn get_platform_binary_path(manifest: &serde_json::Value, platform: &str) -> Option<String> {
+    // Helper to extract path from command string (removes ${__dirname}/ prefix)
+    fn extract_path_from_command(command: &str) -> String {
+        command
+            .replace("${__dirname}/", "")
+            .replace("${__dirname}", "")
+    }
+
+    // 1. Check _meta["store.tool.mcpb"].mcp_config.platform_overrides[platform]
+    if let Some(command) = manifest
+        .get("_meta")
+        .and_then(|m| m.get("store.tool.mcpb"))
+        .and_then(|s| s.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|o| o.get(platform))
+        .and_then(|p| p.get("command"))
+        .and_then(|c| c.as_str())
+    {
+        return Some(extract_path_from_command(command));
+    }
+
+    // 2. Check server.mcp_config.platform_overrides[os] (os-only fallback)
+    let os = platform.split('-').next().unwrap_or(platform);
+    if let Some(command) = manifest
+        .get("server")
+        .and_then(|s| s.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|o| o.get(os))
+        .and_then(|p| p.get("command"))
+        .and_then(|c| c.as_str())
+    {
+        return Some(extract_path_from_command(command));
+    }
+
+    // 3. Fall back to base command
+    if let Some(command) = manifest
+        .get("server")
+        .and_then(|s| s.get("mcp_config"))
+        .and_then(|c| c.get("command"))
+        .and_then(|c| c.as_str())
+    {
+        return Some(extract_path_from_command(command));
+    }
+
+    None
+}
+
+/// Get all binary paths from platform overrides (to know what to exclude).
+fn get_all_platform_binary_paths(manifest: &serde_json::Value) -> Vec<String> {
+    let mut paths = Vec::new();
+
+    fn extract_path_from_command(command: &str) -> String {
+        command
+            .replace("${__dirname}/", "")
+            .replace("${__dirname}", "")
+    }
+
+    // Collect from _meta["store.tool.mcpb"].mcp_config.platform_overrides
+    if let Some(overrides) = manifest
+        .get("_meta")
+        .and_then(|m| m.get("store.tool.mcpb"))
+        .and_then(|s| s.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|o| o.as_object())
+    {
+        for (_platform, config) in overrides {
+            if let Some(command) = config.get("command").and_then(|c| c.as_str()) {
+                paths.push(extract_path_from_command(command));
+            }
+        }
+    }
+
+    // Collect from server.mcp_config.platform_overrides
+    if let Some(overrides) = manifest
+        .get("server")
+        .and_then(|s| s.get("mcp_config"))
+        .and_then(|c| c.get("platform_overrides"))
+        .and_then(|o| o.as_object())
+    {
+        for (_platform, config) in overrides {
+            if let Some(command) = config.get("command").and_then(|c| c.as_str()) {
+                paths.push(extract_path_from_command(command));
+            }
+        }
+    }
+
+    // Collect base command
+    if let Some(command) = manifest
+        .get("server")
+        .and_then(|s| s.get("mcp_config"))
+        .and_then(|c| c.get("command"))
+        .and_then(|c| c.as_str())
+    {
+        paths.push(extract_path_from_command(command));
+    }
+
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// Modify manifest JSON to contain only the specified platform's mcp_config.
+///
+/// This:
+/// 1. Applies the platform-specific config to mcp_config
+/// 2. Removes all platform_overrides
+/// 3. Updates entry_point to the platform-specific binary
+/// 4. Updates compatibility.platforms to only this platform
+fn modify_manifest_for_platform(manifest: &mut serde_json::Value, platform: &str) {
+    // Get the platform binary path first (before we modify anything)
+    let platform_binary = get_platform_binary_path(manifest, platform);
+
+    // Extract OS from platform (e.g., "darwin" from "darwin-arm64")
+    let os = platform.split('-').next().unwrap_or(platform);
+
+    // 1. Apply _meta["store.tool.mcpb"].mcp_config.platform_overrides config
+    if let Some(meta) = manifest.get_mut("_meta")
+        && let Some(store_meta) = meta.get_mut("store.tool.mcpb")
+    {
+        // Apply platform config to mcp_config
+        if let Some(mcp_config) = store_meta.get_mut("mcp_config") {
+            let platform_config = mcp_config
+                .get("platform_overrides")
+                .and_then(|o| o.get(platform))
+                .cloned();
+            if let Some(config) = platform_config {
+                apply_platform_config(mcp_config, &config);
+            }
+            // Remove platform_overrides
+            if let Some(obj) = mcp_config.as_object_mut() {
+                obj.remove("platform_overrides");
+            }
+        }
+
+        // Update _meta compatibility.platforms to only this platform
+        if let Some(compat) = store_meta.get_mut("compatibility")
+            && let Some(obj) = compat.as_object_mut()
+        {
+            obj.insert("platforms".to_string(), serde_json::json!([platform]));
+        }
+    }
+
+    // 2. Apply server.mcp_config.platform_overrides config (os-level fallback)
+    if let Some(server) = manifest.get_mut("server") {
+        // Update entry_point to the platform-specific binary
+        if let Some(binary_path) = &platform_binary
+            && let Some(obj) = server.as_object_mut()
+        {
+            obj.insert("entry_point".to_string(), serde_json::json!(binary_path));
+        }
+
+        if let Some(mcp_config) = server.get_mut("mcp_config") {
+            // First try exact platform match, then os-only fallback
+            let platform_config = mcp_config
+                .get("platform_overrides")
+                .and_then(|o| o.get(platform).or_else(|| o.get(os)))
+                .cloned();
+            if let Some(config) = platform_config {
+                apply_platform_config(mcp_config, &config);
+            }
+            // Remove platform_overrides
+            if let Some(obj) = mcp_config.as_object_mut() {
+                obj.remove("platform_overrides");
+            }
+        }
+    }
+
+    // 3. Update root compatibility.platforms to only the OS (for spec compliance)
+    if let Some(compat) = manifest.get_mut("compatibility")
+        && let Some(obj) = compat.as_object_mut()
+    {
+        obj.insert("platforms".to_string(), serde_json::json!([os]));
+    }
+}
+
+/// Apply platform-specific config values to the mcp_config.
+fn apply_platform_config(mcp_config: &mut serde_json::Value, platform_config: &serde_json::Value) {
+    if let (Some(base), Some(override_obj)) =
+        (mcp_config.as_object_mut(), platform_config.as_object())
+    {
+        for (key, value) in override_obj {
+            base.insert(key.clone(), value.clone());
+        }
+    }
+}
+
+/// Check if a file path should be excluded for a platform-specific bundle.
+/// Returns true if the file is a binary for a DIFFERENT platform.
+fn should_exclude_for_platform(
+    file_path: &str,
+    _target_platform: &str,
+    all_binary_paths: &[String],
+    target_binary_path: Option<&str>,
+) -> bool {
+    // If this file matches the target platform's binary, include it
+    if let Some(target) = target_binary_path
+        && file_path == target
+    {
+        return false; // Don't exclude
+    }
+
+    // If this file is one of the platform binaries but NOT our target, exclude it
+    for binary_path in all_binary_paths {
+        if file_path == binary_path
+            && let Some(target) = target_binary_path
+            && binary_path != target
+        {
+            return true; // Exclude - it's a different platform's binary
+        }
+    }
+
+    false // Include by default
 }
 
 /// Collect files from a directory for bundling, applying ignore patterns.
@@ -535,6 +967,58 @@ fn days_to_ymd(days: i64) -> (i32, u32, u32) {
     let y = if m <= 2 { y + 1 } else { y };
 
     (y as i32, m, d)
+}
+
+/// Compute SHA-256 checksum of data and return as hex string.
+pub fn compute_sha256(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    format!("{:x}", hasher.finalize())
+}
+
+/// Extract icon from manifest as a separate file alongside the bundle.
+///
+/// Returns (icon_path, icon_size, icon_checksum) if icon was extracted.
+fn extract_icon(
+    dir: &Path,
+    manifest: &McpbManifest,
+    bundle_path: &Path,
+) -> Result<IconResult, PackError> {
+    // Get icon path from manifest
+    let icon_field = match &manifest.icon {
+        Some(icon) => icon,
+        None => return Ok((None, None, None)),
+    };
+
+    // Resolve icon source path
+    let icon_src = dir.join(icon_field);
+    if !icon_src.exists() {
+        return Ok((None, None, None));
+    }
+
+    // Determine icon destination path (same directory as bundle)
+    let icon_ext = icon_src
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_else(|| "png".to_string());
+    let icon_dest = bundle_path.with_file_name(format!(
+        "{}-icon.{}",
+        bundle_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy(),
+        icon_ext
+    ));
+
+    // Copy icon to destination
+    std::fs::copy(&icon_src, &icon_dest)?;
+
+    // Read icon and compute checksum
+    let icon_bytes = std::fs::read(&icon_dest)?;
+    let icon_size = icon_bytes.len() as u64;
+    let icon_checksum = compute_sha256(&icon_bytes);
+
+    Ok((Some(icon_dest), Some(icon_size), Some(icon_checksum)))
 }
 
 //--------------------------------------------------------------------------------------------------

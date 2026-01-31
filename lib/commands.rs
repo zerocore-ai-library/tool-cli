@@ -36,11 +36,12 @@ const SEARCH_EXAMPLES: &str = examples![
 ];
 
 const INSTALL_EXAMPLES: &str = examples![
-    "tool install appcypher/bash       " # "Install from registry (latest)",
-    "tool install appcypher/bash@1.0.0 " # "Install specific version",
-    "tool install ./my-local-tool      " # "Install from local directory",
-    "tool install ~/tools/custom       " # "Install from home directory",
-    "tool install ./local ns/a ns/b    " # "Install multiple packages",
+    "tool install appcypher/bash              " # "Install from registry (latest)",
+    "tool install appcypher/bash@1.0.0        " # "Install specific version",
+    "tool install ./my-local-tool             " # "Install from local directory",
+    "tool install ~/tools/custom              " # "Install from home directory",
+    "tool install ./local ns/a ns/b           " # "Install multiple packages",
+    "tool install ns/tool --platform=universal" # "Install universal bundle",
 ];
 
 const UNINSTALL_EXAMPLES: &str = examples![
@@ -100,10 +101,12 @@ const CALL_EXAMPLES: &str = examples![
 ];
 
 const DOWNLOAD_EXAMPLES: &str = examples![
-    "tool download appcypher/bash      " # "Download to current dir",
-    "tool download appcypher/bash@1.0.0" # "Download specific version",
-    "tool download bash terminal       " # "Download multiple packages",
-    "tool download bash -o ./downloads " # "Download to specific directory",
+    "tool download appcypher/bash                  " # "Download to current dir",
+    "tool download appcypher/bash@1.0.0            " # "Download specific version",
+    "tool download ns/a ns/b ns/c                  " # "Download multiple packages",
+    "tool download ns/tool -o ./dist               " # "Download to specific directory",
+    "tool download ns/tool --platform=darwin-arm64 " # "Download for specific platform",
+    "tool download ns/tool --platform=universal    " # "Download universal bundle",
 ];
 
 const VALIDATE_EXAMPLES: &str = examples![
@@ -121,6 +124,7 @@ const PACK_EXAMPLES: &str = examples![
     "tool pack --no-validate           " # "Skip validation step",
     "tool pack --include-dotfiles      " # "Include dotfiles (except .git)",
     "tool pack -v                      " # "Show files being added",
+    "tool pack --multi-platform        " # "Pack bundles for each platform override",
 ];
 
 const RUN_EXAMPLES: &str = examples![
@@ -135,9 +139,12 @@ const RUN_EXAMPLES: &str = examples![
 ];
 
 const PUBLISH_EXAMPLES: &str = examples![
-    "tool publish                      " # "Publish current directory",
-    "tool publish ./my-tool            " # "Publish specific directory",
-    "tool publish --dry-run            " # "Preview without uploading",
+    "tool publish                                                 " # "Publish current directory",
+    "tool publish ./my-tool                                       " # "Publish specific directory",
+    "tool publish --dry-run                                       " # "Preview without uploading",
+    "tool publish --multi-platform                                " # "Publish bundles for each platform",
+    "tool publish --multi-platform --darwin-arm64 ./dist/mac.mcpb " # "Use pre-built bundle",
+    "tool publish --multi-platform --universal ./dist/all.mcpb    " # "Specify universal bundle",
 ];
 
 const LOGIN_EXAMPLES: &str = examples![
@@ -348,6 +355,10 @@ pub enum Command {
         /// Tool references (`namespace/name[@version]`) or local paths.
         #[arg(required = true)]
         names: Vec<String>,
+
+        /// Override platform detection (use "universal" for universal bundle).
+        #[arg(long)]
+        platform: Option<String>,
     },
 
     /// Uninstall installed tools.
@@ -541,6 +552,11 @@ pub enum Command {
         /// Download to this directory (defaults to current directory).
         #[arg(short, long)]
         output: Option<String>,
+
+        /// Target platform (e.g., "darwin-arm64", "linux-x64", or "universal").
+        /// Defaults to auto-detect, falling back to universal if no match.
+        #[arg(long)]
+        platform: Option<String>,
     },
 
     /// Validate an MCPB package.
@@ -568,7 +584,7 @@ pub enum Command {
         /// Path to tool directory (defaults to current directory).
         path: Option<String>,
 
-        /// Output file path.
+        /// Output file path (ignored with --multi-platform).
         #[arg(short, long)]
         output: Option<String>,
 
@@ -587,6 +603,12 @@ pub enum Command {
         /// Show files being added.
         #[arg(short, long)]
         verbose: bool,
+
+        /// Create bundles for each platform override (+ universal bundle).
+        /// Checks _meta["store.tool.mcpb"].mcp_config.platform_overrides first,
+        /// then falls back to server.mcp_config.platform_overrides.
+        #[arg(long)]
+        multi_platform: bool,
     },
 
     /// Run an MCP server in proxy mode.
@@ -642,6 +664,35 @@ pub enum Command {
         /// Treat warnings as errors.
         #[arg(long)]
         strict: bool,
+
+        /// Publish bundles for each platform override (+ universal bundle).
+        /// Can be combined with platform flags to use pre-built bundles.
+        #[arg(long)]
+        multi_platform: bool,
+
+        /// Pre-built bundle for darwin-arm64 (Apple Silicon Mac).
+        #[arg(long, value_name = "PATH")]
+        darwin_arm64: Option<String>,
+
+        /// Pre-built bundle for darwin-x64 (Intel Mac).
+        #[arg(long, value_name = "PATH")]
+        darwin_x64: Option<String>,
+
+        /// Pre-built bundle for linux-x64.
+        #[arg(long, value_name = "PATH")]
+        linux_x64: Option<String>,
+
+        /// Pre-built bundle for linux-arm64.
+        #[arg(long, value_name = "PATH")]
+        linux_arm64: Option<String>,
+
+        /// Pre-built bundle for win32-x64 (Windows x64).
+        #[arg(long, value_name = "PATH")]
+        win32_x64: Option<String>,
+
+        /// Pre-built universal bundle (all platforms).
+        #[arg(long, value_name = "PATH")]
+        universal: Option<String>,
     },
 
     /// Login to the registry.
