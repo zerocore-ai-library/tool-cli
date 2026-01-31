@@ -490,7 +490,7 @@ impl RegistryClient {
             "namespace": namespace,
             "name": name,
             "slug": name,
-            "plugin_type": "tool",
+            "artifact_type": "tool",
             "description": description,
         });
 
@@ -773,7 +773,7 @@ impl RegistryClient {
     pub async fn search(&self, query: &str, limit: Option<usize>) -> ToolResult<Vec<SearchResult>> {
         let per_page = limit.unwrap_or(20);
         let url = format!(
-            "{}{}/search?q={}&plugin_type=tool&page=1&per_page={}",
+            "{}{}/search?q={}&artifact_type=tool&page=1&per_page={}",
             self.url,
             API_PREFIX,
             urlencoding::encode(query),
