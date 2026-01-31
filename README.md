@@ -9,7 +9,9 @@
 
 > [MCP](https://github.com/modelcontextprotocol) solved how AI agents integrate with other systems. [MCPB](https://github.com/modelcontextprotocol/mcpb) solved how users install them. But if you're building MCP tools, you're still copying JSON configs, wrestling with dependencies, and manually testing against clients.
 >
-> `tool-cli` is the missing piece. It handles the entire lifecycle from scaffolding to publishing, so you can focus on building your tool. It also turns MCP servers into CLIs, enabling you to build context-efficient agents with dynamic tool loading.
+> `tool-cli` is the missing piece. It handles the entire lifecycle from scaffolding to publishing, so you can focus on building your tool.
+>
+> `tool-cli` also turns your MCP servers into CLIs, allowing you to build context-efficient agents with dynamic tool loading.
 
 <br />
 
@@ -135,7 +137,7 @@ Get your first MCP tool published in three steps.
 > <blockquote>
 >
 > ```sh
-> tool pack
+> tool pack my-tool
 > ```
 >
 > Creates a `.mcpb` or `.mcpbx` file you can distribute yourself.
@@ -165,7 +167,7 @@ Get your first MCP tool published in three steps.
 > tool grep "file"
 > ```
 >
-> Search across all installed tools - server names, tool names, descriptions, and schema fields. Returns matches with JavaScript accessor paths so you can locate exactly where the match occurred.
+> Search across all installed tools - server names, tool names, descriptions, and schema fields.
 
 ##
 
@@ -196,11 +198,11 @@ Get your first MCP tool published in three steps.
 > You can also use `--expose` to bridge between transports.
 >
 > ```sh
-> tool run appcypher/service --expose stdio             # HTTP backend to stdio
+> tool run <namespace/remote-mcp> --expose stdio      # HTTP backend to stdio
 > ```
 >
 > ```sh
-> tool run library/bash --expose http --port 3000   # stdio backend to HTTP
+> tool run <namespace/local-mcp> --expose http --port 3000   # stdio backend to HTTP
 > ```
 
 ##
@@ -208,13 +210,13 @@ Get your first MCP tool published in three steps.
 ### Configure Tools
 
 > ```sh
-> tool config set library/bash
+> tool config set library/terminal
 > ```
 >
 > Some tools need configuration like API keys. This walks you through setting them up interactively.
 >
 > ```sh
-> tool config get library/bash
+> tool config get library/terminal
 > ```
 >
 > Check what config values are set.
@@ -246,7 +248,7 @@ Get your first MCP tool published in three steps.
 Once you've installed some tools, you probably want to use them in your favorite AI app. Instead of manually editing JSON configs, just run:
 
 > ```sh
-> tool host add claude-desktop library/weather
+> tool host add claude-desktop library/open-data
 > ```
 >
 > This registers the tool with the host. Works with Claude Desktop, Cursor, VS Code, Claude Code, Codex, Windsurf, Zed, Gemini CLI, Kiro, and Roo Code.
@@ -316,7 +318,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 > ```sh
 > tool host list                             # see all supported hosts
-> tool host add cursor library/weather       # add a tool to Cursor
+> tool host add cursor library/open-ddata    # add a tool to Cursor
 > tool host add vscode                       # add all installed tools
 > tool host remove claude-desktop            # remove tools from a host
 > tool host preview cursor                   # preview the generated config
@@ -385,9 +387,9 @@ The goal is simple. Make building and sharing MCP tools as easy as publishing an
 
 [MCPB](https://github.com/modelcontextprotocol/mcpb) is great for what it was designed for: bundled servers that run locally over stdio. But most MCP servers today run via `npx` or `uvx` (nothing to bundle), some are remote HTTP servers (no local code at all), and some need things like host-managed ports or OAuth flows that the spec doesn't cover.
 
-We created [MCPBX](https://github.com/anthropics/mcpb/blob/main/MANIFEST.md) (`.mcpbx`) to fill those gaps. It's a superset of MCPB that adds HTTP transport, reference mode (so you can point to `npx`/`uvx` or a remote URL instead of bundling code), system config for host-managed resources, OAuth config, and template functions for constructing auth headers.
+We created [MCPBX](https://tool.store/docs/building-tools/mcpbx) (`.mcpbx`) to fill those gaps. It's a superset of MCPB that adds HTTP transport, reference mode (so you can point to `npx`/`uvx` or a remote URL instead of bundling code), system config for host-managed resources, OAuth config, and template functions for constructing auth headers.
 
-The separate file extension exists so hosts know upfront whether they can handle the manifest. `tool pack` picks the right format automatically based on what your manifest uses.
+The separate file extension exists so hosts know upfront whether they can handle the manifest. `tool-cli` picks the right format automatically based on what your manifest uses.
 
 <br />
 
