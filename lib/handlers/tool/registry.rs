@@ -1603,13 +1603,12 @@ pub async fn publish_mcpb(
             icon_hasher.update(icon_bytes);
             let icon_sha256 = format!("{:x}", icon_hasher.finalize());
 
-            let filename = icon_name.clone();
             files.push(crate::registry::FileSpec {
-                name: filename.clone(),
+                name: icon_name.clone(),
                 size: icon_bytes.len() as i64,
                 sha256: icon_sha256,
             });
-            filename
+            icon_name.clone()
         })
     } else {
         None
@@ -1617,7 +1616,7 @@ pub async fn publish_mcpb(
 
     let file_count = files.len();
     println!(
-        "\n  {} Uploading {} file{}",
+        "\n  {} Uploading {} file{} in parallel",
         "→".bright_blue(),
         file_count,
         if file_count > 1 { "s" } else { "" }
@@ -1626,66 +1625,64 @@ pub async fn publish_mcpb(
         .init_upload(&namespace, tool_name, version, files)
         .await?;
 
-    // Upload bundle
-    let bundle_target = upload_info
-        .uploads
-        .iter()
-        .find(|t| t.name == file_name)
-        .ok_or_else(|| ToolError::Generic("No upload target for bundle".into()))?;
-
-    let pb = ProgressBar::new(bundle_size);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("  [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
-            .unwrap()
-            .progress_chars("█░░"),
-    );
-    pb.enable_steady_tick(std::time::Duration::from_millis(100));
-
-    let pb_arc = Arc::new(pb);
-    let pb_clone = Arc::clone(&pb_arc);
-    client
-        .upload_bundle_with_progress(
-            &bundle_target.upload_url,
-            &bundle,
-            &bundle_target.content_type,
-            move |bytes| {
-                pb_clone.set_position(bytes);
-            },
-        )
-        .await?;
-    pb_arc.finish_and_clear();
-
-    // Upload icon if present
+    // Build list of files to upload
+    let mut files_to_upload: Vec<(String, Vec<u8>)> = vec![(file_name.clone(), bundle)];
     if let (Some(icon_bytes), Some(icon_name)) = (icon_data, icon_filename) {
-        let icon_target = upload_info
-            .uploads
-            .iter()
-            .find(|t| t.name == icon_name)
-            .ok_or_else(|| ToolError::Generic("No upload target for icon".into()))?;
+        files_to_upload.push((icon_name, icon_bytes));
+    }
 
-        let icon_pb = ProgressBar::new(icon_bytes.len() as u64);
-        icon_pb.set_style(
-            ProgressStyle::default_bar()
-                .template("  [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
-                .unwrap()
-                .progress_chars("█░░"),
-        );
-        icon_pb.enable_steady_tick(std::time::Duration::from_millis(100));
+    // Upload all files in parallel
+    let mp = MultiProgress::new();
+    let style = ProgressStyle::default_bar()
+        .template("  {msg:<25} [{bar:25.cyan/dim}] {bytes:>10}/{total_bytes:<10}")
+        .unwrap()
+        .progress_chars("█░░");
 
-        let icon_pb_arc = Arc::new(icon_pb);
-        let icon_pb_clone = Arc::clone(&icon_pb_arc);
-        client
-            .upload_bundle_with_progress(
-                &icon_target.upload_url,
-                &icon_bytes,
-                &icon_target.content_type,
-                move |bytes| {
-                    icon_pb_clone.set_position(bytes);
-                },
-            )
-            .await?;
-        icon_pb_arc.finish_and_clear();
+    let upload_handles: Vec<_> = files_to_upload
+        .into_iter()
+        .map(|(name, bytes)| {
+            let upload_target = upload_info.uploads.iter().find(|t| t.name == name).cloned();
+
+            let pb = mp.add(ProgressBar::new(bytes.len() as u64));
+            pb.set_style(style.clone());
+            pb.set_message(name.clone());
+            pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+            let client = client.clone();
+            tokio::spawn(async move {
+                let upload_target = match upload_target {
+                    Some(t) => t,
+                    None => return Err(format!("No upload target for file: {}", name)),
+                };
+
+                let pb_arc = Arc::new(pb);
+                let pb_clone = Arc::clone(&pb_arc);
+                let result = client
+                    .upload_bundle_with_progress(
+                        &upload_target.upload_url,
+                        &bytes,
+                        move |uploaded| {
+                            pb_clone.set_position(uploaded);
+                        },
+                    )
+                    .await;
+
+                pb_arc.finish_and_clear();
+                result.map_err(|e| format!("Upload failed for {}: {}", name, e))
+            })
+        })
+        .collect();
+
+    // Wait for all uploads to complete
+    let upload_results = futures_util::future::join_all(upload_handles).await;
+
+    // Check for failures
+    for result in upload_results {
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(ToolError::Generic(e)),
+            Err(e) => return Err(ToolError::Generic(format!("Upload task failed: {}", e))),
+        }
     }
 
     println!("  {} Upload complete", "✓".bright_green());
@@ -2165,7 +2162,6 @@ async fn publish_multi_artifact_impl(
                     .upload_bundle_with_progress(
                         &upload_target.upload_url,
                         &bytes,
-                        &upload_target.content_type,
                         move |uploaded| {
                             pb_clone.set_position(uploaded);
                         },
