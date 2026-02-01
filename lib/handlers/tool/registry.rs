@@ -1515,8 +1515,27 @@ pub async fn publish_mcpb(
     let bundle_size = bundle.len() as u64;
     println!("  · Size: {}", format_size(bundle_size).bright_white());
 
-    // Clean up temp bundle
+    // Read icon if present
+    let icon_data = if let Some(ref icon_path) = pack_result.icon_path {
+        match std::fs::read(icon_path) {
+            Ok(bytes) => {
+                println!(
+                    "  · Icon: {}",
+                    format_size(bytes.len() as u64).bright_white()
+                );
+                Some(bytes)
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    // Clean up temp bundle and icon
     let _ = std::fs::remove_file(&pack_result.output_path);
+    if let Some(ref icon_path) = pack_result.icon_path {
+        let _ = std::fs::remove_file(icon_path);
+    }
 
     if dry_run {
         println!(
@@ -1563,35 +1582,57 @@ pub async fn publish_mcpb(
         }
     }
 
-    // Compute SHA-256
+    // Compute SHA-256 for bundle
     let mut hasher = Sha256::new();
     hasher.update(&bundle);
     let sha256 = format!("{:x}", hasher.finalize());
 
-    // Initiate upload with file spec
+    // Build file specs for upload
     let file_name = format!("{}.{}", tool_name, manifest.bundle_extension());
-    let files = vec![crate::registry::FileSpec {
+    let mut files = vec![crate::registry::FileSpec {
         name: file_name.clone(),
         size: bundle_size as i64,
         sha256: sha256.clone(),
     }];
 
+    // Add icon to upload if present
+    let icon_filename = if let Some(ref icon_bytes) = icon_data {
+        // Use the original icon filename from manifest
+        manifest.icon.as_ref().map(|icon_name| {
+            let mut icon_hasher = Sha256::new();
+            icon_hasher.update(icon_bytes);
+            let icon_sha256 = format!("{:x}", icon_hasher.finalize());
+
+            let filename = icon_name.clone();
+            files.push(crate::registry::FileSpec {
+                name: filename.clone(),
+                size: icon_bytes.len() as i64,
+                sha256: icon_sha256,
+            });
+            filename
+        })
+    } else {
+        None
+    };
+
+    let file_count = files.len();
     println!(
-        "\n  {} Uploading bundle ({})",
+        "\n  {} Uploading {} file{}",
         "→".bright_blue(),
-        manifest.bundle_extension()
+        file_count,
+        if file_count > 1 { "s" } else { "" }
     );
     let upload_info = client
         .init_upload(&namespace, tool_name, version, files)
         .await?;
 
-    // Get the upload target for our file
-    let upload_target = upload_info
+    // Upload bundle
+    let bundle_target = upload_info
         .uploads
-        .first()
-        .ok_or_else(|| ToolError::Generic("No upload target returned".into()))?;
+        .iter()
+        .find(|t| t.name == file_name)
+        .ok_or_else(|| ToolError::Generic("No upload target for bundle".into()))?;
 
-    // Create progress bar for upload
     let pb = ProgressBar::new(bundle_size);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -1601,21 +1642,52 @@ pub async fn publish_mcpb(
     );
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
-    // Upload to presigned URL with progress
     let pb_arc = Arc::new(pb);
     let pb_clone = Arc::clone(&pb_arc);
     client
         .upload_bundle_with_progress(
-            &upload_target.upload_url,
+            &bundle_target.upload_url,
             &bundle,
-            &upload_target.content_type,
+            &bundle_target.content_type,
             move |bytes| {
                 pb_clone.set_position(bytes);
             },
         )
         .await?;
-
     pb_arc.finish_and_clear();
+
+    // Upload icon if present
+    if let (Some(icon_bytes), Some(icon_name)) = (icon_data, icon_filename) {
+        let icon_target = upload_info
+            .uploads
+            .iter()
+            .find(|t| t.name == icon_name)
+            .ok_or_else(|| ToolError::Generic("No upload target for icon".into()))?;
+
+        let icon_pb = ProgressBar::new(icon_bytes.len() as u64);
+        icon_pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
+                .unwrap()
+                .progress_chars("█░░"),
+        );
+        icon_pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+        let icon_pb_arc = Arc::new(icon_pb);
+        let icon_pb_clone = Arc::clone(&icon_pb_arc);
+        client
+            .upload_bundle_with_progress(
+                &icon_target.upload_url,
+                &icon_bytes,
+                &icon_target.content_type,
+                move |bytes| {
+                    icon_pb_clone.set_position(bytes);
+                },
+            )
+            .await?;
+        icon_pb_arc.finish_and_clear();
+    }
+
     println!("  {} Upload complete", "✓".bright_green());
 
     // Publish the version
@@ -1630,6 +1702,18 @@ pub async fn publish_mcpb(
         }
     };
 
+    // Derive icon_url from manifest.icon + uploaded files
+    let icon_url = manifest_json
+        .get("icon")
+        .and_then(|icon| icon.as_str())
+        .and_then(|icon_filename| {
+            upload_info
+                .uploads
+                .iter()
+                .find(|target| target.name == icon_filename)
+                .map(|target| target.cdn_url.clone())
+        });
+
     let result = match client
         .publish_version(
             &namespace,
@@ -1639,6 +1723,7 @@ pub async fn publish_mcpb(
             &file_name,
             manifest_json,
             description,
+            icon_url,
         )
         .await
     {
@@ -1727,7 +1812,7 @@ fn detect_available_platforms(manifest: &McpbManifest) -> Vec<String> {
 #[allow(clippy::too_many_arguments)]
 async fn publish_multi_artifact_impl(
     dir: &Path,
-    _manifest: &McpbManifest,
+    manifest: &McpbManifest,
     manifest_content: &str,
     namespace: &str,
     tool_name: &str,
@@ -1945,8 +2030,10 @@ async fn publish_multi_artifact_impl(
         }
 
         // Add icon if found
-        if let Some((_icon_path, icon_bytes, icon_checksum)) = icon_info {
-            let icon_filename = "icon.png".to_string(); // Standardize icon filename
+        if let Some((_icon_path, icon_bytes, icon_checksum)) = icon_info
+            && let Some(icon_name) = &manifest.icon
+        {
+            let icon_filename = icon_name.clone();
             println!(
                 "  · icon: {} ({})",
                 icon_filename,
@@ -2112,6 +2199,18 @@ async fn publish_multi_artifact_impl(
     let manifest_json: serde_json::Value = serde_json::from_str(manifest_content)
         .map_err(|e| ToolError::Generic(format!("Failed to parse manifest: {}", e)))?;
 
+    // Derive icon_url from manifest.icon + uploaded files
+    let icon_url = manifest_json
+        .get("icon")
+        .and_then(|icon| icon.as_str())
+        .and_then(|icon_filename| {
+            upload_info
+                .uploads
+                .iter()
+                .find(|target| target.name == icon_filename)
+                .map(|target| target.cdn_url.clone())
+        });
+
     let result = match client
         .publish_version(
             namespace,
@@ -2121,6 +2220,7 @@ async fn publish_multi_artifact_impl(
             "version.json",
             manifest_json,
             description,
+            icon_url,
         )
         .await
     {

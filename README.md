@@ -153,7 +153,7 @@ Get your first MCP tool published in three steps.
 
 ## Multi-Platform Bundles
 
-If your tool includes platform-specific binaries (native executables, compiled code), you can publish separate bundles for each platform. Users automatically get the right bundle for their system.
+If your tool includes platform-specific binaries (native executables, compiled code), you can publish separate bundles for each platform. Users automatically get the right bundle for their system. Learn more about [multi-platform packaging](https://tool.store/docs/advanced/multi-platform).
 
 ### Packing for Multiple Platforms
 
@@ -384,10 +384,10 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 > ```sh
 > tool host list                             # see all supported hosts
-> tool host add cursor library/open-ddata    # add a tool to Cursor
+> tool host add cursor library/open-data     # add a tool to Cursor
 > tool host add vscode                       # add all installed tools
 > tool host remove claude-desktop            # remove tools from a host
-> tool host preview cursor                   # preview the generated config
+> tool host show cursor                      # preview the generated config
 > ```
 >
 > You can specify individual tools or omit them to register all installed tools. The command creates backups before modifying anything, so your original config is safe.

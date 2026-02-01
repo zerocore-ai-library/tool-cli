@@ -410,7 +410,8 @@ pub(super) fn prompt_missing_user_config(
         let is_required = field.required.unwrap_or(false);
         let is_sensitive = field.sensitive.unwrap_or(false);
 
-        // Get description
+        // Use title for display
+        let display_name = &field.title;
         let description = field.description.as_deref().unwrap_or("");
 
         // Default can be number, string, or bool - convert to string
@@ -428,9 +429,9 @@ pub(super) fn prompt_missing_user_config(
 
         // Build prompt text
         let prompt_text = if description.is_empty() {
-            key.clone()
+            display_name.clone()
         } else {
-            format!("{} ({})", key, description)
+            format!("{} ({})", display_name, description)
         };
 
         // Get user input using cliclack - use password prompt for sensitive fields
