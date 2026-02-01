@@ -125,6 +125,8 @@ pub struct FileInfo {
 pub struct VersionInfo {
     /// Version string.
     pub version: String,
+    /// Icon URL (if provided).
+    pub icon_url: Option<String>,
     /// Main download size in bytes.
     pub main_download_size: Option<u64>,
     /// Main download checksum.
@@ -155,6 +157,8 @@ pub struct UploadTarget {
     pub upload_url: String,
     /// Storage key for this file.
     pub storage_key: String,
+    /// CDN URL where the file will be accessible after upload.
+    pub cdn_url: String,
     /// Content-Type to use when uploading.
     #[serde(default = "default_content_type")]
     pub content_type: String,
@@ -195,6 +199,7 @@ struct PublishVersionRequest {
     main_file: String,
     manifest: serde_json::Value,
     description: Option<String>,
+    icon_url: Option<String>,
 }
 
 /// A stream wrapper that reports progress as chunks are consumed.
@@ -679,6 +684,7 @@ impl RegistryClient {
         main_file: &str,
         manifest: serde_json::Value,
         description: Option<&str>,
+        icon_url: Option<String>,
     ) -> ToolResult<PublishResult> {
         let token = self
             .auth_token
@@ -696,6 +702,7 @@ impl RegistryClient {
             main_file: main_file.to_string(),
             manifest,
             description: description.map(String::from),
+            icon_url,
         };
 
         let response = self
