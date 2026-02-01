@@ -4,6 +4,7 @@ use crate::constants::{REGISTRY_TOKEN_ENV, get_registry_url};
 use crate::error::{ToolError, ToolResult};
 use bytes::Bytes;
 use futures_util::StreamExt;
+use http_body::{Body as HttpBody, Frame, SizeHint};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -159,13 +160,6 @@ pub struct UploadTarget {
     pub storage_key: String,
     /// CDN URL where the file will be accessible after upload.
     pub cdn_url: String,
-    /// Content-Type to use when uploading.
-    #[serde(default = "default_content_type")]
-    pub content_type: String,
-}
-
-fn default_content_type() -> String {
-    "application/octet-stream".to_string()
 }
 
 /// Upload initiation response.
@@ -202,40 +196,62 @@ struct PublishVersionRequest {
     icon_url: Option<String>,
 }
 
-/// A stream wrapper that reports progress as chunks are consumed.
-pub struct ProgressStream<F> {
+/// A streaming body with known size that reports upload progress.
+///
+/// This implements `http_body::Body` with an exact `size_hint()`, which ensures
+/// that reqwest uses Content-Length header instead of chunked transfer encoding.
+/// This is required for AWS/R2 presigned URLs where Content-Length is signed.
+pub struct SizedProgressBody<F> {
     content: Vec<u8>,
     position: usize,
     chunk_size: usize,
+    total_size: usize,
     on_progress: Arc<F>,
 }
 
-impl<F> ProgressStream<F> {
-    /// Create a new progress stream with the given content and progress callback.
+impl<F> SizedProgressBody<F> {
+    /// Create a new sized progress body.
     pub fn new(content: Vec<u8>, chunk_size: usize, on_progress: F) -> Self {
+        let total_size = content.len();
         Self {
             content,
             position: 0,
             chunk_size,
+            total_size,
             on_progress: Arc::new(on_progress),
         }
     }
 }
 
-impl<F: Fn(u64) + Send + Sync> futures_util::Stream for ProgressStream<F> {
-    type Item = Result<Bytes, std::io::Error>;
+impl<F: Fn(u64) + Send + Sync + 'static> HttpBody for SizedProgressBody<F> {
+    type Data = Bytes;
+    type Error = std::convert::Infallible;
 
-    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.position >= self.content.len() {
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.get_mut();
+
+        if this.position >= this.content.len() {
             return Poll::Ready(None);
         }
 
-        let end = (self.position + self.chunk_size).min(self.content.len());
-        let chunk = Bytes::copy_from_slice(&self.content[self.position..end]);
-        self.position = end;
-        (self.on_progress)(self.position as u64);
+        let end = (this.position + this.chunk_size).min(this.content.len());
+        let chunk = Bytes::copy_from_slice(&this.content[this.position..end]);
+        this.position = end;
+        (this.on_progress)(this.position as u64);
 
-        Poll::Ready(Some(Ok(chunk)))
+        Poll::Ready(Some(Ok(Frame::data(chunk))))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.position >= self.content.len()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        // IMPORTANT: Return TOTAL size, not remaining. HTTP Content-Length is total body size.
+        SizeHint::with_exact(self.total_size as u64)
     }
 }
 
@@ -604,16 +620,13 @@ impl RegistryClient {
     }
 
     /// Upload a bundle to the presigned URL.
-    pub async fn upload_bundle(
-        &self,
-        upload_url: &str,
-        content: &[u8],
-        content_type: &str,
-    ) -> ToolResult<()> {
+    pub async fn upload_bundle(&self, upload_url: &str, content: &[u8]) -> ToolResult<()> {
+        // IMPORTANT: Do not set Content-Type header manually.
+        // The presigned URL is generated without Content-Type in the signature,
+        // and R2 auto-detects Content-Type from file extension.
         let response = self
             .http
             .put(upload_url)
-            .header("Content-Type", content_type)
             .body(content.to_vec())
             .send()
             .await
@@ -631,38 +644,40 @@ impl RegistryClient {
         Ok(())
     }
 
-    /// Upload a bundle to the presigned URL with progress reporting.
+    /// Upload a bundle to the presigned URL with streaming progress reporting.
+    ///
+    /// Uses a custom `SizedProgressBody` that implements `http_body::Body` with
+    /// an exact size hint. This ensures Content-Length is used (not chunked encoding),
+    /// which is required for presigned URLs where Content-Length is signed.
     pub async fn upload_bundle_with_progress<F>(
         &self,
         upload_url: &str,
         content: &[u8],
-        content_type: &str,
         on_progress: F,
     ) -> ToolResult<()>
     where
         F: Fn(u64) + Send + Sync + 'static,
     {
-        let total_size = content.len();
-        let stream = ProgressStream::new(
+        // Create a sized body that reports progress as chunks are consumed.
+        // The size_hint() returns exact size, so reqwest uses Content-Length.
+        let body = SizedProgressBody::new(
             content.to_vec(),
             64 * 1024, // 64KB chunks
             on_progress,
         );
 
-        let body = reqwest::Body::wrap_stream(stream);
-
+        // Wrap our custom body for use with reqwest.
+        // Don't set Content-Type - R2 auto-detects from file extension.
         let response = self
             .http
             .put(upload_url)
-            .header("Content-Type", content_type)
-            .header("Content-Length", total_size)
-            .body(body)
+            .body(reqwest::Body::wrap(body))
             .send()
             .await
             .map_err(|e| ToolError::Generic(format!("Failed to upload bundle: {}", e)))?;
 
-        if !response.status().is_success() {
-            let status = response.status();
+        let status = response.status();
+        if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             return Err(ToolError::Generic(format!(
                 "Failed to upload bundle ({}): {}",

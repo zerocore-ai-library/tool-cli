@@ -2633,6 +2633,7 @@ dependencies = [
  "grep-matcher",
  "grep-regex",
  "grep-searcher",
+ "http-body",
  "ignore",
  "indicatif",
  "libc",
