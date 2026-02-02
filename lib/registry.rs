@@ -205,20 +205,28 @@ pub struct SizedProgressBody<F> {
     content: Vec<u8>,
     position: usize,
     chunk_size: usize,
-    total_size: usize,
     on_progress: Arc<F>,
 }
 
 impl<F> SizedProgressBody<F> {
     /// Create a new sized progress body.
     pub fn new(content: Vec<u8>, chunk_size: usize, on_progress: F) -> Self {
-        let total_size = content.len();
         Self {
             content,
             position: 0,
             chunk_size,
-            total_size,
             on_progress: Arc::new(on_progress),
+        }
+    }
+
+    /// Create a new sized progress body with a pre-wrapped Arc callback.
+    /// Useful for retry scenarios where the callback needs to be shared.
+    pub fn new_with_arc(content: Vec<u8>, chunk_size: usize, on_progress: Arc<F>) -> Self {
+        Self {
+            content,
+            position: 0,
+            chunk_size,
+            on_progress,
         }
     }
 }
@@ -250,8 +258,10 @@ impl<F: Fn(u64) + Send + Sync + 'static> HttpBody for SizedProgressBody<F> {
     }
 
     fn size_hint(&self) -> SizeHint {
-        // IMPORTANT: Return TOTAL size, not remaining. HTTP Content-Length is total body size.
-        SizeHint::with_exact(self.total_size as u64)
+        // Return remaining bytes - this is what http_body::Body expects.
+        // At position = 0, remaining = total_size, which correctly sets Content-Length.
+        let remaining = self.content.len() - self.position;
+        SizeHint::with_exact(remaining as u64)
     }
 }
 
@@ -269,6 +279,8 @@ impl RegistryClient {
             url,
             auth_token,
             http: Client::builder()
+                .http1_only() // Force HTTP/1.1 - R2 handles it better than HTTP/2
+                .connect_timeout(std::time::Duration::from_secs(30))
                 .build()
                 .expect("Failed to create HTTP client"),
         }
@@ -649,6 +661,8 @@ impl RegistryClient {
     /// Uses a custom `SizedProgressBody` that implements `http_body::Body` with
     /// an exact size hint. This ensures Content-Length is used (not chunked encoding),
     /// which is required for presigned URLs where Content-Length is signed.
+    ///
+    /// Retries up to 3 times on transient connection errors (broken pipe, connection reset).
     pub async fn upload_bundle_with_progress<F>(
         &self,
         upload_url: &str,
@@ -658,34 +672,66 @@ impl RegistryClient {
     where
         F: Fn(u64) + Send + Sync + 'static,
     {
-        // Create a sized body that reports progress as chunks are consumed.
-        // The size_hint() returns exact size, so reqwest uses Content-Length.
-        let body = SizedProgressBody::new(
-            content.to_vec(),
-            64 * 1024, // 64KB chunks
-            on_progress,
-        );
+        const MAX_RETRIES: u32 = 3;
+        let on_progress = Arc::new(on_progress);
+        let mut last_error = None;
 
-        // Wrap our custom body for use with reqwest.
-        // Don't set Content-Type - R2 auto-detects from file extension.
-        let response = self
-            .http
-            .put(upload_url)
-            .body(reqwest::Body::wrap(body))
-            .send()
-            .await
-            .map_err(|e| ToolError::Generic(format!("Failed to upload bundle: {}", e)))?;
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                // Wait before retry with exponential backoff
+                tokio::time::sleep(std::time::Duration::from_millis(500 * (1 << attempt))).await;
+            }
 
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(ToolError::Generic(format!(
-                "Failed to upload bundle ({}): {}",
-                status, body
-            )));
+            // Reset progress on retry
+            let progress_clone = Arc::clone(&on_progress);
+
+            // Create a sized body that reports progress as chunks are consumed.
+            let body = SizedProgressBody::new_with_arc(
+                content.to_vec(),
+                64 * 1024, // 64KB chunks
+                progress_clone,
+            );
+
+            // Wrap our custom body for use with reqwest.
+            // Don't set Content-Type - R2 auto-detects from file extension.
+            let result = self
+                .http
+                .put(upload_url)
+                .body(reqwest::Body::wrap(body))
+                .send()
+                .await;
+
+            match result {
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        return Ok(());
+                    }
+                    let body = response.text().await.unwrap_or_default();
+                    return Err(ToolError::Generic(format!(
+                        "Failed to upload bundle ({}): {}",
+                        status, body
+                    )));
+                }
+                Err(e) => {
+                    // Check if this is a retryable error (connection issues)
+                    let is_retryable = e.is_connect() || e.is_request() || e.is_timeout();
+                    if is_retryable && attempt < MAX_RETRIES - 1 {
+                        last_error = Some(e);
+                        continue;
+                    }
+                    return Err(ToolError::Generic(format!(
+                        "Failed to upload bundle: {:?}",
+                        e
+                    )));
+                }
+            }
         }
 
-        Ok(())
+        Err(ToolError::Generic(format!(
+            "Failed to upload bundle after {} retries: {:?}",
+            MAX_RETRIES, last_error
+        )))
     }
 
     /// Publish a version after upload.
