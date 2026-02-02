@@ -1,5 +1,6 @@
 //! Registry command handlers.
 
+use super::pack_cmd::format_size;
 use crate::constants::MCPB_MANIFEST_FILE;
 use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
@@ -15,8 +16,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-use super::pack_cmd::format_size;
 
 //--------------------------------------------------------------------------------------------------
 // Types
