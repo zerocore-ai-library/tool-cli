@@ -18,6 +18,9 @@ const INIT_EXAMPLES: &str = examples![
     "tool init existing-project        " # "Detect and migrate existing MCP server",
     "tool init . --reference           " # "Create manifest only (no scaffolding)",
     "tool init . --pm pnpm             " # "Use pnpm as package manager",
+    "tool init . --command npx --args \"@anthropic/mcp-server\"" # "Reference external command",
+    "tool init . --url https://api.example.com/mcp/" # "Reference remote HTTP server",
+    "tool init . --url https://example.com --oauth-client-id abc" # "HTTP with OAuth",
 ];
 
 const DETECT_EXAMPLES: &str = examples![
@@ -254,6 +257,7 @@ pub struct Cli {
 
 /// Available commands.
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     /// Initialize a new MCPB package.
     #[command(after_help = INIT_EXAMPLES)]
@@ -312,6 +316,43 @@ pub enum Command {
         /// Verify detection by starting the server and sending an MCP initialize request.
         #[arg(long)]
         verify: bool,
+
+        // === Reference mode options (mcp_config overrides) ===
+        /// Command to execute (implies reference mode for stdio).
+        #[arg(long)]
+        command: Option<String>,
+
+        /// Command arguments (space-separated string).
+        #[arg(long, allow_hyphen_values = true)]
+        args: Option<String>,
+
+        /// Environment variables as KEY=VALUE (repeatable).
+        #[arg(long = "env")]
+        env: Vec<String>,
+
+        /// Server URL (implies HTTP reference mode).
+        #[arg(long)]
+        url: Option<String>,
+
+        /// HTTP headers as KEY=VALUE (repeatable).
+        #[arg(long = "header")]
+        headers: Vec<String>,
+
+        /// OAuth client ID.
+        #[arg(long = "oauth-client-id")]
+        oauth_client_id: Option<String>,
+
+        /// OAuth authorization endpoint URL.
+        #[arg(long = "oauth-authorization-url")]
+        oauth_authorization_url: Option<String>,
+
+        /// OAuth token endpoint URL.
+        #[arg(long = "oauth-token-url")]
+        oauth_token_url: Option<String>,
+
+        /// OAuth scopes (comma-separated).
+        #[arg(long = "oauth-scopes")]
+        oauth_scopes: Option<String>,
     },
 
     /// Determine if an existing MCP server can be converted to a MCPB package.

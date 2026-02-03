@@ -248,6 +248,15 @@ async fn run() -> ToolResult<()> {
             transport,
             force,
             verify,
+            command,
+            args,
+            env,
+            url,
+            headers,
+            oauth_client_id,
+            oauth_authorization_url,
+            oauth_token_url,
+            oauth_scopes,
         } => {
             handlers::init_mcpb(
                 path,
@@ -264,6 +273,15 @@ async fn run() -> ToolResult<()> {
                 transport,
                 force,
                 verify,
+                command,
+                args,
+                env,
+                url,
+                headers,
+                oauth_client_id,
+                oauth_authorization_url,
+                oauth_token_url,
+                oauth_scopes,
             )
             .await
         }
