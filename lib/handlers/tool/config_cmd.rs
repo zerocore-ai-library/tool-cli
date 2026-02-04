@@ -14,7 +14,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 
 use super::list::resolve_tool_path;
@@ -54,8 +54,12 @@ pub async fn config_tool(cmd: ConfigCommand, concise: bool, no_header: bool) -> 
         } => config_set(tool, values, yes, config, concise).await,
         ConfigCommand::Get { tool, key } => config_get(tool, key, concise, no_header).await,
         ConfigCommand::List => config_list(concise, no_header).await,
-        ConfigCommand::Unset { tool, key } => config_unset(tool, key, concise).await,
-        ConfigCommand::Reset { tool } => config_reset(tool, concise).await,
+        ConfigCommand::Unset {
+            tool,
+            keys,
+            all,
+            yes,
+        } => config_unset(tool, keys, all, yes, concise).await,
     }
 }
 
@@ -430,75 +434,100 @@ async fn config_list(concise: bool, no_header: bool) -> ToolResult<()> {
 }
 
 /// Handle `config unset` subcommand.
-async fn config_unset(tool: String, key: String, concise: bool) -> ToolResult<()> {
-    // Resolve tool
-    let resolved_path = resolve_tool_path(&tool).await?;
+async fn config_unset(
+    tool: Option<String>,
+    keys: Vec<String>,
+    all: bool,
+    yes: bool,
+    concise: bool,
+) -> ToolResult<()> {
+    match (tool, all) {
+        // `tool config unset --all` or `tool config unset --all <keys...>`
+        (None, true) => unset_all_tools(keys, yes, concise).await,
+
+        // `tool config unset <tool> --all`
+        (Some(tool), true) => unset_tool_all_keys(&tool, yes, concise).await,
+
+        // `tool config unset <tool> <keys...>`
+        (Some(tool), false) => {
+            if keys.is_empty() {
+                return Err(ToolError::Generic(
+                    "No keys specified. Use --all to remove all keys.".into(),
+                ));
+            }
+            unset_tool_keys(&tool, &keys, concise).await
+        }
+
+        // `tool config unset` (no tool, no --all)
+        (None, false) => Err(ToolError::Generic(
+            "Either specify a tool or use --all.".into(),
+        )),
+    }
+}
+
+/// Unset specific keys from a single tool.
+async fn unset_tool_keys(tool: &str, keys: &[String], concise: bool) -> ToolResult<()> {
+    let resolved_path = resolve_tool_path(tool).await?;
     let resolved = load_tool_from_path(&resolved_path.path)?;
-
-    // Parse the original tool reference for storage
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved, resolved_path.is_installed)?;
-
-    // Get schema for encryption decision
+    let plugin_ref = parse_tool_ref_for_config(tool, &resolved, resolved_path.is_installed)?;
     let schema = resolved.template.user_config.as_ref();
 
-    // Load existing config
     let mut config = load_tool_config(&plugin_ref).unwrap_or_default();
+    let mut removed = Vec::new();
+    let mut not_found = Vec::new();
 
-    if !config.contains_key(&key) {
-        if concise {
-            println!("ok");
+    for key in keys {
+        if config.remove(key).is_some() {
+            removed.push(key.as_str());
         } else {
-            println!(
-                "\n  {} Key '{}' was not set for {}\n",
-                "!".bright_yellow(),
-                key,
-                plugin_ref
-            );
+            not_found.push(key.as_str());
         }
-        return Ok(());
     }
 
-    // Remove key
-    config.remove(&key);
-
-    // Save or delete config file
-    if config.is_empty() {
-        delete_tool_config(&plugin_ref)?;
-    } else {
-        save_tool_config_with_schema(&plugin_ref, &config, schema)?;
+    if !removed.is_empty() {
+        if config.is_empty() {
+            delete_tool_config(&plugin_ref)?;
+        } else {
+            save_tool_config_with_schema(&plugin_ref, &config, schema)?;
+        }
     }
 
     if concise {
         println!("ok");
     } else {
-        println!(
-            "\n  {} Removed '{}' from {}\n",
-            "✓".bright_green(),
-            key,
-            plugin_ref
-        );
+        if !removed.is_empty() {
+            println!(
+                "\n  {} Removed {} from {}\n",
+                "✓".bright_green(),
+                removed.join(", "),
+                plugin_ref
+            );
+        }
+        if !not_found.is_empty() {
+            println!(
+                "  {} Keys not found: {}\n",
+                "!".bright_yellow(),
+                not_found.join(", ")
+            );
+        }
     }
 
     Ok(())
 }
 
-/// Handle `config reset` subcommand.
-async fn config_reset(tool: String, concise: bool) -> ToolResult<()> {
-    // Resolve tool
-    let resolved_path = resolve_tool_path(&tool).await?;
+/// Unset all keys from a single tool.
+async fn unset_tool_all_keys(tool: &str, yes: bool, concise: bool) -> ToolResult<()> {
+    let resolved_path = resolve_tool_path(tool).await?;
     let resolved = load_tool_from_path(&resolved_path.path)?;
+    let plugin_ref = parse_tool_ref_for_config(tool, &resolved, resolved_path.is_installed)?;
 
-    // Parse the original tool reference for storage
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved, resolved_path.is_installed)?;
-
-    // Check if config exists
     let config_path = get_config_path(&plugin_ref);
     if !config_path.exists() {
         if concise {
             println!("ok");
         } else {
             println!(
-                "\n  {} No configuration to reset for {}\n",
+                "\n  {} No configuration to remove for {}\n",
                 "!".bright_yellow(),
                 plugin_ref
             );
@@ -506,7 +535,31 @@ async fn config_reset(tool: String, concise: bool) -> ToolResult<()> {
         return Ok(());
     }
 
-    // Delete config
+    // Confirm if not --yes
+    if !yes && !concise {
+        println!();
+        println!(
+            "  {} This will remove all configuration for {}",
+            "!".bright_yellow(),
+            plugin_ref
+        );
+        println!();
+        print!("  Continue? [y/N] ");
+        io::stdout().flush().ok();
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| ToolError::Generic(format!("Failed to read input: {}", e)))?;
+
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!();
+            println!("  {} Cancelled", "✗".bright_red());
+            println!();
+            return Ok(());
+        }
+    }
+
     delete_tool_config(&plugin_ref)?;
 
     if concise {
@@ -517,6 +570,121 @@ async fn config_reset(tool: String, concise: bool) -> ToolResult<()> {
             "✓".bright_green(),
             plugin_ref
         );
+    }
+
+    Ok(())
+}
+
+/// Unset config for all tools, optionally filtering by keys.
+async fn unset_all_tools(keys: Vec<String>, yes: bool, concise: bool) -> ToolResult<()> {
+    let tools = list_configured_tools()?;
+
+    if tools.is_empty() {
+        if concise {
+            println!("ok");
+        } else {
+            println!(
+                "\n  {} No tools have saved configuration.\n",
+                "!".bright_yellow()
+            );
+        }
+        return Ok(());
+    }
+
+    // Confirm if not --yes
+    if !yes && !concise {
+        println!();
+        let message = if keys.is_empty() {
+            format!("remove all configuration for {} tool(s)", tools.len())
+        } else {
+            format!("remove {} from {} tool(s)", keys.join(", "), tools.len())
+        };
+        println!("  {} This will {}", "!".bright_yellow(), message);
+        println!();
+        print!("  Continue? [y/N] ");
+        io::stdout().flush().ok();
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| ToolError::Generic(format!("Failed to read input: {}", e)))?;
+
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!();
+            println!("  {} Cancelled", "✗".bright_red());
+            println!();
+            return Ok(());
+        }
+        println!();
+    }
+
+    let config_root = DEFAULT_CONFIG_PATH.clone();
+    let mut removed_count = 0usize;
+
+    if keys.is_empty() {
+        // Remove all config for all tools
+        for (name, _, _) in &tools {
+            let tool_dir = config_root.join(name);
+            if tool_dir.exists() {
+                std::fs::remove_dir_all(&tool_dir)?;
+                removed_count += 1;
+                if !concise {
+                    println!("  {} Removed all config for {}", "✓".bright_green(), name);
+                }
+            }
+        }
+    } else {
+        // Remove specific keys from all tools
+        for (name, config_path, _) in &tools {
+            let mut config = load_config_from_path(config_path)?;
+            let mut changed = false;
+
+            for key in &keys {
+                if config.remove(key).is_some() {
+                    changed = true;
+                }
+            }
+
+            if changed {
+                if config.is_empty() {
+                    // Delete the entire config directory
+                    if let Some(parent) = config_path.parent() {
+                        std::fs::remove_dir_all(parent)?;
+                    }
+                } else {
+                    // Save updated config (without encryption since we don't have schema)
+                    let json = serde_json::to_string_pretty(&config)?;
+                    std::fs::write(config_path, json)?;
+                }
+                removed_count += 1;
+                if !concise {
+                    println!(
+                        "  {} Removed {} from {}",
+                        "✓".bright_green(),
+                        keys.join(", "),
+                        name
+                    );
+                }
+            }
+        }
+    }
+
+    if concise {
+        println!("ok");
+    } else {
+        println!();
+        if removed_count == 0 {
+            println!(
+                "  {} No matching configuration found.\n",
+                "!".bright_yellow()
+            );
+        } else {
+            println!(
+                "  Updated {} tool{}.\n",
+                removed_count,
+                if removed_count == 1 { "" } else { "s" }
+            );
+        }
     }
 
     Ok(())
@@ -588,6 +756,28 @@ pub fn load_tool_config(plugin_ref: &PluginRef) -> ToolResult<BTreeMap<String, S
     }
 
     let content = std::fs::read_to_string(&config_path)?;
+
+    // Check if config is encrypted
+    if let Ok(envelope) = serde_json::from_str::<EncryptedConfigEnvelope>(&content)
+        && envelope.encrypted
+    {
+        return decrypt_config(&envelope);
+    }
+
+    // Plain config
+    let config: BTreeMap<String, String> = serde_json::from_str(&content)
+        .map_err(|e| ToolError::Generic(format!("Failed to parse config file: {}", e)))?;
+
+    Ok(config)
+}
+
+/// Load config from a specific path (used for batch operations).
+fn load_config_from_path(path: &PathBuf) -> ToolResult<BTreeMap<String, String>> {
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+
+    let content = std::fs::read_to_string(path)?;
 
     // Check if config is encrypted
     if let Ok(envelope) = serde_json::from_str::<EncryptedConfigEnvelope>(&content)

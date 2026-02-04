@@ -51,6 +51,8 @@ const UNINSTALL_EXAMPLES: &str = examples![
     "tool uninstall appcypher/bash     " # "Remove installed tool",
     "tool uninstall my-local-tool      " # "Remove local tool",
     "tool uninstall tool1 tool2 tool3  " # "Remove multiple tools",
+    "tool uninstall --all              " # "Remove all installed tools",
+    "tool uninstall --all -y           " # "Remove all without confirmation",
 ];
 
 const LIST_EXAMPLES: &str = examples![
@@ -181,10 +183,11 @@ const CONFIG_GET_EXAMPLES: &str = examples![
 
 const CONFIG_UNSET_EXAMPLES: &str = examples![
     "tool config unset bash API_KEY    " # "Remove specific key",
-];
-
-const CONFIG_RESET_EXAMPLES: &str = examples![
-    "tool config reset bash            " # "Remove all config for tool",
+    "tool config unset bash K1 K2 K3   " # "Remove multiple keys",
+    "tool config unset bash --all      " # "Remove all keys for tool",
+    "tool config unset --all           " # "Remove config for all tools",
+    "tool config unset --all API_KEY   " # "Remove key from all tools",
+    "tool config unset --all -y        " # "Skip confirmation prompt",
 ];
 
 const HOST_ADD_EXAMPLES: &str = examples![
@@ -406,8 +409,15 @@ pub enum Command {
     #[command(after_help = UNINSTALL_EXAMPLES)]
     Uninstall {
         /// Tool references.
-        #[arg(required = true)]
         names: Vec<String>,
+
+        /// Uninstall all installed tools.
+        #[arg(long)]
+        all: bool,
+
+        /// Skip confirmation prompt.
+        #[arg(short, long)]
+        yes: bool,
     },
 
     /// List installed tools.
@@ -826,21 +836,22 @@ pub enum ConfigCommand {
     /// List all tools with saved configuration.
     List,
 
-    /// Remove a specific configuration key.
+    /// Remove configuration keys.
     #[command(after_help = CONFIG_UNSET_EXAMPLES)]
     Unset {
-        /// Tool reference.
-        tool: String,
+        /// Tool reference (required unless --all is used).
+        tool: Option<String>,
 
-        /// Key to remove.
-        key: String,
-    },
+        /// Keys to remove.
+        keys: Vec<String>,
 
-    /// Remove all configuration for a tool.
-    #[command(after_help = CONFIG_RESET_EXAMPLES)]
-    Reset {
-        /// Tool reference.
-        tool: String,
+        /// Remove all keys for the tool, or all config for all tools if no tool specified.
+        #[arg(long)]
+        all: bool,
+
+        /// Skip confirmation prompt.
+        #[arg(short, long)]
+        yes: bool,
     },
 }
 
