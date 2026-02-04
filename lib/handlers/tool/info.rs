@@ -4,6 +4,7 @@ use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
 use crate::mcp::{ToolCapabilities, ToolType, get_tool_info, get_tool_type};
 use crate::output::ToolInfoOutput;
+use crate::styles::Spinner;
 use colored::Colorize;
 use rmcp::model::Tool;
 use std::path::Path;
@@ -51,16 +52,29 @@ pub async fn tool_info(
     // Get tool metadata
     let tool_type = get_tool_type(&prepared.plugin.template);
 
+    // Show spinner while connecting (human-readable mode only)
+    let show_spinner = !json_output && !concise;
+    let spinner =
+        show_spinner.then(|| Spinner::new(format!("Connecting to {}", prepared.tool_name)));
+
     // Get tool info - handle EntryPointNotFound specially
     // Never pass verbose to connection - verbose only affects output formatting, not debug logging
     let capabilities = match get_tool_info(&prepared.resolved, &prepared.tool_name, false).await {
-        Ok(result) => result,
+        Ok(result) => {
+            if let Some(s) = spinner {
+                s.done();
+            }
+            result
+        }
         Err(ToolError::EntryPointNotFound {
             entry_point,
             full_path: _,
             build_script,
             bundle_path,
         }) => {
+            if let Some(s) = spinner {
+                s.fail(None);
+            }
             println!(
                 "  {} Entry point not found: {}\n",
                 "✗".bright_red(),
@@ -83,6 +97,9 @@ pub async fn tool_info(
             std::process::exit(1);
         }
         Err(ToolError::OAuthNotConfigured) | Err(ToolError::AuthRequired { tool_ref: _ }) => {
+            if let Some(s) = spinner {
+                s.fail(None);
+            }
             println!("  {} OAuth authentication failed\n", "✗".bright_red());
             println!(
                 "  · Could not initialize credential storage. Check that {} is writable.",
@@ -90,7 +107,12 @@ pub async fn tool_info(
             );
             std::process::exit(1);
         }
-        Err(e) => return Err(e),
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.fail(None);
+            }
+            return Err(e);
+        }
     };
 
     // Extract toolset name from the tool reference

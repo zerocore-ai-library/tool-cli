@@ -3,6 +3,7 @@
 use crate::error::{ToolError, ToolResult};
 use crate::mcp::call_tool;
 use crate::mcpb::McpbUserConfigField;
+use crate::styles::Spinner;
 use colored::Colorize;
 use std::collections::BTreeMap;
 
@@ -79,6 +80,11 @@ pub async fn tool_call(
     )
     .await?;
 
+    // Show spinner while connecting (human-readable mode only)
+    let show_spinner = !json_output && !concise;
+    let spinner =
+        show_spinner.then(|| Spinner::new(format!("Connecting to {}", prepared.tool_name)));
+
     // Call the tool - handle EntryPointNotFound specially
     // Never pass verbose to connection - verbose only affects output formatting
     let result = match call_tool(
@@ -90,13 +96,21 @@ pub async fn tool_call(
     )
     .await
     {
-        Ok(result) => result,
+        Ok(result) => {
+            if let Some(s) = spinner {
+                s.done();
+            }
+            result
+        }
         Err(ToolError::EntryPointNotFound {
             entry_point,
             full_path: _,
             build_script,
             bundle_path,
         }) => {
+            if let Some(s) = spinner {
+                s.fail(None);
+            }
             println!(
                 "  {} Entry point not found: {}\n",
                 "✗".bright_red(),
@@ -119,6 +133,9 @@ pub async fn tool_call(
             std::process::exit(1);
         }
         Err(ToolError::OAuthNotConfigured) | Err(ToolError::AuthRequired { tool_ref: _ }) => {
+            if let Some(s) = spinner {
+                s.fail(None);
+            }
             println!("  {} OAuth authentication failed\n", "✗".bright_red());
             println!(
                 "  · Could not initialize credential storage. Check that {} is writable.",
@@ -126,7 +143,12 @@ pub async fn tool_call(
             );
             std::process::exit(1);
         }
-        Err(e) => return Err(e),
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.fail(None);
+            }
+            return Err(e);
+        }
     };
 
     let is_error = result.result.is_error.unwrap_or(false);
