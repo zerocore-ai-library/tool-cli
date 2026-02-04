@@ -14,6 +14,7 @@ use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1145,11 +1146,63 @@ async fn remove_tool(name: &str) -> (String, UninstallResult) {
 }
 
 /// Remove multiple installed tools.
-pub async fn remove_tools(names: &[String]) -> ToolResult<()> {
+pub async fn remove_tools(names: &[String], all: bool, yes: bool) -> ToolResult<()> {
     use futures_util::future::join_all;
 
+    // Get list of tools to remove
+    let tools_to_remove = if all {
+        if !names.is_empty() {
+            return Err(ToolError::Generic(
+                "Cannot specify tool names with --all".into(),
+            ));
+        }
+        let resolver = FilePluginResolver::default();
+        let installed = resolver.list_tools().await?;
+        if installed.is_empty() {
+            println!("\n  No tools installed.\n");
+            return Ok(());
+        }
+        installed.into_iter().map(|t| t.to_string()).collect()
+    } else {
+        if names.is_empty() {
+            return Err(ToolError::Generic(
+                "No tools specified. Use --all to remove all tools.".into(),
+            ));
+        }
+        names.to_vec()
+    };
+
+    // Confirm if --all and not --yes
+    if all && !yes {
+        println!();
+        println!(
+            "  {} This will uninstall {} tool(s)",
+            "!".bright_yellow(),
+            tools_to_remove.len()
+        );
+        println!();
+        print!("  Continue? [y/N] ");
+        io::stdout().flush().ok();
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| ToolError::Generic(format!("Failed to read input: {}", e)))?;
+
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!();
+            println!("  {} Cancelled", "✗".bright_red());
+            println!();
+            return Ok(());
+        }
+        println!();
+    }
+
     // Run all removals concurrently
-    let futures: Vec<_> = names.iter().map(|name| remove_tool(name)).collect();
+    let futures: Vec<_> = tools_to_remove
+        .iter()
+        .map(|name| remove_tool(name))
+        .collect();
     let results = join_all(futures).await;
 
     let mut removed_count = 0usize;
@@ -1183,7 +1236,7 @@ pub async fn remove_tools(names: &[String]) -> ToolResult<()> {
     }
 
     // Print summary if multiple tools were requested
-    if names.len() > 1 {
+    if tools_to_remove.len() > 1 {
         println!();
         if removed_count > 0 {
             println!(

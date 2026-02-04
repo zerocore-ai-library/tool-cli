@@ -426,7 +426,7 @@ async fn run() -> ToolResult<()> {
             handlers::add_tools(&names, platform.as_deref()).await
         }
 
-        Command::Uninstall { names } => handlers::remove_tools(&names).await,
+        Command::Uninstall { names, all, yes } => handlers::remove_tools(&names, all, yes).await,
 
         Command::Search { query } => {
             handlers::search_tools(&query, cli.concise, cli.no_header).await
