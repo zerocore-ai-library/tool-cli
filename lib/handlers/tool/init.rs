@@ -3,8 +3,8 @@
 use crate::constants::MCPB_MANIFEST_FILE;
 use crate::error::{ToolError, ToolResult};
 use crate::mcpb::{
-    InitMode, McpbAuthor, McpbManifest, McpbServerType, McpbTransport, NodePackageManager,
-    PackageManager, PythonPackageManager,
+    InitMode, McpbAuthor, McpbManifest, McpbMcpConfig, McpbServer, McpbServerType, McpbTransport,
+    NodePackageManager, OAuthConfig, PackageManager, PythonPackageManager,
 };
 use crate::scaffold::{
     mcpbignore_template, node_gitignore_template, node_scaffold, python_gitignore_template,
@@ -12,8 +12,121 @@ use crate::scaffold::{
 };
 use crate::validate::validators::fields::is_valid_package_name;
 use colored::Colorize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+//--------------------------------------------------------------------------------------------------
+// Types
+//--------------------------------------------------------------------------------------------------
+
+/// Options for mcp_config passed via CLI arguments.
+#[derive(Debug, Clone, Default)]
+pub struct McpConfigOptions {
+    /// Command to execute (implies reference mode for stdio).
+    pub command: Option<String>,
+    /// Command arguments.
+    pub args: Vec<String>,
+    /// Environment variables as KEY=VALUE pairs.
+    pub env: Vec<String>,
+    /// Server URL (implies HTTP reference mode).
+    pub url: Option<String>,
+    /// HTTP headers as KEY=VALUE pairs.
+    pub headers: Vec<String>,
+    /// OAuth client ID.
+    pub oauth_client_id: Option<String>,
+    /// OAuth authorization URL.
+    pub oauth_authorization_url: Option<String>,
+    /// OAuth token URL.
+    pub oauth_token_url: Option<String>,
+    /// OAuth scopes (comma-separated).
+    pub oauth_scopes: Option<String>,
+}
+
+impl McpConfigOptions {
+    /// Check if any mcp_config options are specified.
+    pub fn has_any(&self) -> bool {
+        self.command.is_some()
+            || !self.args.is_empty()
+            || !self.env.is_empty()
+            || self.url.is_some()
+            || !self.headers.is_empty()
+            || self.oauth_client_id.is_some()
+            || self.oauth_authorization_url.is_some()
+            || self.oauth_token_url.is_some()
+            || self.oauth_scopes.is_some()
+    }
+
+    /// Check if this implies reference mode.
+    pub fn implies_reference(&self) -> bool {
+        self.command.is_some() || self.url.is_some()
+    }
+
+    /// Check if this implies HTTP transport.
+    pub fn implies_http(&self) -> bool {
+        self.url.is_some()
+            || !self.headers.is_empty()
+            || self.oauth_client_id.is_some()
+            || self.oauth_authorization_url.is_some()
+            || self.oauth_token_url.is_some()
+            || self.oauth_scopes.is_some()
+    }
+
+    /// Parse env/headers from KEY=VALUE format into a BTreeMap.
+    fn parse_key_values(pairs: &[String]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .filter_map(|s| {
+                let mut parts = s.splitn(2, '=');
+                let key = parts.next()?.trim().to_string();
+                let value = parts.next().unwrap_or("").trim().to_string();
+                if key.is_empty() {
+                    None
+                } else {
+                    Some((key, value))
+                }
+            })
+            .collect()
+    }
+
+    /// Build McpbMcpConfig from these options.
+    pub fn to_mcp_config(&self) -> Option<McpbMcpConfig> {
+        if !self.has_any() {
+            return None;
+        }
+
+        let env = Self::parse_key_values(&self.env);
+        let headers = Self::parse_key_values(&self.headers);
+
+        let oauth_config = if self.oauth_client_id.is_some()
+            || self.oauth_authorization_url.is_some()
+            || self.oauth_token_url.is_some()
+            || self.oauth_scopes.is_some()
+        {
+            Some(OAuthConfig {
+                client_id: self.oauth_client_id.clone(),
+                authorization_url: self.oauth_authorization_url.clone(),
+                token_url: self.oauth_token_url.clone(),
+                scopes: self
+                    .oauth_scopes
+                    .as_ref()
+                    .map(|s| s.split(',').map(|x| x.trim().to_string()).collect()),
+            })
+        } else {
+            None
+        };
+
+        Some(McpbMcpConfig {
+            command: self.command.clone(),
+            args: self.args.clone(),
+            env,
+            url: self.url.clone(),
+            headers,
+            oauth_config,
+            platform_overrides: BTreeMap::new(),
+        })
+    }
+}
 
 //--------------------------------------------------------------------------------------------------
 // Functions
@@ -36,7 +149,50 @@ pub async fn init_mcpb(
     transport: Option<String>,
     force: bool,
     verify: bool,
+    // mcp_config options
+    command: Option<String>,
+    args: Option<String>,
+    env: Vec<String>,
+    url: Option<String>,
+    headers: Vec<String>,
+    oauth_client_id: Option<String>,
+    oauth_authorization_url: Option<String>,
+    oauth_token_url: Option<String>,
+    oauth_scopes: Option<String>,
 ) -> ToolResult<()> {
+    // Parse args string into Vec by splitting on whitespace
+    let parsed_args: Vec<String> = args
+        .map(|s| s.split_whitespace().map(|x| x.to_string()).collect())
+        .unwrap_or_default();
+
+    // Build mcp_config options struct
+    let mcp_opts = McpConfigOptions {
+        command,
+        args: parsed_args,
+        env,
+        url,
+        headers,
+        oauth_client_id,
+        oauth_authorization_url,
+        oauth_token_url,
+        oauth_scopes,
+    };
+
+    // If --reference flag is set or mcp_config options imply reference mode, delegate to reference init
+    if reference || mcp_opts.implies_reference() {
+        return init_reference(
+            path,
+            name,
+            description,
+            author,
+            license,
+            http,
+            yes,
+            force,
+            mcp_opts,
+        )
+        .await;
+    }
     use crate::prompt::{McpbPrefill, get_git_author_name, prompt_init_mcpb};
 
     // Determine target directory
@@ -150,6 +306,31 @@ pub async fn init_mcpb(
             || server_type
                 .as_ref()
                 .is_some_and(|t| t.to_lowercase() == "rust");
+
+        // If reference mode with command/args/url from prompt, delegate to init_reference
+        if result.mode.is_reference()
+            && (result.command.is_some() || result.url.is_some() || !result.args.is_empty())
+        {
+            let mcp_opts = McpConfigOptions {
+                command: result.command,
+                args: result.args,
+                url: result.url,
+                ..Default::default()
+            };
+            return init_reference(
+                path,
+                Some(result.name),
+                result.description,
+                result.author,
+                result.license,
+                result.mode.is_http(),
+                true, // yes - we already have all the values from prompts
+                force,
+                mcp_opts,
+            )
+            .await;
+        }
+
         (
             result.name,
             result.mode,
@@ -974,4 +1155,278 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
             pack_hint.dimmed()
         );
     }
+}
+
+/// Initialize a reference manifest with explicit mcp_config options.
+///
+/// This creates a manifest that points to an external command or URL,
+/// without scaffolding any code files.
+#[allow(clippy::too_many_arguments)]
+async fn init_reference(
+    path: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+    author: Option<String>,
+    license: Option<String>,
+    http: bool,
+    yes: bool,
+    force: bool,
+    mut mcp_opts: McpConfigOptions,
+) -> ToolResult<()> {
+    use std::io::IsTerminal;
+
+    // Determine target directory
+    let target_dir = match &path {
+        Some(p) => {
+            let target = PathBuf::from(p);
+            let target = if target.is_absolute() {
+                target
+            } else {
+                std::env::current_dir()?.join(&target)
+            };
+
+            if !target.exists() {
+                std::fs::create_dir_all(&target)?;
+            }
+            target
+        }
+        None => std::env::current_dir()?,
+    };
+
+    // Check if manifest.json already exists
+    let manifest_path = target_dir.join(MCPB_MANIFEST_FILE);
+    if manifest_path.exists() && !force {
+        return Err(ToolError::Generic(
+            "manifest.json already exists. Use --force to overwrite.".into(),
+        ));
+    }
+
+    // Resolve name
+    let resolved_name = name.or_else(|| {
+        path.as_ref().and_then(|p| {
+            Path::new(p)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+        })
+    });
+
+    let default_name = target_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string());
+
+    // Determine if we're in HTTP mode
+    let is_http = http || mcp_opts.implies_http();
+
+    // Interactive mode: prompt for missing required fields
+    let is_interactive = !yes && std::io::stdin().is_terminal();
+
+    // Get final name and prompt for command/url if interactive
+    let pkg_name = if is_interactive {
+        crate::prompt::init_theme();
+
+        // Prompt for name if not provided
+        let name_result: String = if let Some(ref n) = resolved_name {
+            n.clone()
+        } else {
+            cliclack::input("Package name")
+                .placeholder("my-tool")
+                .default_input(default_name.as_deref().unwrap_or("my-tool"))
+                .interact()?
+        };
+
+        // Prompt for command or url depending on transport
+        if is_http {
+            // HTTP mode: prompt for url if not provided
+            if mcp_opts.url.is_none() {
+                let url: String = cliclack::input("Server URL")
+                    .placeholder("https://api.example.com/mcp/")
+                    .interact()?;
+                mcp_opts.url = Some(url);
+            }
+        } else {
+            // Stdio mode: prompt for command and args if not provided
+            if mcp_opts.command.is_none() {
+                let cmd: String = cliclack::input("Command").placeholder("npx").interact()?;
+                mcp_opts.command = Some(cmd);
+            }
+
+            if mcp_opts.args.is_empty() {
+                let args_str: String = cliclack::input("Arguments (space-separated)")
+                    .placeholder("@anthropic/mcp-server --verbose")
+                    .required(false)
+                    .interact()?;
+
+                if !args_str.trim().is_empty() {
+                    mcp_opts.args = args_str.split_whitespace().map(|s| s.to_string()).collect();
+                }
+            }
+        }
+
+        name_result
+    } else {
+        // Non-interactive: use provided values or defaults
+        resolved_name.or(default_name.clone()).ok_or_else(|| {
+            ToolError::Generic("Could not determine package name. Use --name.".into())
+        })?
+    };
+
+    // Validate name format
+    if !is_valid_package_name(&pkg_name) {
+        return Err(ToolError::Generic(format!(
+            "Invalid package name \"{}\"\nName must be 3-64 characters, start with a lowercase letter, and contain only lowercase letters, numbers, and hyphens.",
+            pkg_name
+        )));
+    }
+
+    // Determine transport
+    let transport = if is_http {
+        McpbTransport::Http
+    } else {
+        McpbTransport::Stdio
+    };
+
+    // Build mcp_config from options
+    let mcp_config = mcp_opts.to_mcp_config();
+
+    // Build manifest
+    let mut manifest = McpbManifest {
+        manifest_version: "0.3".to_string(),
+        name: Some(pkg_name.clone()),
+        version: Some("0.1.0".to_string()),
+        description: description.or_else(|| Some("An MCP server".to_string())),
+        author: None,
+        server: McpbServer {
+            server_type: None, // Reference mode has no server type
+            transport,
+            entry_point: None, // Reference mode has no entry point
+            mcp_config,
+        },
+        display_name: None,
+        long_description: None,
+        license: None,
+        icon: None,
+        icons: None,
+        homepage: None,
+        documentation: None,
+        support: None,
+        repository: None,
+        keywords: None,
+        tools: None,
+        prompts: None,
+        tools_generated: None,
+        prompts_generated: None,
+        user_config: None,
+        system_config: None,
+        compatibility: None,
+        privacy_policies: None,
+        localization: None,
+        meta: None,
+        bundle_path: None,
+    };
+
+    // Set license if provided
+    if let Some(lic) = license {
+        manifest.license = Some(lic);
+    }
+
+    // Set author
+    if let Some(author_name) = author {
+        manifest.author = Some(McpbAuthor::new(author_name));
+    } else if let Some(git_author) = get_git_author() {
+        manifest.author = Some(git_author);
+    }
+
+    // Write manifest.json
+    let manifest_json = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(&manifest_path, &manifest_json)?;
+
+    // Write .mcpbignore
+    let mcpbignore_path = target_dir.join(".mcpbignore");
+    std::fs::write(&mcpbignore_path, mcpbignore_template())?;
+
+    // Write README.md
+    let readme_path = target_dir.join("README.md");
+    let readme_content = format!("# {}\n", pkg_name);
+    std::fs::write(&readme_path, readme_content)?;
+
+    // Print success message
+    print_reference_success(&pkg_name, transport, &mcp_opts, path.as_deref());
+
+    Ok(())
+}
+
+/// Print success output for reference mode initialization.
+fn print_reference_success(
+    name: &str,
+    transport: McpbTransport,
+    mcp_opts: &McpConfigOptions,
+    dir_path: Option<&str>,
+) {
+    println!("  {} Created {}\n", "✓".bright_green(), name.bold());
+
+    let transport_display = match transport {
+        McpbTransport::Http => "http",
+        McpbTransport::Stdio => "stdio",
+    };
+
+    println!("  · {}       reference", "Type".dimmed());
+    println!("  · {}  {}", "Transport".dimmed(), transport_display);
+    println!("  · {}     {}", "Format".dimmed(), "mcpbx".bright_yellow());
+
+    // Show configured values
+    if let Some(ref cmd) = mcp_opts.command {
+        println!("  · {}    {}", "Command".dimmed(), cmd);
+    }
+    if !mcp_opts.args.is_empty() {
+        println!("  · {}       {}", "Args".dimmed(), mcp_opts.args.join(" "));
+    }
+    if let Some(ref url) = mcp_opts.url {
+        println!("  · {}        {}", "URL".dimmed(), url);
+    }
+    if mcp_opts.oauth_client_id.is_some() {
+        println!("  · {}      configured", "OAuth".dimmed());
+    }
+
+    println!("  · {}    0.1.0\n", "Version".dimmed());
+
+    // Tree structure
+    let prefix = match dir_path {
+        Some(p) => format!("{}/", p),
+        None => "./".to_string(),
+    };
+
+    println!("  {}", prefix.bold());
+    println!("  ├── manifest.json");
+    println!("  ├── README.md");
+    println!("  └── .mcpbignore");
+
+    // Next steps
+    println!("\n  {}:", "Next Steps".bold());
+
+    let mut step = 1;
+
+    if let Some(p) = dir_path {
+        println!("  {}. cd {}", step, p);
+        step += 1;
+    }
+
+    println!(
+        "  {}. tool info               {}",
+        step,
+        "# verify connection".dimmed()
+    );
+    println!(
+        "  {}. tool run                {}",
+        step + 1,
+        "# run server".dimmed()
+    );
+
+    let pack_hint = format!("# create {} bundle", ".mcpbx".bright_yellow());
+    println!(
+        "  {}. tool pack               {}",
+        step + 2,
+        pack_hint.dimmed()
+    );
 }

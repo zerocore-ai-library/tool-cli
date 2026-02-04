@@ -37,6 +37,12 @@ pub struct McpbPromptResult {
     pub description: Option<String>,
     pub license: Option<String>,
     pub author: Option<String>,
+    /// Command for reference stdio mode.
+    pub command: Option<String>,
+    /// Arguments for reference stdio mode.
+    pub args: Vec<String>,
+    /// URL for reference HTTP mode.
+    pub url: Option<String>,
 }
 
 /// Pre-filled values for MCPB prompt (skip prompts for Some values).
@@ -214,6 +220,11 @@ pub fn prompt_init_mcpb(
         )?
     };
 
+    // Track reference mode mcp_config values
+    let mut ref_command: Option<String> = None;
+    let mut ref_args: Vec<String> = Vec::new();
+    let mut ref_url: Option<String> = None;
+
     // Mode selection - prompt only for unprefilled components
     let (mode, is_rust) = if prefill.reference {
         // Reference mode: only need transport
@@ -236,6 +247,51 @@ pub fn prompt_init_mcpb(
                 McpbTransport::Stdio
             }
         };
+
+        // Prompt for mcp_config values based on transport
+        match transport {
+            McpbTransport::Http => {
+                let url: String = map_cancelled(
+                    input("Server URL")
+                        .placeholder("https://api.example.com/mcp/")
+                        .validate(|input: &String| {
+                            if input.is_empty() {
+                                Err("URL is required for HTTP reference mode")
+                            } else {
+                                Ok(())
+                            }
+                        })
+                        .interact(),
+                )?;
+                ref_url = Some(url);
+            }
+            McpbTransport::Stdio => {
+                let cmd: String = map_cancelled(
+                    input("Command")
+                        .placeholder("npx")
+                        .validate(|input: &String| {
+                            if input.is_empty() {
+                                Err("Command is required for stdio reference mode")
+                            } else {
+                                Ok(())
+                            }
+                        })
+                        .interact(),
+                )?;
+                ref_command = Some(cmd);
+
+                let args_str: String = map_cancelled(
+                    input("Arguments (space-separated)")
+                        .placeholder("@anthropic/mcp-server --verbose")
+                        .required(false)
+                        .interact(),
+                )?;
+                if !args_str.trim().is_empty() {
+                    ref_args = args_str.split_whitespace().map(|s| s.to_string()).collect();
+                }
+            }
+        }
+
         (InitMode::Reference { transport }, false)
     } else if let Some(server_type) = prefill.server_type {
         // Bundle mode with prefilled server type
@@ -263,7 +319,7 @@ pub fn prompt_init_mcpb(
         )?;
 
         if is_reference == "reference" {
-            let transport: &str = map_cancelled(
+            let transport_str: &str = map_cancelled(
                 select("Transport")
                     .item("http", "HTTP", "Connect to remote server via HTTP [mcpbx]")
                     .item(
@@ -273,11 +329,56 @@ pub fn prompt_init_mcpb(
                     )
                     .interact(),
             )?;
-            let transport = if transport == "http" {
+            let transport = if transport_str == "http" {
                 McpbTransport::Http
             } else {
                 McpbTransport::Stdio
             };
+
+            // Prompt for mcp_config values based on transport
+            match transport {
+                McpbTransport::Http => {
+                    let url: String = map_cancelled(
+                        input("Server URL")
+                            .placeholder("https://api.example.com/mcp/")
+                            .validate(|input: &String| {
+                                if input.is_empty() {
+                                    Err("URL is required for HTTP reference mode")
+                                } else {
+                                    Ok(())
+                                }
+                            })
+                            .interact(),
+                    )?;
+                    ref_url = Some(url);
+                }
+                McpbTransport::Stdio => {
+                    let cmd: String = map_cancelled(
+                        input("Command")
+                            .placeholder("npx")
+                            .validate(|input: &String| {
+                                if input.is_empty() {
+                                    Err("Command is required for stdio reference mode")
+                                } else {
+                                    Ok(())
+                                }
+                            })
+                            .interact(),
+                    )?;
+                    ref_command = Some(cmd);
+
+                    let args_str: String = map_cancelled(
+                        input("Arguments (space-separated)")
+                            .placeholder("@anthropic/mcp-server --verbose")
+                            .required(false)
+                            .interact(),
+                    )?;
+                    if !args_str.trim().is_empty() {
+                        ref_args = args_str.split_whitespace().map(|s| s.to_string()).collect();
+                    }
+                }
+            }
+
             (InitMode::Reference { transport }, false)
         } else {
             let server_type_str: &str = map_cancelled(
@@ -348,6 +449,9 @@ pub fn prompt_init_mcpb(
         description,
         license,
         author,
+        command: ref_command,
+        args: ref_args,
+        url: ref_url,
     })
 }
 
