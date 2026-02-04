@@ -5,6 +5,7 @@ use colored::Colorize;
 use crate::error::{ToolError, ToolResult};
 use crate::mcp::connect_with_oauth;
 use crate::proxy::{ExposeTransport, HttpExposeConfig, run_proxy};
+use crate::styles::Spinner;
 
 use super::common::{PrepareToolOptions, prepare_tool};
 
@@ -45,16 +46,21 @@ pub async fn tool_run(
 
     let backend_transport = prepared.transport;
 
-    if verbose {
-        eprintln!(
-            "  {} Connecting to backend MCP server...",
-            "→".bright_blue()
-        );
-    }
+    // Show spinner while connecting
+    let spinner = Spinner::new(format!("Connecting to {}", prepared.tool_name));
 
     // Connect to backend
     // Never pass verbose to connection - verbose only affects output formatting
-    let backend = connect_with_oauth(&prepared.resolved, &prepared.tool_name, false).await?;
+    let backend = match connect_with_oauth(&prepared.resolved, &prepared.tool_name, false).await {
+        Ok(conn) => {
+            spinner.done();
+            conn
+        }
+        Err(e) => {
+            spinner.fail(None);
+            return Err(e);
+        }
+    };
 
     // Get server info for display
     let server_info = backend
