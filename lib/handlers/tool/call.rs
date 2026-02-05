@@ -8,7 +8,7 @@ use colored::Colorize;
 use std::collections::BTreeMap;
 
 use super::common::{PrepareToolOptions, prepare_tool};
-use super::config_cmd::{load_tool_config, parse_tool_ref_for_config};
+use super::config_cmd::{load_tool_config, parse_tool_ref_for_config, tool_config_exists};
 
 //--------------------------------------------------------------------------------------------------
 // Functions
@@ -295,20 +295,24 @@ pub async fn tool_call(
 /// 1. Saved config from `~/.tool/config/...` (lowest priority)
 /// 2. Config file (`--config-file`)
 /// 3. CLI flags (`-k`) (highest priority)
+///
+/// Returns the merged config and whether a saved config file was found.
 pub(super) fn parse_user_config(
     config_flags: &[String],
     config_file: Option<&str>,
     tool: &str,
     resolved: &crate::resolver::ResolvedPlugin<crate::mcpb::McpbManifest>,
     is_installed: bool,
-) -> ToolResult<BTreeMap<String, String>> {
+) -> ToolResult<(BTreeMap<String, String>, bool)> {
     let mut config = BTreeMap::new();
+    let mut has_saved_config = false;
 
     // 1. Load saved config (lowest priority)
-    if let Ok(plugin_ref) = parse_tool_ref_for_config(tool, resolved, is_installed)
-        && let Ok(saved) = load_tool_config(&plugin_ref)
-    {
-        config.extend(saved);
+    if let Ok(plugin_ref) = parse_tool_ref_for_config(tool, resolved, is_installed) {
+        has_saved_config = tool_config_exists(&plugin_ref);
+        if let Ok(saved) = load_tool_config(&plugin_ref) {
+            config.extend(saved);
+        }
     }
 
     // 2. Load from config file
@@ -332,7 +336,7 @@ pub(super) fn parse_user_config(
         }
     }
 
-    Ok(config)
+    Ok((config, has_saved_config))
 }
 
 /// Apply default values from user_config schema.
@@ -369,8 +373,9 @@ pub(super) fn apply_user_config_defaults(
 
 /// Prompt for user_config values interactively.
 ///
-/// Prompts for all config fields not already provided. Fields with defaults
-/// are shown with the default pre-filled so users can accept or override.
+/// On first use (no saved config), prompts for all fields so the user can
+/// configure the tool. On subsequent runs (saved config exists), only prompts
+/// for required fields without defaults that are still missing.
 ///
 /// If `skip_interactive` is true, prompting is skipped and an error is returned
 /// if any required fields are missing.
@@ -378,6 +383,7 @@ pub(super) fn prompt_missing_user_config(
     schema: Option<&BTreeMap<String, McpbUserConfigField>>,
     user_config: &mut BTreeMap<String, String>,
     skip_interactive: bool,
+    has_saved_config: bool,
 ) -> ToolResult<()> {
     use std::io::IsTerminal;
 
@@ -385,10 +391,26 @@ pub(super) fn prompt_missing_user_config(
         return Ok(());
     };
 
-    // Find fields that need prompting (all fields not already provided)
+    // Determine which fields need prompting based on whether user has already configured.
+    // - First time (no saved config): prompt all missing fields
+    // - Already configured (saved config exists): only prompt required fields without defaults
     let to_prompt: Vec<(&String, &McpbUserConfigField)> = schema
         .iter()
-        .filter(|(key, _)| !user_config.contains_key(*key))
+        .filter(|(key, field)| {
+            let is_missing = !user_config.contains_key(*key);
+            if !is_missing {
+                return false;
+            }
+            if has_saved_config {
+                // Already configured: only prompt for required fields without defaults
+                let is_required = field.required.unwrap_or(false);
+                let has_default = field.default.is_some();
+                is_required && !has_default
+            } else {
+                // First time: prompt for all missing fields
+                true
+            }
+        })
         .collect();
 
     if to_prompt.is_empty() {
@@ -424,7 +446,7 @@ pub(super) fn prompt_missing_user_config(
         return Ok(());
     }
 
-    // Interactive: prompt for each field
+    // Interactive: prompt for fields
     crate::prompt::init_theme();
     cliclack::intro("Tool configuration")?;
 

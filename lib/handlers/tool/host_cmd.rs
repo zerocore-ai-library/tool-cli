@@ -61,11 +61,25 @@ async fn host_add(
     let host = McpHost::parse(host_name)?;
 
     // Get tools to add
+    let user_specified = !tools.is_empty();
     let tools_to_add = if tools.is_empty() {
         get_installed_tools().await?
     } else {
         tools
     };
+
+    // Validate user-specified tools are installed
+    if user_specified {
+        let resolver = FilePluginResolver::default();
+        for tool_ref in &tools_to_add {
+            if let Ok(None) | Err(_) = resolver.resolve_tool(tool_ref).await {
+                return Err(ToolError::Generic(format!(
+                    "Tool '{}' is not installed. Run `tool install {}` first.",
+                    tool_ref, tool_ref
+                )));
+            }
+        }
+    }
 
     if tools_to_add.is_empty() {
         if concise {
