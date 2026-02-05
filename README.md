@@ -279,13 +279,25 @@ If your tool includes platform-specific binaries (native executables, compiled c
 > tool config set library/terminal
 > ```
 >
-> Some tools need configuration like API keys. This walks you through setting them up interactively.
+> Some tools need configuration like API keys. This walks you through setting them up interactively. You can also pass values directly with `tool config set library/terminal KEY=VALUE`.
 >
 > ```sh
 > tool config get library/terminal
 > ```
 >
 > Check what config values are set.
+>
+> ```sh
+> tool config list
+> ```
+>
+> See all tools that have saved configuration.
+>
+> ```sh
+> tool config unset library/terminal API_KEY
+> ```
+>
+> Remove specific config keys, or use `--all` to clear everything.
 
 ##
 
@@ -425,6 +437,9 @@ Once you've installed some tools, you probably want to use them in your favorite
 | `config`    | Manage tool configuration                                   |
 | `host`      | Register tools with MCP hosts                               |
 | `login`     | Log in to the registry                                      |
+| `logout`    | Log out from the registry                                   |
+| `whoami`    | Show current authentication status                          |
+| `self`      | Manage tool-cli itself (update, uninstall)                  |
 
 Check out the [CLI docs](https://tool.store/docs/cli) for the full details.
 

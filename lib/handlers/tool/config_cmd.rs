@@ -5,6 +5,9 @@ use crate::constants::DEFAULT_CONFIG_PATH;
 use crate::error::{ToolError, ToolResult};
 use crate::mcp::connect_with_oauth;
 use crate::mcpb::{McpbTransport, McpbUserConfigField, McpbUserConfigType};
+use crate::output::{
+    ConfigListEntry, ConfigListOutput, ConfigOAuthOutput, ConfigPropertyOutput, ConfigSchemaOutput,
+};
 use crate::prompt::init_theme;
 use crate::references::PluginRef;
 use crate::security::get_credential_crypto;
@@ -52,7 +55,7 @@ pub async fn config_tool(cmd: ConfigCommand, concise: bool, no_header: bool) -> 
             config,
         } => config_set(tool, values, yes, config, concise).await,
         ConfigCommand::Get { tool, key } => config_get(tool, key, concise, no_header).await,
-        ConfigCommand::List => config_list(concise, no_header).await,
+        ConfigCommand::List { tool, json } => config_list(tool, json, concise, no_header).await,
         ConfigCommand::Unset {
             tool,
             keys,
@@ -382,11 +385,30 @@ async fn config_get(
 }
 
 /// Handle `config list` subcommand.
-async fn config_list(concise: bool, no_header: bool) -> ToolResult<()> {
+async fn config_list(
+    tool: Option<String>,
+    json_output: bool,
+    concise: bool,
+    no_header: bool,
+) -> ToolResult<()> {
+    if let Some(tool) = tool {
+        return config_list_tool(&tool, json_output, concise, no_header).await;
+    }
+
     let tools = list_configured_tools()?;
 
     if tools.is_empty() {
-        if concise {
+        if concise || json_output {
+            if json_output {
+                let output = ConfigListOutput {
+                    tools: BTreeMap::new(),
+                };
+                if concise {
+                    println!("{}", serde_json::to_string(&output)?);
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                }
+            }
             return Ok(());
         }
         println!("\n  No tools have saved configuration.\n");
@@ -397,7 +419,24 @@ async fn config_list(concise: bool, no_header: bool) -> ToolResult<()> {
         return Ok(());
     }
 
-    if concise {
+    if json_output {
+        let mut entries = BTreeMap::new();
+        for (name, path, count) in &tools {
+            entries.insert(
+                name.clone(),
+                ConfigListEntry {
+                    keys: *count,
+                    path: path.display().to_string(),
+                },
+            );
+        }
+        let output = ConfigListOutput { tools: entries };
+        if concise {
+            println!("{}", serde_json::to_string(&output)?);
+        } else {
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+    } else if concise {
         if !no_header {
             println!("#tool\tkeys\tpath");
         }
@@ -420,6 +459,222 @@ async fn config_list(concise: bool, no_header: bool) -> ToolResult<()> {
     }
 
     Ok(())
+}
+
+/// Handle `config list <tool>` - show config schema for a specific tool.
+async fn config_list_tool(
+    tool: &str,
+    json_output: bool,
+    concise: bool,
+    no_header: bool,
+) -> ToolResult<()> {
+    let resolved = resolve_tool(tool, false, false).await?;
+    let plugin_ref = &resolved.plugin_ref;
+    let schema = resolved
+        .plugin
+        .template
+        .user_config
+        .clone()
+        .unwrap_or_default();
+    let is_http = resolved.plugin.template.server.transport == McpbTransport::Http;
+
+    // Check OAuth status for HTTP tools
+    let oauth_status = if is_http {
+        Some(check_oauth_status(&plugin_ref.to_string()).await)
+    } else {
+        None
+    };
+
+    let has_content = !schema.is_empty() || oauth_status.is_some();
+
+    if !has_content {
+        if json_output {
+            let output = ConfigSchemaOutput {
+                tool: plugin_ref.to_string(),
+                user_config: BTreeMap::new(),
+                oauth: None,
+            };
+            if concise {
+                println!("{}", serde_json::to_string(&output)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            }
+        } else if !concise {
+            println!("\n  Config: {}\n", plugin_ref.to_string().bold());
+            println!("    {}", "No configurable options.".dimmed());
+            println!();
+        }
+        return Ok(());
+    }
+
+    if json_output {
+        let mut user_config = BTreeMap::new();
+        for (key, field) in &schema {
+            user_config.insert(
+                key.clone(),
+                ConfigPropertyOutput {
+                    field_type: config_type_str(&field.field_type),
+                    title: field.title.clone(),
+                    description: field.description.clone(),
+                    required: field.required,
+                    default: field.default.clone(),
+                    sensitive: field.sensitive,
+                    min: field.min,
+                    max: field.max,
+                    enum_values: field.enum_values.clone(),
+                },
+            );
+        }
+        let oauth = oauth_status.map(|(authenticated, expired)| ConfigOAuthOutput {
+            authenticated,
+            expired: if authenticated { Some(expired) } else { None },
+        });
+        let output = ConfigSchemaOutput {
+            tool: plugin_ref.to_string(),
+            user_config,
+            oauth,
+        };
+        if concise {
+            println!("{}", serde_json::to_string(&output)?);
+        } else {
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+    } else if concise {
+        if !no_header {
+            println!("#key\ttype\trequired\tsensitive\tdefault\ttitle");
+        }
+        for (key, field) in &schema {
+            let required = field.required.unwrap_or(false);
+            let sensitive = field.sensitive.unwrap_or(false);
+            let default = field
+                .default
+                .as_ref()
+                .map(|d| match d {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .unwrap_or_default();
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{}",
+                key,
+                config_type_str(&field.field_type),
+                required,
+                sensitive,
+                default,
+                field.title,
+            );
+        }
+        if let Some((authenticated, expired)) = oauth_status {
+            let status = if !authenticated {
+                "not authenticated"
+            } else if expired {
+                "expired"
+            } else {
+                "authenticated"
+            };
+            println!("oauth\t\t\t\t\t{}", status);
+        }
+    } else {
+        println!("\n  Config: {}\n", plugin_ref.to_string().bold());
+
+        let schema_vec: Vec<_> = schema.iter().collect();
+        for (idx, (key, field)) in schema_vec.iter().enumerate() {
+            let req_marker = if field.required.unwrap_or(false) {
+                "*"
+            } else {
+                ""
+            };
+            let name = format!("{}{}", key, req_marker);
+
+            // First line: name + description
+            let desc = field
+                .description
+                .as_deref()
+                .and_then(|d| crate::format::format_description(d, false, ""))
+                .map(|d| format!("  {}", d.dimmed()))
+                .unwrap_or_default();
+            println!("  {}{}", name.bright_cyan(), desc);
+
+            // Properties below
+            println!("  · {:<14} {}", "Title".dimmed(), field.title);
+            println!(
+                "  · {:<14} {}",
+                "Type".dimmed(),
+                config_type_str(&field.field_type)
+            );
+
+            if field.sensitive.unwrap_or(false) {
+                println!("  · {:<14} {}", "Sensitive".dimmed(), "yes".dimmed());
+            }
+
+            if let Some(default) = &field.default {
+                let val = match default {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                println!("  · {:<14} {}", "Default".dimmed(), val.dimmed());
+            }
+
+            if let Some(min) = field.min {
+                println!("  · {:<14} {}", "Min".dimmed(), min.to_string().dimmed());
+            }
+
+            if let Some(max) = field.max {
+                println!("  · {:<14} {}", "Max".dimmed(), max.to_string().dimmed());
+            }
+
+            if let Some(enum_values) = &field.enum_values {
+                println!(
+                    "  · {:<14} {}",
+                    "Enum".dimmed(),
+                    enum_values.join(", ").dimmed()
+                );
+            }
+
+            if idx < schema_vec.len() - 1 {
+                println!();
+            }
+        }
+
+        if let Some((authenticated, expired)) = oauth_status {
+            if !schema.is_empty() {
+                println!();
+            }
+            let status = if !authenticated {
+                "not authenticated".dimmed().to_string()
+            } else if expired {
+                "expired".bright_yellow().to_string()
+            } else {
+                "authenticated".bright_green().to_string()
+            };
+            println!("  · {:<14} {}", "OAuth".dimmed(), status);
+        }
+
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Check OAuth credential status for a tool.
+///
+/// Returns `(authenticated, expired)` tuple.
+async fn check_oauth_status(tool_ref: &str) -> (bool, bool) {
+    match crate::oauth::load_credentials(tool_ref).await {
+        Ok(Some(creds)) => (true, creds.is_expired()),
+        _ => (false, false),
+    }
+}
+
+/// Convert McpbUserConfigType to a display string.
+fn config_type_str(t: &McpbUserConfigType) -> String {
+    match t {
+        McpbUserConfigType::String => "string".to_string(),
+        McpbUserConfigType::Number => "number".to_string(),
+        McpbUserConfigType::Boolean => "boolean".to_string(),
+        McpbUserConfigType::Directory => "directory".to_string(),
+        McpbUserConfigType::File => "file".to_string(),
+    }
 }
 
 /// Handle `config unset` subcommand.

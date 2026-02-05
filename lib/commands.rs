@@ -168,6 +168,14 @@ const SELF_UNINSTALL_EXAMPLES: &str = examples![
     "tool self uninstall -y            " # "Uninstall without confirmation",
 ];
 
+const CONFIG_LIST_EXAMPLES: &str = examples![
+    "tool config list                  " # "List all tools with saved config",
+    "tool config list appcypher/bash   " # "Show config schema for a tool",
+    "tool config list ./my-tool        " # "Show config schema for local tool",
+    "tool config list bash -c          " # "Concise output",
+    "tool config list bash --json      " # "JSON output",
+];
+
 const CONFIG_SET_EXAMPLES: &str = examples![
     "tool config set bash API_KEY=xxx  " # "Set single value",
     "tool config set weather k=a u=m   " # "Set multiple values",
@@ -833,9 +841,16 @@ pub enum ConfigCommand {
         key: Option<String>,
     },
 
-    /// List all tools with saved configuration.
-    #[command(alias = "l")]
-    List,
+    /// List configured tools, or show config schema for a specific tool.
+    #[command(alias = "l", after_help = CONFIG_LIST_EXAMPLES)]
+    List {
+        /// Tool reference or path (shows config schema for that tool).
+        tool: Option<String>,
+
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Remove configuration keys.
     #[command(alias = "u", after_help = CONFIG_UNSET_EXAMPLES)]
