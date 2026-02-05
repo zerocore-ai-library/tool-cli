@@ -7,6 +7,7 @@ use colored::Colorize;
 
 use crate::error::{ToolError, ToolResult};
 use crate::mcpb::{McpbManifest, McpbTransport, ResolvedMcpbManifest};
+use crate::references::PluginRef;
 use crate::resolver::{ResolvedPlugin, load_tool_from_path};
 use crate::system_config::allocate_system_config;
 
@@ -35,6 +36,16 @@ pub struct PreparedTool {
     pub plugin: ResolvedPlugin<McpbManifest>,
 }
 
+/// A tool that has been resolved with its config key derived.
+pub struct ResolvedTool {
+    /// The loaded plugin with manifest.
+    pub plugin: ResolvedPlugin<McpbManifest>,
+    /// The tool directory path.
+    pub tool_path: PathBuf,
+    /// The plugin reference for config storage.
+    pub plugin_ref: PluginRef,
+}
+
 /// Options for preparing a tool.
 pub struct PrepareToolOptions<'a> {
     /// Configuration values from -k flags.
@@ -51,39 +62,50 @@ pub struct PrepareToolOptions<'a> {
 // Functions
 //--------------------------------------------------------------------------------------------------
 
+/// Resolve a tool reference to a loaded manifest with config key.
+///
+/// This consolidates the common resolution logic:
+/// 1. Find tool (installed or local path)
+/// 2. Load manifest
+/// 3. Optionally auto-install local tools
+/// 4. Derive plugin reference for config storage
+pub async fn resolve_tool(tool: &str, auto_install: bool, yes: bool) -> ToolResult<ResolvedTool> {
+    let resolved_path = resolve_tool_path(tool).await?;
+    let plugin = load_tool_from_path(&resolved_path.path)?;
+
+    if auto_install && !resolved_path.is_installed {
+        auto_install_local_tool(&resolved_path.path, &plugin.template, yes)?;
+    }
+
+    let plugin_ref = parse_tool_ref_for_config(tool, &plugin, resolved_path.is_installed)?;
+
+    Ok(ResolvedTool {
+        plugin,
+        tool_path: resolved_path.path,
+        plugin_ref,
+    })
+}
+
 /// Prepare a tool for connection.
 ///
 /// This consolidates the common setup logic shared by `tool call`, `tool info`, and `tool run`:
-/// 1. Resolve tool path
-/// 2. Load manifest
-/// 3. Parse, prompt, and apply user config
-/// 4. Auto-save config (unless disabled)
-/// 5. Allocate system config and resolve manifest
-/// 6. Extract tool name
+/// 1. Resolve tool path, load manifest, auto-install
+/// 2. Parse, prompt, and apply user config
+/// 3. Auto-save config (unless disabled)
+/// 4. Allocate system config and resolve manifest
+/// 5. Extract tool name
 pub async fn prepare_tool(tool: &str, options: PrepareToolOptions<'_>) -> ToolResult<PreparedTool> {
-    // Resolve tool path
-    let resolved_path = resolve_tool_path(tool).await?;
-    let tool_path = resolved_path.path;
-    let mut is_installed = resolved_path.is_installed;
-
-    // Load manifest
-    let resolved_plugin = load_tool_from_path(&tool_path)?;
-
-    // Auto-install local path tools
-    if !is_installed {
-        is_installed = auto_install_local_tool(&tool_path, &resolved_plugin.template, options.yes)?;
-    }
+    let ResolvedTool {
+        plugin: resolved_plugin,
+        tool_path,
+        plugin_ref,
+    } = resolve_tool(tool, true, options.yes).await?;
 
     let manifest_schema = resolved_plugin.template.user_config.as_ref();
 
     // Parse user config from saved config, config file, and -k flags
-    let (mut user_config, has_saved_config) = parse_user_config(
-        options.config,
-        options.config_file,
-        tool,
-        &resolved_plugin,
-        is_installed,
-    )?;
+    let (mut user_config, has_saved_config) =
+        parse_user_config(options.config, options.config_file, &plugin_ref)?;
 
     // Prompt for missing required config values, then apply defaults
     prompt_missing_user_config(
@@ -95,10 +117,7 @@ pub async fn prepare_tool(tool: &str, options: PrepareToolOptions<'_>) -> ToolRe
     apply_user_config_defaults(manifest_schema, &mut user_config);
 
     // Auto-save config for future use (unless --no-save)
-    if !options.no_save
-        && !user_config.is_empty()
-        && let Ok(plugin_ref) = parse_tool_ref_for_config(tool, &resolved_plugin, is_installed)
-    {
+    if !options.no_save && !user_config.is_empty() {
         let _ = save_tool_config_with_schema(&plugin_ref, &user_config, manifest_schema);
     }
 
