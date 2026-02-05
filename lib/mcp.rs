@@ -280,8 +280,17 @@ async fn connect_http_direct(
         eprintln!("Connecting to: {}", url);
     }
 
-    // Use rmcp's HTTP transport
-    let transport = StreamableHttpClientTransport::from_uri(url.as_str());
+    // Build config with optional Authorization header from manifest
+    let mut config = StreamableHttpClientTransportConfig::with_uri(url.as_str());
+    if let Some(auth_value) = resolved.mcp_config.headers.get("Authorization") {
+        if verbose {
+            eprintln!("Using Authorization header from manifest");
+        }
+        config = config.auth_header(auth_value);
+    }
+
+    // Create transport with configured client
+    let transport = StreamableHttpClientTransport::with_client(reqwest::Client::default(), config);
     let client_info = ClientInfo::default();
 
     match serve_client(client_info, transport).await {
@@ -406,8 +415,17 @@ async fn connect_http_spawned(
         eprintln!("Server ready at {}", url);
     }
 
+    // Build config with optional Authorization header from manifest
+    let mut config = StreamableHttpClientTransportConfig::with_uri(url.as_str());
+    if let Some(auth_value) = resolved.mcp_config.headers.get("Authorization") {
+        if verbose {
+            eprintln!("Using Authorization header from manifest");
+        }
+        config = config.auth_header(auth_value);
+    }
+
     // Connect via HTTP
-    let transport = StreamableHttpClientTransport::from_uri(url.as_str());
+    let transport = StreamableHttpClientTransport::with_client(reqwest::Client::default(), config);
     let client_info = ClientInfo::default();
 
     match serve_client(client_info, transport).await {
