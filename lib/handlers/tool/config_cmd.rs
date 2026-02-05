@@ -6,7 +6,8 @@ use crate::error::{ToolError, ToolResult};
 use crate::mcp::connect_with_oauth;
 use crate::mcpb::{McpbTransport, McpbUserConfigField, McpbUserConfigType};
 use crate::output::{
-    ConfigListEntry, ConfigListOutput, ConfigOAuthOutput, ConfigPropertyOutput, ConfigSchemaOutput,
+    ConfigGetEntry, ConfigGetOutput, ConfigListEntry, ConfigListOutput, ConfigOAuthOutput,
+    ConfigPropertyOutput, ConfigSchemaOutput,
 };
 use crate::prompt::init_theme;
 use crate::references::PluginRef;
@@ -54,7 +55,9 @@ pub async fn config_tool(cmd: ConfigCommand, concise: bool, no_header: bool) -> 
             yes,
             config,
         } => config_set(tool, values, yes, config, concise).await,
-        ConfigCommand::Get { tool, key } => config_get(tool, key, concise, no_header).await,
+        ConfigCommand::Get { tool, key, json } => {
+            config_get(tool, key, json, concise, no_header).await
+        }
         ConfigCommand::List { tool, json } => config_list(tool, json, concise, no_header).await,
         ConfigCommand::Unset {
             tool,
@@ -293,6 +296,7 @@ async fn try_oauth_for_http_tool(
 async fn config_get(
     tool: String,
     key: Option<String>,
+    json_output: bool,
     concise: bool,
     no_header: bool,
 ) -> ToolResult<()> {
@@ -303,6 +307,18 @@ async fn config_get(
     let config = load_tool_config(&plugin_ref)?;
 
     if config.is_empty() {
+        if json_output {
+            let output = ConfigGetOutput {
+                tool: plugin_ref.to_string(),
+                config: BTreeMap::new(),
+            };
+            if concise {
+                println!("{}", serde_json::to_string(&output)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            }
+            return Ok(());
+        }
         if concise {
             // Empty output for concise mode
             return Ok(());
@@ -330,7 +346,35 @@ async fn config_get(
             ToolError::Generic(format!("Config key '{}' not set for {}", key, plugin_ref))
         })?;
 
-        if concise {
+        let sensitive = schema
+            .as_ref()
+            .and_then(|s| s.get(&key))
+            .map(|f| f.sensitive.unwrap_or(false))
+            .unwrap_or(false);
+
+        if json_output {
+            let mut entries = BTreeMap::new();
+            entries.insert(
+                key.clone(),
+                ConfigGetEntry {
+                    value: if sensitive {
+                        mask_sensitive(value)
+                    } else {
+                        value.clone()
+                    },
+                    sensitive,
+                },
+            );
+            let output = ConfigGetOutput {
+                tool: plugin_ref.to_string(),
+                config: entries,
+            };
+            if concise {
+                println!("{}", serde_json::to_string(&output)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            }
+        } else if concise {
             println!("{}", value);
         } else {
             println!("\n  {}.{} = {}\n", plugin_ref, key, value);
@@ -339,7 +383,36 @@ async fn config_get(
     }
 
     // Show all config
-    if concise {
+    if json_output {
+        let mut entries = BTreeMap::new();
+        for (key, value) in &config {
+            let sensitive = schema
+                .as_ref()
+                .and_then(|s| s.get(key))
+                .map(|f| f.sensitive.unwrap_or(false))
+                .unwrap_or(false);
+            entries.insert(
+                key.clone(),
+                ConfigGetEntry {
+                    value: if sensitive {
+                        mask_sensitive(value)
+                    } else {
+                        value.clone()
+                    },
+                    sensitive,
+                },
+            );
+        }
+        let output = ConfigGetOutput {
+            tool: plugin_ref.to_string(),
+            config: entries,
+        };
+        if concise {
+            println!("{}", serde_json::to_string(&output)?);
+        } else {
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+    } else if concise {
         if !no_header {
             println!("#key\tvalue\tsensitive");
         }
