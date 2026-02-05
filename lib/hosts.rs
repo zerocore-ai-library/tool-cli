@@ -32,6 +32,7 @@ pub enum McpHost {
     GeminiCli,
     Kiro,
     RooCode,
+    OpenCode,
 }
 
 /// Metadata for tracking tool-cli managed entries.
@@ -59,6 +60,7 @@ impl McpHost {
             "gemini-cli" | "geminicli" | "gemini" => Ok(Self::GeminiCli),
             "kiro" => Ok(Self::Kiro),
             "roo-code" | "roocode" | "roo" => Ok(Self::RooCode),
+            "opencode" | "open-code" | "oc" => Ok(Self::OpenCode),
             _ => Err(ToolError::InvalidHost(s.to_string())),
         }
     }
@@ -76,6 +78,7 @@ impl McpHost {
             Self::GeminiCli => "Gemini CLI",
             Self::Kiro => "Kiro",
             Self::RooCode => "Roo Code",
+            Self::OpenCode => "OpenCode",
         }
     }
 
@@ -92,6 +95,7 @@ impl McpHost {
             Self::GeminiCli => "gemini-cli",
             Self::Kiro => "kiro",
             Self::RooCode => "roo-code",
+            Self::OpenCode => "opencode",
         }
     }
 
@@ -102,6 +106,7 @@ impl McpHost {
             Self::Vscode => "servers",
             Self::Zed => "context_servers",
             Self::Codex => "mcp_servers",
+            Self::OpenCode => "mcp",
             _ => "mcpServers",
         }
     }
@@ -119,6 +124,7 @@ impl McpHost {
             Self::GeminiCli => Self::gemini_cli_path(),
             Self::Kiro => Self::kiro_path(),
             Self::RooCode => Self::roo_code_path(),
+            Self::OpenCode => Self::opencode_path(),
         }
     }
 
@@ -380,6 +386,31 @@ impl McpHost {
         }
     }
 
+    fn opencode_path() -> ToolResult<PathBuf> {
+        #[cfg(target_os = "windows")]
+        {
+            let appdata = std::env::var("APPDATA").map(PathBuf::from).or_else(|_| {
+                dirs::config_dir().ok_or_else(|| {
+                    ToolError::Generic("Could not determine config directory".to_string())
+                })
+            })?;
+            Ok(appdata.join("opencode").join("opencode.json"))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            // OpenCode uses XDG basedir (xdg-basedir npm package), which resolves
+            // to $XDG_CONFIG_HOME or ~/.config on all Unix platforms including macOS.
+            let xdg_config = std::env::var("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| {
+                    dirs::home_dir()
+                        .unwrap_or_else(|| PathBuf::from("~"))
+                        .join(".config")
+                });
+            Ok(xdg_config.join("opencode").join("opencode.json"))
+        }
+    }
+
     /// Get all supported hosts.
     pub fn all() -> &'static [McpHost] {
         &[
@@ -393,6 +424,7 @@ impl McpHost {
             Self::GeminiCli,
             Self::Kiro,
             Self::RooCode,
+            Self::OpenCode,
         ]
     }
 
@@ -733,6 +765,14 @@ pub fn generate_server_entry(tool_ref: &str, host: &McpHost) -> Value {
                 "args": args,
             })
         }
+        McpHost::OpenCode => {
+            let mut command = vec!["tool".to_string()];
+            command.extend(args);
+            serde_json::json!({
+                "type": "local",
+                "command": command,
+            })
+        }
         _ => {
             serde_json::json!({
                 "command": "tool",
@@ -788,6 +828,9 @@ mod tests {
         assert!(matches!(McpHost::parse("roo-code"), Ok(McpHost::RooCode)));
         assert!(matches!(McpHost::parse("roocode"), Ok(McpHost::RooCode)));
         assert!(matches!(McpHost::parse("roo"), Ok(McpHost::RooCode)));
+        assert!(matches!(McpHost::parse("opencode"), Ok(McpHost::OpenCode)));
+        assert!(matches!(McpHost::parse("open-code"), Ok(McpHost::OpenCode)));
+        assert!(matches!(McpHost::parse("oc"), Ok(McpHost::OpenCode)));
         assert!(McpHost::parse("invalid").is_err());
     }
 
@@ -819,6 +862,13 @@ mod tests {
         assert_eq!(entry["command"]["path"], "tool");
         assert_eq!(entry["command"]["args"][0], "run");
 
+        // OpenCode uses type "local" and command as array
+        let entry = generate_server_entry("appcypher/filesystem", &McpHost::OpenCode);
+        assert_eq!(entry["type"], "local");
+        assert_eq!(entry["command"][0], "tool");
+        assert_eq!(entry["command"][1], "run");
+        assert!(entry.get("args").is_none());
+
         // Codex entry has enabled field
         let entry = generate_codex_server_entry("appcypher/filesystem");
         assert_eq!(entry["command"], "tool");
@@ -837,6 +887,7 @@ mod tests {
         assert_eq!(McpHost::GeminiCli.canonical_name(), "gemini-cli");
         assert_eq!(McpHost::Kiro.canonical_name(), "kiro");
         assert_eq!(McpHost::RooCode.canonical_name(), "roo-code");
+        assert_eq!(McpHost::OpenCode.canonical_name(), "opencode");
     }
 
     #[test]
@@ -851,6 +902,7 @@ mod tests {
         assert_eq!(McpHost::GeminiCli.display_name(), "Gemini CLI");
         assert_eq!(McpHost::Kiro.display_name(), "Kiro");
         assert_eq!(McpHost::RooCode.display_name(), "Roo Code");
+        assert_eq!(McpHost::OpenCode.display_name(), "OpenCode");
     }
 
     #[test]
@@ -865,5 +917,6 @@ mod tests {
         assert_eq!(McpHost::GeminiCli.server_key(), "mcpServers");
         assert_eq!(McpHost::Kiro.server_key(), "mcpServers");
         assert_eq!(McpHost::RooCode.server_key(), "mcpServers");
+        assert_eq!(McpHost::OpenCode.server_key(), "mcp");
     }
 }

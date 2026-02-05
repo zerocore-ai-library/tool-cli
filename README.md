@@ -329,7 +329,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 > tool host add claude-desktop library/open-data
 > ```
 >
-> This registers the tool with the host. Works with Claude Desktop, Cursor, VS Code, Claude Code, Codex, Windsurf, Zed, Gemini CLI, Kiro, and Roo Code.
+> This registers the tool with the host. Works with Claude Desktop, Cursor, VS Code, Claude Code, Codex, Windsurf, Zed, Gemini CLI, Kiro, Roo Code, and OpenCode.
 
 <br />
 
@@ -387,6 +387,11 @@ Once you've installed some tools, you probably want to use them in your favorite
 <img src="https://avatars.githubusercontent.com/u/211522643?s=200&v=4" width="50" height="50" alt="Roo Code"/>
 <br />
 <code>roo-code</code>
+</td>
+<td align="center" width="180">
+<img src="https://avatars.githubusercontent.com/u/66570915?s=200&v=4" width="50" height="50" alt="OpenCode"/>
+<br />
+<code>opencode</code>
 </td>
 </tr>
 </table>
