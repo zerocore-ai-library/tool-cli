@@ -575,19 +575,17 @@ enum StoredCredentialsResult {
     /// Connected successfully with stored credentials.
     Connected(McpConnection),
     /// No stored credentials available, or credentials were rejected.
-    /// The spawned server (if any) is returned for use in OAuth flow.
-    NotAvailable(Option<Child>),
+    NotAvailable,
 }
 
 /// Try to connect to an HTTP server using stored OAuth credentials.
 ///
 /// Returns `Connected(connection)` if credentials exist and connection succeeds,
-/// `NotAvailable(spawned_server)` if no credentials or they were rejected (auth error),
+/// `NotAvailable` if no credentials or they were rejected (auth error),
 /// `Err` if credentials exist but connection fails with a non-auth error.
 async fn try_connect_with_stored_credentials(
     url: &str,
     tool_ref: &str,
-    spawned_server: Option<Child>,
     verbose: bool,
 ) -> ToolResult<StoredCredentialsResult> {
     // Check if crypto is configured (should auto-initialize)
@@ -599,7 +597,7 @@ async fn try_connect_with_stored_credentials(
                     "Could not initialize credential storage, skipping stored credentials check"
                 );
             }
-            return Ok(StoredCredentialsResult::NotAvailable(spawned_server));
+            return Ok(StoredCredentialsResult::NotAvailable);
         }
     };
 
@@ -610,13 +608,13 @@ async fn try_connect_with_stored_credentials(
             if verbose {
                 eprintln!("No stored credentials for {}", tool_ref);
             }
-            return Ok(StoredCredentialsResult::NotAvailable(spawned_server));
+            return Ok(StoredCredentialsResult::NotAvailable);
         }
         Err(e) => {
             if verbose {
                 eprintln!("Failed to load credentials: {}", e);
             }
-            return Ok(StoredCredentialsResult::NotAvailable(spawned_server));
+            return Ok(StoredCredentialsResult::NotAvailable);
         }
     };
 
@@ -651,7 +649,7 @@ async fn try_connect_with_stored_credentials(
         if verbose {
             eprintln!("Credential store returned no credentials");
         }
-        return Ok(StoredCredentialsResult::NotAvailable(spawned_server));
+        return Ok(StoredCredentialsResult::NotAvailable);
     }
 
     // Create authenticated transport
@@ -666,37 +664,21 @@ async fn try_connect_with_stored_credentials(
                 eprintln!("Connected with stored credentials");
             }
 
-            // Extract child and pgid from spawned server
-            #[cfg(unix)]
-            let (child, pgid) = if let Some(server) = spawned_server {
-                let pid = server.id() as i32;
-                let pgid = unsafe { libc::getpgid(pid) };
-                let pgid = if pgid > 0 { Some(pgid) } else { None };
-                (Some(server), pgid)
-            } else {
-                (None, None)
-            };
-
-            #[cfg(not(unix))]
-            let child = spawned_server;
-
             Ok(StoredCredentialsResult::Connected(McpConnection {
                 client,
-                child,
+                child: None,
                 #[cfg(unix)]
-                pgid,
+                pgid: None,
             }))
         }
         Err(e) => {
             // Check if this is an auth error - if so, return NotAvailable to trigger OAuth flow
             if is_auth_error(&e) {
-                // Always show this message so users understand why re-auth is happening
                 eprintln!(
                     "  {} Stored credentials expired or rejected, re-authenticating...\n",
                     "!".bright_yellow()
                 );
-                // Return spawned_server so OAuth flow can use it
-                Ok(StoredCredentialsResult::NotAvailable(spawned_server))
+                Ok(StoredCredentialsResult::NotAvailable)
             } else {
                 // Non-auth error - propagate it
                 Err(ToolError::Generic(format!(
@@ -725,9 +707,9 @@ pub async fn connect_with_oauth(
         && resolved.is_reference
         && let Some(url) = &resolved.mcp_config.url
     {
-        match try_connect_with_stored_credentials(url, tool_ref, None, verbose).await? {
+        match try_connect_with_stored_credentials(url, tool_ref, verbose).await? {
             StoredCredentialsResult::Connected(conn) => return Ok(conn),
-            StoredCredentialsResult::NotAvailable(_) => {
+            StoredCredentialsResult::NotAvailable => {
                 // Fall through to normal connect flow
             }
         }
@@ -741,20 +723,11 @@ pub async fn connect_with_oauth(
         } => {
             let server_url = session.url().to_string();
 
-            // Before running OAuth, try stored credentials (for spawned server case)
-            let spawned_server = match try_connect_with_stored_credentials(
-                &server_url,
-                tool_ref,
-                spawned_server,
-                verbose,
-            )
-            .await?
-            {
-                StoredCredentialsResult::Connected(conn) => return Ok(conn),
-                StoredCredentialsResult::NotAvailable(server) => server,
-            };
+            // Skip stored credentials here:
+            // - Reference-mode tools already tried them above (lines 724-734)
+            // - Spawned servers are fresh instances that won't recognize old tokens
 
-            // No stored credentials or they were rejected - run OAuth flow
+            // Run OAuth flow
             // Get credential crypto (auto-generates encryption key if needed)
             let crypto =
                 crate::security::get_credential_crypto().ok_or(ToolError::OAuthNotConfigured)?;

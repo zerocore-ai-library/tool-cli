@@ -93,6 +93,64 @@ pub struct FullServerOutput {
 }
 
 //--------------------------------------------------------------------------------------------------
+// Types: Config List Output
+//--------------------------------------------------------------------------------------------------
+
+/// Output for `tool config list --json` (no tool specified) - list of configured tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigListOutput {
+    pub tools: BTreeMap<String, ConfigListEntry>,
+}
+
+/// Entry for a configured tool in `tool config list --json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigListEntry {
+    pub keys: usize,
+    pub path: String,
+}
+
+/// Output for `tool config list <tool> --json` - config schema for a specific tool.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigSchemaOutput {
+    pub tool: String,
+    pub user_config: BTreeMap<String, ConfigPropertyOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<ConfigOAuthOutput>,
+}
+
+/// OAuth status in `tool config list <tool> --json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigOAuthOutput {
+    /// Whether OAuth credentials are saved.
+    pub authenticated: bool,
+    /// Whether the saved token is expired.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expired: Option<bool>,
+}
+
+/// A single config property in `tool config list <tool> --json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigPropertyOutput {
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sensitive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    #[serde(rename = "enum", skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<String>>,
+}
+
+//--------------------------------------------------------------------------------------------------
 // Types: Grep Output
 //--------------------------------------------------------------------------------------------------
 
