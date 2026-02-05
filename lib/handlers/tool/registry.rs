@@ -48,6 +48,17 @@ pub enum UninstallResult {
     Failed(String),
 }
 
+/// Result of attempting to link a local tool.
+#[derive(Debug, Clone)]
+pub enum LinkResult {
+    /// Successfully created a new symlink.
+    Linked,
+    /// Already linked to the same source.
+    AlreadyLinked,
+    /// A different source is already linked at the target path.
+    Conflict(PathBuf),
+}
+
 /// Options for multi-artifact publishing.
 #[derive(Debug, Clone, Default)]
 pub struct MultiArtifactOptions {
@@ -1108,6 +1119,104 @@ async fn install_local_tool(path: &str) -> InstallResult {
     );
 
     InstallResult::InstalledLocal
+}
+
+//--------------------------------------------------------------------------------------------------
+// Functions: Local Tool Linking
+//--------------------------------------------------------------------------------------------------
+
+/// Link a local tool by creating a symlink in the tools directory.
+///
+/// Does NOT handle conflict resolution — returns `LinkResult::Conflict`
+/// with the existing target path if a different source is already linked.
+pub fn link_local_tool(
+    source_path: &Path,
+    tool_name: &str,
+    version: Option<&str>,
+) -> ToolResult<LinkResult> {
+    use crate::constants::DEFAULT_TOOLS_PATH;
+
+    let target_name = match version {
+        Some(v) => format!("{}@{}", tool_name, v),
+        None => tool_name.to_string(),
+    };
+
+    let target_path = DEFAULT_TOOLS_PATH.join(&target_name);
+
+    // Check if target already exists
+    if target_path.exists() || target_path.is_symlink() {
+        if target_path.is_symlink()
+            && let Ok(existing_target) = std::fs::read_link(&target_path)
+        {
+            if existing_target == source_path {
+                return Ok(LinkResult::AlreadyLinked);
+            }
+            return Ok(LinkResult::Conflict(existing_target));
+        }
+        return Ok(LinkResult::Conflict(target_path));
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = target_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ToolError::Generic(format!("Failed to create tools directory: {}", e)))?;
+    }
+
+    create_symlink(source_path, &target_path)?;
+
+    Ok(LinkResult::Linked)
+}
+
+/// Force-link a local tool by removing any existing target and creating a new symlink.
+pub fn link_local_tool_force(
+    source_path: &Path,
+    tool_name: &str,
+    version: Option<&str>,
+) -> ToolResult<()> {
+    use crate::constants::DEFAULT_TOOLS_PATH;
+
+    let target_name = match version {
+        Some(v) => format!("{}@{}", tool_name, v),
+        None => tool_name.to_string(),
+    };
+
+    let target_path = DEFAULT_TOOLS_PATH.join(&target_name);
+
+    // Remove existing if present
+    if target_path.exists() || target_path.is_symlink() {
+        if target_path.is_symlink() || target_path.is_file() {
+            std::fs::remove_file(&target_path).map_err(|e| {
+                ToolError::Generic(format!("Failed to remove existing link: {}", e))
+            })?;
+        } else {
+            std::fs::remove_dir_all(&target_path).map_err(|e| {
+                ToolError::Generic(format!("Failed to remove existing directory: {}", e))
+            })?;
+        }
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = target_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ToolError::Generic(format!("Failed to create tools directory: {}", e)))?;
+    }
+
+    create_symlink(source_path, &target_path)?;
+
+    Ok(())
+}
+
+/// Create a symlink (platform-specific).
+fn create_symlink(source: &Path, target: &Path) -> ToolResult<()> {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(source, target)
+        .map_err(|e| ToolError::Generic(format!("Failed to create symlink: {}", e)))?;
+
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(source, target)
+        .map_err(|e| ToolError::Generic(format!("Failed to create symlink: {}", e)))?;
+
+    Ok(())
 }
 
 /// Remove a single installed tool.

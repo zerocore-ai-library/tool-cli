@@ -805,7 +805,7 @@ pub enum SelfCommand {
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
     /// Set configuration values and authenticate HTTP tools.
-    #[command(after_help = CONFIG_SET_EXAMPLES)]
+    #[command(alias = "s", after_help = CONFIG_SET_EXAMPLES)]
     Set {
         /// Tool reference.
         tool: String,
@@ -824,7 +824,7 @@ pub enum ConfigCommand {
     },
 
     /// Show configuration for a tool.
-    #[command(after_help = CONFIG_GET_EXAMPLES)]
+    #[command(alias = "g", after_help = CONFIG_GET_EXAMPLES)]
     Get {
         /// Tool reference.
         tool: String,
@@ -834,10 +834,11 @@ pub enum ConfigCommand {
     },
 
     /// List all tools with saved configuration.
+    #[command(alias = "l")]
     List,
 
     /// Remove configuration keys.
-    #[command(after_help = CONFIG_UNSET_EXAMPLES)]
+    #[command(alias = "u", after_help = CONFIG_UNSET_EXAMPLES)]
     Unset {
         /// Tool reference (required unless --all is used).
         tool: Option<String>,
@@ -859,7 +860,7 @@ pub enum ConfigCommand {
 #[derive(Debug, Subcommand)]
 pub enum HostCommand {
     /// Register tools with an MCP host.
-    #[command(after_help = HOST_ADD_EXAMPLES)]
+    #[command(alias = "a", after_help = HOST_ADD_EXAMPLES)]
     Add {
         /// Target host (claude-desktop, cursor, claude-code).
         host: String,
@@ -881,7 +882,7 @@ pub enum HostCommand {
     },
 
     /// Remove tools from an MCP host.
-    #[command(after_help = HOST_REMOVE_EXAMPLES)]
+    #[command(alias = "r", after_help = HOST_REMOVE_EXAMPLES)]
     Remove {
         /// Target host.
         host: String,
@@ -899,10 +900,11 @@ pub enum HostCommand {
     },
 
     /// List supported hosts and their status.
+    #[command(alias = "l")]
     List,
 
     /// Preview the MCP config that would be generated.
-    #[command(after_help = HOST_PREVIEW_EXAMPLES)]
+    #[command(alias = "p", after_help = HOST_PREVIEW_EXAMPLES)]
     Preview {
         /// Target host.
         host: String,

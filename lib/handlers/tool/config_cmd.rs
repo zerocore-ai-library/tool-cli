@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 
+use super::common::auto_install_local_tool;
 use super::list::resolve_tool_path;
 
 //--------------------------------------------------------------------------------------------------
@@ -75,9 +76,15 @@ async fn config_set(
     let resolved_path = resolve_tool_path(&tool).await?;
     let resolved_plugin = load_tool_from_path(&resolved_path.path)?;
 
+    // Auto-install local path tools
+    let mut is_installed = resolved_path.is_installed;
+    if !is_installed {
+        is_installed =
+            auto_install_local_tool(&resolved_path.path, &resolved_plugin.template, yes)?;
+    }
+
     // Parse the original tool reference for storage (strip version for config path)
-    let plugin_ref =
-        parse_tool_ref_for_config(&tool, &resolved_plugin, resolved_path.is_installed)?;
+    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved_plugin, is_installed)?;
 
     // Clone the schema since we need resolved_plugin later for OAuth
     let schema = resolved_plugin.template.user_config.clone();
@@ -467,10 +474,7 @@ async fn config_unset(
 
 /// Unset specific keys from a single tool.
 async fn unset_tool_keys(tool: &str, keys: &[String], concise: bool) -> ToolResult<()> {
-    let resolved_path = resolve_tool_path(tool).await?;
-    let resolved = load_tool_from_path(&resolved_path.path)?;
-    let plugin_ref = parse_tool_ref_for_config(tool, &resolved, resolved_path.is_installed)?;
-    let schema = resolved.template.user_config.as_ref();
+    let (plugin_ref, schema) = resolve_tool_for_config(tool).await?;
 
     let mut config = load_tool_config(&plugin_ref).unwrap_or_default();
     let mut removed = Vec::new();
@@ -488,7 +492,7 @@ async fn unset_tool_keys(tool: &str, keys: &[String], concise: bool) -> ToolResu
         if config.is_empty() {
             delete_tool_config(&plugin_ref)?;
         } else {
-            save_tool_config_with_schema(&plugin_ref, &config, schema)?;
+            save_tool_config_with_schema(&plugin_ref, &config, schema.as_ref())?;
         }
     }
 
@@ -517,9 +521,7 @@ async fn unset_tool_keys(tool: &str, keys: &[String], concise: bool) -> ToolResu
 
 /// Unset all keys from a single tool.
 async fn unset_tool_all_keys(tool: &str, yes: bool, concise: bool) -> ToolResult<()> {
-    let resolved_path = resolve_tool_path(tool).await?;
-    let resolved = load_tool_from_path(&resolved_path.path)?;
-    let plugin_ref = parse_tool_ref_for_config(tool, &resolved, resolved_path.is_installed)?;
+    let (plugin_ref, _schema) = resolve_tool_for_config(tool).await?;
 
     let config_path = get_config_path(&plugin_ref);
     if !config_path.exists() {
@@ -694,6 +696,43 @@ async fn unset_all_tools(keys: Vec<String>, yes: bool, concise: bool) -> ToolRes
 // Functions: Helpers
 //--------------------------------------------------------------------------------------------------
 
+/// Resolve a tool reference for config operations (get/unset).
+///
+/// Tries normal resolution first (installed tools, paths). If that fails,
+/// falls back to parsing the name directly and checking if config exists.
+/// This allows `config unset mongodb` to work even when mongodb isn't installed.
+async fn resolve_tool_for_config(
+    tool: &str,
+) -> ToolResult<(PluginRef, Option<BTreeMap<String, McpbUserConfigField>>)> {
+    // Try normal resolution first
+    if let Ok(resolved_path) = resolve_tool_path(tool).await
+        && let Ok(resolved) = load_tool_from_path(&resolved_path.path)
+    {
+        let plugin_ref = parse_tool_ref_for_config(tool, &resolved, resolved_path.is_installed)?;
+        let schema = resolved.template.user_config.clone();
+        return Ok((plugin_ref, schema));
+    }
+
+    // Fallback: parse as a plugin ref and check if config exists
+    let plugin_ref = PluginRef::parse(tool)
+        .or_else(|_| PluginRef::new(tool))
+        .map_err(|_| {
+            ToolError::Generic(format!(
+                "Tool '{}' not found and no saved configuration exists",
+                tool
+            ))
+        })?;
+
+    if !tool_config_exists(&plugin_ref) {
+        return Err(ToolError::Generic(format!(
+            "No configuration found for '{}'",
+            tool
+        )));
+    }
+
+    Ok((plugin_ref, None))
+}
+
 /// Parse a tool reference for config storage.
 ///
 /// Config storage is based on:
@@ -726,6 +765,11 @@ pub fn parse_tool_ref_for_config(
 }
 
 /// Get config file path for a tool reference (without version).
+/// Check if a saved config file exists for the given tool.
+pub fn tool_config_exists(plugin_ref: &PluginRef) -> bool {
+    get_config_path(plugin_ref).exists()
+}
+
 fn get_config_path(plugin_ref: &PluginRef) -> PathBuf {
     let mut path = DEFAULT_CONFIG_PATH.clone();
 
