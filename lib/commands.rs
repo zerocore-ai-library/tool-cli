@@ -839,6 +839,10 @@ pub enum ConfigCommand {
 
         /// Specific key to show (shows all if omitted).
         key: Option<String>,
+
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
     },
 
     /// List configured tools, or show config schema for a specific tool.

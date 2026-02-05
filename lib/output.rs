@@ -151,6 +151,24 @@ pub struct ConfigPropertyOutput {
 }
 
 //--------------------------------------------------------------------------------------------------
+// Types: Config Get Output
+//--------------------------------------------------------------------------------------------------
+
+/// Output for `tool config get <tool> --json` - saved config values for a tool.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigGetOutput {
+    pub tool: String,
+    pub config: BTreeMap<String, ConfigGetEntry>,
+}
+
+/// A single config entry in `tool config get <tool> --json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigGetEntry {
+    pub value: String,
+    pub sensitive: bool,
+}
+
+//--------------------------------------------------------------------------------------------------
 // Types: Grep Output
 //--------------------------------------------------------------------------------------------------
 
