@@ -8,7 +8,7 @@ use colored::Colorize;
 use std::collections::BTreeMap;
 
 use super::common::{PrepareToolOptions, prepare_tool};
-use super::config_cmd::{load_tool_config, parse_tool_ref_for_config, tool_config_exists};
+use super::config_cmd::{load_tool_config, tool_config_exists};
 
 //--------------------------------------------------------------------------------------------------
 // Functions
@@ -155,30 +155,38 @@ pub async fn tool_call(
 
     // Concise output: minified JSON (takes precedence over --json)
     if concise {
-        for content in &result.result.content {
-            match &**content {
-                rmcp::model::RawContent::Text(text) => {
-                    // Try to parse and re-serialize as minified JSON
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text.text) {
-                        println!(
-                            "{}",
-                            serde_json::to_string(&json).unwrap_or(text.text.clone())
-                        );
-                    } else {
-                        println!("{}", text.text);
+        // Prefer structuredContent if available
+        if let Some(structured) = &result.result.structured_content {
+            println!(
+                "{}",
+                serde_json::to_string(structured).unwrap_or_else(|_| structured.to_string())
+            );
+        } else {
+            for content in &result.result.content {
+                match &**content {
+                    rmcp::model::RawContent::Text(text) => {
+                        // Try to parse and re-serialize as minified JSON
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text.text) {
+                            println!(
+                                "{}",
+                                serde_json::to_string(&json).unwrap_or(text.text.clone())
+                            );
+                        } else {
+                            println!("{}", text.text);
+                        }
                     }
-                }
-                rmcp::model::RawContent::Image(img) => {
-                    println!("{{\"type\":\"image\",\"bytes\":{}}}", img.data.len());
-                }
-                rmcp::model::RawContent::Audio(audio) => {
-                    println!("{{\"type\":\"audio\",\"bytes\":{}}}", audio.data.len());
-                }
-                rmcp::model::RawContent::Resource(res) => {
-                    println!("{{\"type\":\"resource\",\"resource\":{:?}}}", res.resource);
-                }
-                rmcp::model::RawContent::ResourceLink(link) => {
-                    println!("{{\"type\":\"resource_link\",\"uri\":\"{}\"}}", link.uri);
+                    rmcp::model::RawContent::Image(img) => {
+                        println!("{{\"type\":\"image\",\"bytes\":{}}}", img.data.len());
+                    }
+                    rmcp::model::RawContent::Audio(audio) => {
+                        println!("{{\"type\":\"audio\",\"bytes\":{}}}", audio.data.len());
+                    }
+                    rmcp::model::RawContent::Resource(res) => {
+                        println!("{{\"type\":\"resource\",\"resource\":{:?}}}", res.resource);
+                    }
+                    rmcp::model::RawContent::ResourceLink(link) => {
+                        println!("{{\"type\":\"resource_link\",\"uri\":\"{}\"}}", link.uri);
+                    }
                 }
             }
         }
@@ -188,34 +196,15 @@ pub async fn tool_call(
         return Ok(());
     }
 
-    // JSON output: pretty-printed, no decorations
+    // JSON output: structured content only, exit with null if absent
     if json_output {
-        for content in &result.result.content {
-            match &**content {
-                rmcp::model::RawContent::Text(text) => {
-                    // Pretty-print JSON, otherwise plain text
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text.text) {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&json).unwrap_or(text.text.clone())
-                        );
-                    } else {
-                        println!("{}", text.text);
-                    }
-                }
-                rmcp::model::RawContent::Image(img) => {
-                    println!("{{\"type\":\"image\",\"bytes\":{}}}", img.data.len());
-                }
-                rmcp::model::RawContent::Audio(audio) => {
-                    println!("{{\"type\":\"audio\",\"bytes\":{}}}", audio.data.len());
-                }
-                rmcp::model::RawContent::Resource(res) => {
-                    println!("{{\"type\":\"resource\",\"resource\":{:?}}}", res.resource);
-                }
-                rmcp::model::RawContent::ResourceLink(link) => {
-                    println!("{{\"type\":\"resource_link\",\"uri\":\"{}\"}}", link.uri);
-                }
-            }
+        if let Some(structured) = &result.result.structured_content {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(structured).unwrap_or_else(|_| structured.to_string())
+            );
+        } else {
+            println!("null");
         }
         if is_error {
             std::process::exit(1);
@@ -241,7 +230,7 @@ pub async fn tool_call(
         );
     }
 
-    // Output the result content
+    // Output text content
     for content in &result.result.content {
         // Content is wrapped in Annotated, so we dereference to get the inner RawContent
         match &**content {
@@ -282,6 +271,20 @@ pub async fn tool_call(
         }
     }
 
+    // Output structured content if available
+    if let Some(structured) = &result.result.structured_content {
+        println!();
+        let pretty =
+            serde_json::to_string_pretty(structured).unwrap_or_else(|_| structured.to_string());
+        for line in pretty.lines() {
+            if is_error {
+                println!("  {}", line.bright_red());
+            } else {
+                println!("  {}", line);
+            }
+        }
+    }
+
     if is_error {
         std::process::exit(1);
     }
@@ -300,19 +303,14 @@ pub async fn tool_call(
 pub(super) fn parse_user_config(
     config_flags: &[String],
     config_file: Option<&str>,
-    tool: &str,
-    resolved: &crate::resolver::ResolvedPlugin<crate::mcpb::McpbManifest>,
-    is_installed: bool,
+    plugin_ref: &crate::references::PluginRef,
 ) -> ToolResult<(BTreeMap<String, String>, bool)> {
     let mut config = BTreeMap::new();
-    let mut has_saved_config = false;
 
     // 1. Load saved config (lowest priority)
-    if let Ok(plugin_ref) = parse_tool_ref_for_config(tool, resolved, is_installed) {
-        has_saved_config = tool_config_exists(&plugin_ref);
-        if let Ok(saved) = load_tool_config(&plugin_ref) {
-            config.extend(saved);
-        }
+    let has_saved_config = tool_config_exists(plugin_ref);
+    if let Ok(saved) = load_tool_config(plugin_ref) {
+        config.extend(saved);
     }
 
     // 2. Load from config file

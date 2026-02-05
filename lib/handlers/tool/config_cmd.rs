@@ -7,7 +7,6 @@ use crate::mcp::connect_with_oauth;
 use crate::mcpb::{McpbTransport, McpbUserConfigField, McpbUserConfigType};
 use crate::prompt::init_theme;
 use crate::references::PluginRef;
-use crate::resolver::load_tool_from_path;
 use crate::security::get_credential_crypto;
 use crate::system_config::allocate_system_config;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -17,8 +16,7 @@ use std::collections::BTreeMap;
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 
-use super::common::auto_install_local_tool;
-use super::list::resolve_tool_path;
+use super::common::resolve_tool;
 
 //--------------------------------------------------------------------------------------------------
 // Types
@@ -72,25 +70,15 @@ async fn config_set(
     config_flags: Vec<String>,
     concise: bool,
 ) -> ToolResult<()> {
-    // Resolve tool and load manifest
-    let resolved_path = resolve_tool_path(&tool).await?;
-    let resolved_plugin = load_tool_from_path(&resolved_path.path)?;
+    // Resolve tool, load manifest, auto-install, derive config key
+    let resolved = resolve_tool(&tool, true, yes).await?;
+    let plugin_ref = resolved.plugin_ref;
 
-    // Auto-install local path tools
-    let mut is_installed = resolved_path.is_installed;
-    if !is_installed {
-        is_installed =
-            auto_install_local_tool(&resolved_path.path, &resolved_plugin.template, yes)?;
-    }
-
-    // Parse the original tool reference for storage (strip version for config path)
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved_plugin, is_installed)?;
-
-    // Clone the schema since we need resolved_plugin later for OAuth
-    let schema = resolved_plugin.template.user_config.clone();
+    // Clone the schema since we need resolved.plugin later for OAuth
+    let schema = resolved.plugin.template.user_config.clone();
 
     // Check if tool uses HTTP transport (may need OAuth via MCP-Auth discovery)
-    let is_http_tool = resolved_plugin.template.server.transport == McpbTransport::Http;
+    let is_http_tool = resolved.plugin.template.server.transport == McpbTransport::Http;
 
     // Check if tool has configurable options (user_config or HTTP transport)
     let has_user_config = schema.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
@@ -170,7 +158,7 @@ async fn config_set(
 
     // For HTTP tools, attempt connection to trigger OAuth flow if needed
     let oauth_result =
-        try_oauth_for_http_tool(&resolved_plugin, &final_config, &plugin_ref.to_string()).await;
+        try_oauth_for_http_tool(&resolved.plugin, &final_config, &plugin_ref.to_string()).await;
 
     // Output
     if concise {
@@ -305,14 +293,8 @@ async fn config_get(
     concise: bool,
     no_header: bool,
 ) -> ToolResult<()> {
-    // Resolve tool and load manifest
-    let resolved_path = resolve_tool_path(&tool).await?;
-    let resolved = load_tool_from_path(&resolved_path.path)?;
-
-    // Parse the original tool reference for storage
-    let plugin_ref = parse_tool_ref_for_config(&tool, &resolved, resolved_path.is_installed)?;
-
-    let schema = resolved.template.user_config;
+    // Resolve tool (with fallback for uninstalled tools that have saved config)
+    let (plugin_ref, schema) = resolve_tool_for_config(&tool).await?;
 
     // Load config
     let config = load_tool_config(&plugin_ref)?;
@@ -704,13 +686,10 @@ async fn unset_all_tools(keys: Vec<String>, yes: bool, concise: bool) -> ToolRes
 async fn resolve_tool_for_config(
     tool: &str,
 ) -> ToolResult<(PluginRef, Option<BTreeMap<String, McpbUserConfigField>>)> {
-    // Try normal resolution first
-    if let Ok(resolved_path) = resolve_tool_path(tool).await
-        && let Ok(resolved) = load_tool_from_path(&resolved_path.path)
-    {
-        let plugin_ref = parse_tool_ref_for_config(tool, &resolved, resolved_path.is_installed)?;
-        let schema = resolved.template.user_config.clone();
-        return Ok((plugin_ref, schema));
+    // Try normal resolution first (no auto-install for read operations)
+    if let Ok(resolved) = resolve_tool(tool, false, false).await {
+        let schema = resolved.plugin.template.user_config.clone();
+        return Ok((resolved.plugin_ref, schema));
     }
 
     // Fallback: parse as a plugin ref and check if config exists
