@@ -58,12 +58,20 @@ pub async fn run_script(
 
     println!("  {} {}", "Running:".bright_cyan(), full_cmd.bright_white());
 
-    // Execute via shell
-    let status = Command::new("sh")
-        .arg("-c")
-        .arg(&full_cmd)
-        .current_dir(&target_dir)
-        .status()?;
+    // Execute via shell (platform-specific)
+    let status = if cfg!(windows) {
+        Command::new("cmd")
+            .arg("/C")
+            .arg(&full_cmd)
+            .current_dir(&target_dir)
+            .status()?
+    } else {
+        Command::new("sh")
+            .arg("-c")
+            .arg(&full_cmd)
+            .current_dir(&target_dir)
+            .status()?
+    };
 
     if !status.success() {
         return Err(ToolError::Generic(format!(

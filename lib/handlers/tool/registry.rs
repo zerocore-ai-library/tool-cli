@@ -1658,6 +1658,8 @@ pub async fn publish_mcpb(
         output: None,
         verbose: false,
         include_dotfiles: false,
+        extract_icon: true,
+        on_progress: None,
     };
     let pack_result = match pack_bundle(&dir, &pack_options) {
         Ok(result) => {
@@ -2036,6 +2038,8 @@ async fn publish_multi_artifact_impl(
             output: None,
             verbose: false,
             include_dotfiles: false,
+            extract_icon: true,
+            on_progress: None,
         };
 
         // Create pack tasks for all platforms

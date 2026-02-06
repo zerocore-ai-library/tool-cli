@@ -12,6 +12,7 @@ use super::platforms::{
     validate_platform_override_keys,
 };
 use super::recommended::validate_recommended_fields;
+use super::scripts::validate_script_names;
 use super::standard::validate_standard_fields;
 use super::tools::validate_tools;
 use super::variables::validate_variable_references;
@@ -114,6 +115,9 @@ pub fn validate_manifest(dir: &Path) -> ValidationResult {
 
     // 15. Validate compatibility.platforms matches platform_overrides
     validate_compatibility_platforms(&raw_json, &mut result);
+
+    // 16. Validate script names don't conflict with built-in subcommands
+    validate_script_names(&raw_json, &mut result);
 
     result
 }

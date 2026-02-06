@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tar::Builder;
 use thiserror::Error;
 use walkdir::WalkDir;
@@ -20,6 +21,20 @@ use zip::write::SimpleFileOptions;
 //--------------------------------------------------------------------------------------------------
 // Types
 //--------------------------------------------------------------------------------------------------
+
+/// Progress event emitted during packing.
+#[derive(Debug, Clone)]
+pub enum PackProgress {
+    /// Starting to pack, with total file count.
+    Started { total_files: usize },
+    /// A file was added to the bundle.
+    FileAdded { path: String, current: usize },
+    /// Packing completed.
+    Finished,
+}
+
+/// Callback type for progress events.
+pub type ProgressCallback = Arc<dyn Fn(PackProgress) + Send + Sync>;
 
 /// Error types for pack operations.
 #[derive(Debug, Error)]
@@ -58,7 +73,7 @@ pub enum PackError {
 }
 
 /// Options for packing.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PackOptions {
     /// Output file path.
     pub output: Option<PathBuf>,
@@ -71,6 +86,12 @@ pub struct PackOptions {
 
     /// Show files being added.
     pub verbose: bool,
+
+    /// Whether to extract icon as a separate file (for registry upload).
+    pub extract_icon: bool,
+
+    /// Progress callback for reporting packing progress.
+    pub on_progress: Option<ProgressCallback>,
 }
 
 impl Default for PackOptions {
@@ -80,7 +101,22 @@ impl Default for PackOptions {
             validate: true,
             include_dotfiles: false,
             verbose: false,
+            extract_icon: false,
+            on_progress: None,
         }
+    }
+}
+
+impl std::fmt::Debug for PackOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PackOptions")
+            .field("output", &self.output)
+            .field("validate", &self.validate)
+            .field("include_dotfiles", &self.include_dotfiles)
+            .field("verbose", &self.verbose)
+            .field("extract_icon", &self.extract_icon)
+            .field("on_progress", &self.on_progress.is_some())
+            .finish()
     }
 }
 
@@ -215,32 +251,18 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
     // 5. Build ignore matcher
     let ignore_matcher = build_ignore_matcher(dir)?;
 
-    // 6. Create zip archive
-    let file = File::create(&output_path)?;
-    let mut zip = ZipWriter::new(file);
-
-    let zip_options = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .unix_permissions(0o644);
-
-    let mut file_count = 0;
-    let mut total_size = 0u64;
+    // 6. Collect all files first (for progress reporting)
+    let mut entries_to_add: Vec<(PathBuf, String, bool)> = Vec::new();
     let mut ignored_files = Vec::new();
 
-    // 7. Walk directory and add files
-    // follow_links(true) ensures symlinks to directories are correctly identified as directories
     for entry in WalkDir::new(dir)
         .follow_links(true)
         .into_iter()
-        .filter_entry(|e| {
-            // Always skip .git directory
-            !is_builtin_ignored(e.path(), dir)
-        })
+        .filter_entry(|e| !is_builtin_ignored(e.path(), dir))
     {
         let entry = entry?;
         let path = entry.path();
 
-        // Skip the root directory itself
         if path == dir {
             continue;
         }
@@ -249,7 +271,6 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
         let path_str = relative_path.to_string_lossy().to_string();
         let is_dir = entry.file_type().is_dir();
 
-        // Check if should be ignored by .mcpbignore patterns
         if ignore_matcher
             .matched_path_or_any_parents(relative_path, is_dir)
             .is_ignore()
@@ -260,7 +281,6 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
             continue;
         }
 
-        // Skip dotfiles unless explicitly included
         if !options.include_dotfiles && is_dotfile(&path_str) {
             if options.verbose {
                 ignored_files.push(path_str);
@@ -268,18 +288,42 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
             continue;
         }
 
-        // Get file options with modification time and permissions preserved
-        let file_options = if let Ok(metadata) = std::fs::metadata(path) {
+        entries_to_add.push((path.to_path_buf(), path_str, is_dir));
+    }
+
+    // Count only files (not directories)
+    let total_files = entries_to_add
+        .iter()
+        .filter(|(_, _, is_dir)| !is_dir)
+        .count();
+
+    // Emit started event
+    if let Some(ref cb) = options.on_progress {
+        cb(PackProgress::Started { total_files });
+    }
+
+    // 7. Create zip archive
+    let file = File::create(&output_path)?;
+    let mut zip = ZipWriter::new(file);
+
+    let zip_options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+
+    let mut file_count = 0;
+    let mut total_size = 0u64;
+
+    // 8. Add files to archive with progress
+    for (path, path_str, is_dir) in entries_to_add {
+        let file_options = if let Ok(metadata) = std::fs::metadata(&path) {
             let mut opts = zip_options;
 
-            // Preserve modification time
             if let Ok(modified) = metadata.modified()
                 && let Some(dt) = system_time_to_zip_datetime(modified)
             {
                 opts = opts.last_modified_time(dt);
             }
 
-            // Preserve Unix permissions
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -293,12 +337,10 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
         };
 
         if is_dir {
-            // Add directory entry
             let dir_path = format!("{}/", path_str);
             zip.add_directory(&dir_path, file_options)?;
         } else {
-            // Add file
-            let mut file = File::open(path)?;
+            let mut file = File::open(&path)?;
             let mut contents = Vec::new();
             file.read_to_end(&mut contents)?;
 
@@ -307,10 +349,23 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
 
             zip.start_file(&path_str, file_options)?;
             zip.write_all(&contents)?;
+
+            // Emit progress
+            if let Some(ref cb) = options.on_progress {
+                cb(PackProgress::FileAdded {
+                    path: path_str,
+                    current: file_count,
+                });
+            }
         }
     }
 
     zip.finish()?;
+
+    // Emit finished event
+    if let Some(ref cb) = options.on_progress {
+        cb(PackProgress::Finished);
+    }
 
     let compressed_size = std::fs::metadata(&output_path)?.len();
 
@@ -318,8 +373,12 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
     let bundle_bytes = std::fs::read(&output_path)?;
     let checksum = compute_sha256(&bundle_bytes);
 
-    // Extract icon as separate file if present
-    let (icon_path, icon_size, icon_checksum) = extract_icon(dir, &manifest, &output_path)?;
+    // Extract icon as separate file if requested (for registry upload)
+    let (icon_path, icon_size, icon_checksum) = if options.extract_icon {
+        extract_icon(dir, &manifest, &output_path)?
+    } else {
+        (None, None, None)
+    };
 
     Ok(PackResult {
         output_path,
@@ -396,19 +455,10 @@ pub fn pack_bundle_for_platform(
         (Vec::new(), None)
     };
 
-    // 7. Create zip archive
-    let file = File::create(&output_path)?;
-    let mut zip = ZipWriter::new(file);
-
-    let zip_options = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .unix_permissions(0o644);
-
-    let mut file_count = 0;
-    let mut total_size = 0u64;
+    // 7. Collect all files first (for progress reporting)
+    let mut entries_to_add: Vec<(PathBuf, String, bool)> = Vec::new();
     let mut ignored_files = Vec::new();
 
-    // 8. Walk directory and add files (with modified manifest)
     for entry in WalkDir::new(dir)
         .follow_links(true)
         .into_iter()
@@ -458,7 +508,34 @@ pub fn pack_bundle_for_platform(
             continue;
         }
 
-        let file_options = if let Ok(metadata) = std::fs::metadata(path) {
+        entries_to_add.push((path.to_path_buf(), path_str, is_dir));
+    }
+
+    // Count only files (not directories)
+    let total_files = entries_to_add
+        .iter()
+        .filter(|(_, _, is_dir)| !is_dir)
+        .count();
+
+    // Emit started event
+    if let Some(ref cb) = options.on_progress {
+        cb(PackProgress::Started { total_files });
+    }
+
+    // 8. Create zip archive
+    let file = File::create(&output_path)?;
+    let mut zip = ZipWriter::new(file);
+
+    let zip_options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+
+    let mut file_count = 0;
+    let mut total_size = 0u64;
+
+    // 9. Add files to archive with progress
+    for (path, path_str, is_dir) in entries_to_add {
+        let file_options = if let Ok(metadata) = std::fs::metadata(&path) {
             let mut opts = zip_options;
             if let Ok(modified) = metadata.modified()
                 && let Some(dt) = system_time_to_zip_datetime(modified)
@@ -484,7 +561,7 @@ pub fn pack_bundle_for_platform(
             let contents = if path_str == MCPB_MANIFEST_FILE {
                 serde_json::to_vec_pretty(&manifest_json)?
             } else {
-                let mut file = File::open(path)?;
+                let mut file = File::open(&path)?;
                 let mut contents = Vec::new();
                 file.read_to_end(&mut contents)?;
                 contents
@@ -495,15 +572,34 @@ pub fn pack_bundle_for_platform(
 
             zip.start_file(&path_str, file_options)?;
             zip.write_all(&contents)?;
+
+            // Emit progress
+            if let Some(ref cb) = options.on_progress {
+                cb(PackProgress::FileAdded {
+                    path: path_str,
+                    current: file_count,
+                });
+            }
         }
     }
 
     zip.finish()?;
 
+    // Emit finished event
+    if let Some(ref cb) = options.on_progress {
+        cb(PackProgress::Finished);
+    }
+
     let compressed_size = std::fs::metadata(&output_path)?.len();
     let bundle_bytes = std::fs::read(&output_path)?;
     let checksum = compute_sha256(&bundle_bytes);
-    let (icon_path, icon_size, icon_checksum) = extract_icon(dir, &manifest, &output_path)?;
+
+    // Extract icon as separate file if requested (for registry upload)
+    let (icon_path, icon_size, icon_checksum) = if options.extract_icon {
+        extract_icon(dir, &manifest, &output_path)?
+    } else {
+        (None, None, None)
+    };
 
     Ok(PackResult {
         output_path,

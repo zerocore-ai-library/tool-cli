@@ -162,6 +162,10 @@ pub enum WarningCode {
     /// W017: No .mcpbignore file found.
     #[serde(rename = "W017")]
     MissingMcpbIgnore,
+
+    /// W018: Script name conflicts with a built-in tool-cli subcommand.
+    #[serde(rename = "W018")]
+    ReservedScriptName,
 }
 
 /// A validation code that can be either an error or warning.
@@ -225,6 +229,7 @@ impl fmt::Display for WarningCode {
             WarningCode::BinaryOverridePathNotFound => "W015",
             WarningCode::CompatibilityPlatformMismatch => "W016",
             WarningCode::MissingMcpbIgnore => "W017",
+            WarningCode::ReservedScriptName => "W018",
         };
         write!(f, "{}", code)
     }
