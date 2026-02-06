@@ -2,11 +2,22 @@
 
 use crate::error::{ToolError, ToolResult};
 use crate::mcpb::McpbManifest;
-use crate::pack::{PackError, PackOptions, PackResult, pack_bundle, pack_bundle_for_platform};
+use crate::pack::{
+    PackError, PackOptions, PackProgress, PackResult, pack_bundle, pack_bundle_for_platform,
+};
 use crate::styles::Spinner;
 use crate::validate::validate_manifest;
 use colored::Colorize;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+//--------------------------------------------------------------------------------------------------
+// Constants
+//--------------------------------------------------------------------------------------------------
+
+/// Number of recent files to show scrolling below the progress bar.
+const SCROLLING_FILE_COUNT: usize = 3;
 
 //--------------------------------------------------------------------------------------------------
 // Functions
@@ -28,9 +39,11 @@ pub async fn pack_mcpb(
 
     // Strict validation: treat warnings as errors
     if strict && !no_validate {
+        let spinner = Spinner::new("Validating manifest (strict)");
         let validation = validate_manifest(&dir);
         if !validation.is_strict_valid() {
-            println!("  {} Validation failed (strict)\n", "✗".bright_red());
+            spinner.fail(Some("Validation failed"));
+            println!();
 
             for issue in validation.errors.iter().chain(validation.warnings.iter()) {
                 println!(
@@ -60,6 +73,7 @@ pub async fn pack_mcpb(
             println!("\n  Cannot pack with --strict. Fix errors and warnings, then retry.");
             std::process::exit(1);
         }
+        spinner.succeed(Some("Validation passed (strict)"));
     }
 
     // Handle multi-platform packing
@@ -67,24 +81,113 @@ pub async fn pack_mcpb(
         return pack_multi_platform(&dir, no_validate, include_dotfiles, verbose).await;
     }
 
-    // Single bundle packing
+    // Single bundle packing with progress bar
+    pack_single_bundle(&dir, output, no_validate, include_dotfiles, verbose)
+}
+
+/// Pack a single bundle with progress bar and scrolling file names.
+fn pack_single_bundle(
+    dir: &Path,
+    output: Option<String>,
+    no_validate: bool,
+    include_dotfiles: bool,
+    verbose: bool,
+) -> ToolResult<()> {
+    // Create multi-progress for progress bar + file lines
+    let mp = MultiProgress::new();
+
+    // Main progress bar
+    let pb = mp.add(ProgressBar::new(0));
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("  {spinner:.cyan} Creating bundle [{bar:30.cyan/dim}] {pos}/{len} files")
+            .unwrap()
+            .progress_chars("█▓░"),
+    );
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+    // File name lines (for scrolling effect)
+    let file_lines: Vec<ProgressBar> = (0..SCROLLING_FILE_COUNT)
+        .map(|_| {
+            let line = mp.add(ProgressBar::new_spinner());
+            line.set_style(
+                ProgressStyle::default_spinner()
+                    .template("    {msg}")
+                    .unwrap(),
+            );
+            line
+        })
+        .collect();
+
+    // Track recent files for scrolling display
+    let recent_files = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let recent_files_clone = recent_files.clone();
+    let file_lines_clone = file_lines.to_vec();
+    let pb_clone = pb.clone();
+
     let options = PackOptions {
         output: output.map(PathBuf::from),
         validate: !no_validate,
         include_dotfiles,
         verbose,
+        extract_icon: false,
+        on_progress: Some(Arc::new(move |progress| match progress {
+            PackProgress::Started { total_files } => {
+                pb_clone.set_length(total_files as u64);
+            }
+            PackProgress::FileAdded { path, current } => {
+                pb_clone.set_position(current as u64);
+
+                // Update scrolling file display
+                let mut files = recent_files_clone.lock().unwrap();
+                files.push(path);
+                if files.len() > SCROLLING_FILE_COUNT {
+                    files.remove(0);
+                }
+
+                // Update file lines
+                for (i, line) in file_lines_clone.iter().enumerate() {
+                    if let Some(file) = files.get(i) {
+                        // Truncate long paths
+                        let display = if file.len() > 60 {
+                            format!("...{}", &file[file.len() - 57..])
+                        } else {
+                            file.clone()
+                        };
+                        line.set_message(display.dimmed().to_string());
+                    } else {
+                        line.set_message("");
+                    }
+                }
+            }
+            PackProgress::Finished => {}
+        })),
     };
 
-    match pack_bundle(&dir, &options) {
-        Ok(result) => {
-            print_pack_success(&result, !no_validate, verbose);
-        }
-        Err(e) => {
-            return handle_pack_error(e);
-        }
+    let result = pack_bundle(dir, &options);
+
+    // Clear file lines and finish progress bar
+    for line in &file_lines {
+        line.finish_and_clear();
     }
 
-    Ok(())
+    match result {
+        Ok(result) => {
+            pb.finish_and_clear();
+            println!(
+                "  {} Bundle created [{} files]",
+                "✓".bright_green(),
+                result.file_count
+            );
+            print_pack_success(&result, !no_validate, verbose);
+            Ok(())
+        }
+        Err(e) => {
+            pb.finish_and_clear();
+            println!("  {} Pack failed", "✗".bright_red());
+            handle_pack_error(e)
+        }
+    }
 }
 
 /// Pack bundles for each platform override + universal bundle.
@@ -109,58 +212,93 @@ async fn pack_multi_platform(
         println!("  Creating single universal bundle instead.");
         println!();
 
-        // Fall back to single bundle
+        return pack_single_bundle(dir, None, no_validate, include_dotfiles, verbose);
+    }
+
+    // Create multi-progress for all bundles
+    let mp = MultiProgress::new();
+    let style = ProgressStyle::default_bar()
+        .template("  {msg:<18} [{bar:25.cyan/dim}] {pos:>6}/{len:<6}")
+        .unwrap()
+        .progress_chars("█▓░");
+
+    // Create progress bars for each platform + universal
+    let mut progress_bars: Vec<(String, ProgressBar)> = Vec::new();
+
+    for platform in &platforms {
+        let pb = mp.add(ProgressBar::new(0));
+        pb.set_style(style.clone());
+        pb.set_message(platform.clone());
+        pb.enable_steady_tick(std::time::Duration::from_millis(100));
+        progress_bars.push((platform.clone(), pb));
+    }
+
+    // Universal bundle progress bar
+    let universal_pb = mp.add(ProgressBar::new(0));
+    universal_pb.set_style(style.clone());
+    universal_pb.set_message("universal");
+    universal_pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+    // Pack all bundles in parallel
+    let mut handles = Vec::new();
+
+    for (platform, pb) in &progress_bars {
+        let dir_clone = dir.to_path_buf();
+        let platform_clone = platform.clone();
+        let pb_clone = pb.clone();
+
         let options = PackOptions {
             output: None,
             validate: !no_validate,
             include_dotfiles,
-            verbose,
+            verbose: false,
+            extract_icon: false,
+            on_progress: Some(Arc::new(move |progress| match progress {
+                PackProgress::Started { total_files } => {
+                    pb_clone.set_length(total_files as u64);
+                }
+                PackProgress::FileAdded { current, .. } => {
+                    pb_clone.set_position(current as u64);
+                }
+                PackProgress::Finished => {}
+            })),
         };
 
-        match pack_bundle(dir, &options) {
-            Ok(result) => {
-                print_pack_success(&result, !no_validate, verbose);
-            }
-            Err(e) => {
-                return handle_pack_error(e);
-            }
-        }
-        return Ok(());
+        let handle = tokio::task::spawn_blocking(move || {
+            (
+                platform_clone.clone(),
+                pack_bundle_for_platform(&dir_clone, &options, Some(&platform_clone)),
+            )
+        });
+        handles.push((platform.clone(), handle));
     }
 
-    let base_options = PackOptions {
+    // Universal bundle
+    let dir_clone = dir.to_path_buf();
+    let universal_pb_clone = universal_pb.clone();
+    let universal_options = PackOptions {
         output: None,
         validate: !no_validate,
         include_dotfiles,
-        verbose: false, // Suppress per-file output for parallel packing
+        verbose: false,
+        extract_icon: false,
+        on_progress: Some(Arc::new(move |progress| match progress {
+            PackProgress::Started { total_files } => {
+                universal_pb_clone.set_length(total_files as u64);
+            }
+            PackProgress::FileAdded { current, .. } => {
+                universal_pb_clone.set_position(current as u64);
+            }
+            PackProgress::Finished => {}
+        })),
     };
+    let universal_handle =
+        tokio::task::spawn_blocking(move || pack_bundle(&dir_clone, &universal_options));
 
-    // Pack all bundles in parallel using tokio::spawn
-    let mut handles = Vec::new();
-
-    // Pack platform-specific bundles
-    for platform in platforms.clone() {
-        let dir_clone = dir.to_path_buf();
-        let opts = base_options.clone();
-        let platform_clone = platform.clone();
-        let handle = tokio::task::spawn_blocking(move || {
-            pack_bundle_for_platform(&dir_clone, &opts, Some(&platform_clone))
-        });
-        handles.push((platform, handle));
-    }
-
-    // Pack universal bundle
-    let dir_clone = dir.to_path_buf();
-    let opts = base_options.clone();
-    let universal_handle = tokio::task::spawn_blocking(move || pack_bundle(&dir_clone, &opts));
-
-    // Wait for all packs to complete with spinner
-    let bundle_count = platforms.len() + 1; // platforms + universal
-    let spinner = Spinner::new(format!("Packing {} bundles", bundle_count));
-
+    // Wait for all packs to complete
     let mut results: Vec<(String, Result<PackResult, PackError>)> = Vec::new();
     for (platform, handle) in handles {
-        let result = handle
+        let (_, result) = handle
             .await
             .map_err(|e| ToolError::Generic(format!("Task failed: {}", e)))?;
         results.push((platform, result));
@@ -170,9 +308,15 @@ async fn pack_multi_platform(
         .await
         .map_err(|e| ToolError::Generic(format!("Task failed: {}", e)))?;
 
-    spinner.succeed(Some("Bundles packed"));
+    // Finish all progress bars
+    for (_, pb) in &progress_bars {
+        pb.finish_and_clear();
+    }
+    universal_pb.finish_and_clear();
 
     // Print results
+    println!("  {} Bundles packed", "✓".bright_green());
+
     if !no_validate {
         println!("  {} Validation passed", "✓".bright_green());
     }

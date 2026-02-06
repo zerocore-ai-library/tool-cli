@@ -341,11 +341,19 @@ pub(super) async fn verify_server(
             match build {
                 Ok(true) => {
                     let _ = cliclack::outro("Building...");
-                    let status = std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(build_cmd)
-                        .current_dir(dir)
-                        .status();
+                    let status = if cfg!(windows) {
+                        std::process::Command::new("cmd")
+                            .arg("/C")
+                            .arg(build_cmd)
+                            .current_dir(dir)
+                            .status()
+                    } else {
+                        std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(build_cmd)
+                            .current_dir(dir)
+                            .status()
+                    };
 
                     match status {
                         Ok(s) if s.success() => {

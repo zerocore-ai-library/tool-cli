@@ -10,8 +10,6 @@
 > [MCP](https://github.com/modelcontextprotocol) solved how AI agents integrate with other systems. [MCPB](https://github.com/modelcontextprotocol/mcpb) solved how users install them. But if you're building MCP tools, you're still copying JSON configs, wrestling with dependencies, and manually testing against clients.
 >
 > `tool-cli` is the missing piece. It handles the entire lifecycle from scaffolding to publishing, so you can focus on building your tool.
->
-> `tool-cli` also turns your MCP servers into CLIs, allowing you to build context-efficient agents with dynamic tool loading.
 
 <br />
 
@@ -29,6 +27,18 @@
     <img src="https://img.shields.io/badge/read the docs-%2300acee.svg?color=ff4500&style=for-the-badge&logo=gitbook&logoColor=white" alt=documentation style="margin-bottom: 5px;"/>
   </a>
 </div>
+
+<br />
+
+- <img src="https://octicons-col.vercel.app/download/f88349" height="14"/> &nbsp;**Growing marketplace:** discover and install MCPs from [tool.store](https://tool.store)
+- <img src="https://octicons-col.vercel.app/plug/f88349" height="14"/> &nbsp;**Works with your stack:** Claude Code, Cursor, OpenCode, VS Code, and more
+- <img src="https://octicons-col.vercel.app/server/f88349" height="14"/> &nbsp;**Unified proxy:** run all your MCPs through a single `tool run` interface
+- <img src="https://octicons-col.vercel.app/command-palette/f88349" height="14"/> &nbsp;**MCPs as CLIs:** invoke any tool directly from your terminal with `tool call`
+- <img src="https://octicons-col.vercel.app/gear/f88349" height="14"/> &nbsp;**Configure once:** set it up once, use it everywhere
+- <img src="https://octicons-col.vercel.app/terminal/f88349" height="14"/> &nbsp;**Built for both humans and agents:** clean output that works in terminals and AI workflows
+- <img src="https://octicons-col.vercel.app/shield-lock/f88349" height="14"/> &nbsp;**Encrypted by default:** API keys and secrets are encrypted at rest
+- <img src="https://octicons-col.vercel.app/passkey-fill/f88349" height="14"/> &nbsp;**OAuth just works:** browser flow, token refresh, secure storage handled for you
+- <img src="https://octicons-col.vercel.app/rocket/f88349" height="14"/> &nbsp;**Ship your own MCP:** scaffold, test, and publish with `tool init`
 
 <br />
 
