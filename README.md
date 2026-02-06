@@ -54,8 +54,16 @@
 
 ## Install
 
+> macOS / Linux:
+>
 > ```sh
 > curl -fsSL https://cli.tool.store | sh
+> ```
+>
+> Windows (or any system with Rust):
+>
+> ```sh
+> cargo install --git https://github.com/zerocore-ai/tool-cli --locked
 > ```
 
 <br />
