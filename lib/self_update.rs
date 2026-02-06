@@ -261,6 +261,12 @@ fn extract_binary(tarball: &[u8]) -> ToolResult<Vec<u8>> {
 
 /// Perform the self-update.
 pub async fn self_update(target_version: Option<&str>) -> ToolResult<()> {
+    if cfg!(windows) {
+        return Err(ToolError::Generic(
+            "Self-update is not supported on Windows yet. Reinstall with: cargo install --git https://github.com/zerocore-ai/tool-cli --locked".into(),
+        ));
+    }
+
     println!();
     let spinner = Spinner::with_indent("Checking for updates", 2);
 

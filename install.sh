@@ -255,6 +255,13 @@ detect_platform() {
     esac
 
     PLATFORM="${OS}-${ARCH}"
+
+    # Binary naming differs on Windows
+    if [ "$OS" = "windows" ]; then
+        BINARIES="tool.exe"
+    else
+        BINARIES="tool"
+    fi
 }
 
 #--------------------------------------------------------------------------------------------------
@@ -642,8 +649,6 @@ do_install() {
     box_top "Tool CLI Installer"
     log ""
 
-    # Detect platform
-    detect_platform
     step_info "Platform: ${BOLD}${PLATFORM}${RESET}"
 
     # Get version
@@ -791,6 +796,7 @@ parse_args() {
 main() {
     parse_args "$@"
     check_requirements
+    detect_platform
 
     if [ "$UNINSTALL" = 1 ]; then
         do_uninstall

@@ -28,6 +28,9 @@ jobs:
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             name: linux-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows-x86_64
 
     runs-on: ${{ matrix.os }}
 
@@ -49,14 +52,27 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} --package tool-cli --bin tool
 
       - name: Strip binary
+        if: runner.os != 'Windows'
         run: strip target/${{ matrix.target }}/release/tool
 
       - name: Package binary
+        if: runner.os != 'Windows'
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           mkdir -p dist
           cp target/${{ matrix.target }}/release/tool dist/
           cd dist && tar -czvf ../tool-${VERSION}-${{ matrix.name }}.tar.gz *
+
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF_NAME}" -replace '^v', ''
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/tool.exe" "dist/tool.exe"
+          Push-Location dist
+          tar -czvf "../tool-$version-${{ matrix.name }}.tar.gz" *
+          Pop-Location
 
       - name: Generate checksum (Linux)
         if: runner.os == 'Linux'
@@ -69,6 +85,15 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           shasum -a 256 tool-${VERSION}-${{ matrix.name }}.tar.gz > tool-${VERSION}-${{ matrix.name }}.tar.gz.sha256
+
+      - name: Generate checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF_NAME}" -replace '^v', ''
+          $file = "tool-$version-${{ matrix.name }}.tar.gz"
+          $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+          "$hash  $file" | Out-File -Encoding ascii "$file.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -11,6 +11,7 @@ use crate::resolver::{FilePluginResolver, load_tool_from_path};
 use crate::system_config::allocate_system_config;
 use colored::Colorize;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::path::PathBuf;
 
 //--------------------------------------------------------------------------------------------------
@@ -452,18 +453,14 @@ pub async fn list_tools(
 /// Resolve a tool reference to a path.
 ///
 /// Resolution order:
-/// 1. Explicit path indicators (`.`, `./`, `/`, `..`) - treat as local path
+/// 1. Explicit path indicators (`.`, `./`, `.\`, `/`, `\`, `..`, `~`, `C:\...`) - treat as local path
 /// 2. Try to resolve from installed tools
 /// 3. Fallback to relative path if it exists locally
 ///
 /// Returns both the path and whether it was resolved as an installed tool.
 pub async fn resolve_tool_path(tool: &str) -> ToolResult<ResolvedToolPath> {
-    // Check for explicit path indicators first
-    let is_explicit_path =
-        tool == "." || tool.starts_with("./") || tool.starts_with('/') || tool.contains("..");
-
-    if is_explicit_path {
-        let path = PathBuf::from(tool);
+    if is_explicit_tool_path(tool) {
+        let path = expand_tilde(PathBuf::from(tool))?;
         let abs_path = if path.is_absolute() {
             path
         } else {
@@ -501,6 +498,61 @@ pub async fn resolve_tool_path(tool: &str) -> ToolResult<ResolvedToolPath> {
         "Tool '{}' not found. Use a path or install it first.",
         tool
     )))
+}
+
+fn is_explicit_tool_path(tool: &str) -> bool {
+    if tool == "." || tool == ".." || tool == "~" {
+        return true;
+    }
+
+    if tool.starts_with("./")
+        || tool.starts_with(".\\")
+        || tool.starts_with("../")
+        || tool.starts_with("..\\")
+        || tool.starts_with("~/")
+        || tool.starts_with("~\\")
+    {
+        return true;
+    }
+
+    // Rooted paths
+    if tool.starts_with('/') || tool.starts_with('\\') {
+        return true;
+    }
+
+    // Windows drive paths (also treat as explicit even if running on non-Windows platforms).
+    // Examples: "C:\foo", "C:/foo"
+    if tool.len() >= 3 {
+        let bytes = tool.as_bytes();
+        if bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && (bytes[2] == b'\\' || bytes[2] == b'/')
+        {
+            return true;
+        }
+    }
+
+    Path::new(tool).is_absolute()
+}
+
+fn expand_tilde(path: PathBuf) -> ToolResult<PathBuf> {
+    let s = path.to_string_lossy();
+    if !s.starts_with('~') {
+        return Ok(path);
+    }
+
+    let home = dirs::home_dir()
+        .ok_or_else(|| ToolError::Generic("Could not determine home directory".into()))?;
+
+    if s == "~" {
+        return Ok(home);
+    }
+
+    if s.starts_with("~/") || s.starts_with("~\\") {
+        return Ok(home.join(&s[2..]));
+    }
+
+    Ok(path)
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -543,7 +595,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_explicit_path_starting_with_slash() {
+    async fn test_resolve_explicit_absolute_path_string() {
         let temp = TempDir::new().unwrap();
         let tool_dir = temp.path().join("my-tool");
         fs::create_dir(&tool_dir).unwrap();
@@ -583,16 +635,25 @@ mod tests {
 
     #[test]
     fn test_is_explicit_path_detection() {
-        // These should be detected as explicit paths
-        assert!(".".starts_with('.') || "." == ".");
-        assert!("./my-tool".starts_with("./"));
-        assert!("/absolute/path".starts_with('/'));
-        assert!("../parent".contains(".."));
+        assert!(super::is_explicit_tool_path("."));
+        assert!(super::is_explicit_tool_path(".."));
+        assert!(super::is_explicit_tool_path("./my-tool"));
+        assert!(super::is_explicit_tool_path("../parent"));
+        assert!(super::is_explicit_tool_path("/absolute/path"));
+        assert!(super::is_explicit_tool_path("~/.tool"));
 
-        // These should NOT be explicit paths
-        assert!(!"my-tool".starts_with('.'));
-        assert!(!"my-tool".starts_with("./"));
-        assert!(!"my-tool".starts_with('/'));
-        assert!(!"my-tool".contains(".."));
+        #[cfg(windows)]
+        {
+            assert!(super::is_explicit_tool_path(".\\my-tool"));
+            assert!(super::is_explicit_tool_path("..\\parent"));
+            assert!(super::is_explicit_tool_path("C:\\absolute\\path"));
+            assert!(super::is_explicit_tool_path("C:/absolute/path"));
+            assert!(super::is_explicit_tool_path("\\\\server\\share"));
+            assert!(super::is_explicit_tool_path("\\absolute\\path"));
+        }
+
+        assert!(!super::is_explicit_tool_path("my-tool"));
+        assert!(!super::is_explicit_tool_path("library/bash"));
+        assert!(!super::is_explicit_tool_path("appcypher/bash@1.0.0"));
     }
 }
