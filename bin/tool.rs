@@ -432,6 +432,35 @@ async fn run() -> ToolResult<()> {
             handlers::search_tools(&query, cli.concise, cli.no_header).await
         }
 
+        Command::Preview {
+            tool,
+            methods,
+            input_only,
+            output_only,
+            description_only,
+            tools,
+            prompts,
+            all,
+            json,
+            level,
+        } => {
+            handlers::tool_preview(
+                tool,
+                methods,
+                input_only,
+                output_only,
+                description_only,
+                tools,
+                prompts,
+                all,
+                json,
+                cli.concise,
+                cli.no_header,
+                level,
+            )
+            .await
+        }
+
         Command::Publish {
             path,
             dry_run,

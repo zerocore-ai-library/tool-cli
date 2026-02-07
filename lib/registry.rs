@@ -136,6 +136,8 @@ pub struct VersionInfo {
     pub main_download_url: Option<String>,
     /// Map of filename to file info (for multi-platform bundles).
     pub files: Option<std::collections::HashMap<String, FileInfo>>,
+    /// The manifest JSON (included when fetching version details).
+    pub manifest: Option<serde_json::Value>,
 }
 
 /// File specification for upload initiation.
