@@ -407,7 +407,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 <code>roo-code</code>
 </td>
 <td align="center" width="180">
-<img src="https://avatars.githubusercontent.com/u/66570915?s=200&v=4" width="50" height="50" alt="OpenCode"/>
+<img src="https://github.com/user-attachments/assets/9bd08b42-6cfc-4c32-80df-0e04d2ec5544" width="50" height="50" alt="OpenCode"/>
 <br />
 <code>opencode</code>
 </td>
