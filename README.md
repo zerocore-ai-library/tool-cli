@@ -255,6 +255,22 @@ If your tool includes platform-specific binaries (native executables, compiled c
 
 ##
 
+### Preview Tools
+
+> ```sh
+> tool preview library/open-data
+> ```
+>
+> Inspect a tool from the registry without installing it. See its available methods before you commit.
+>
+> ```sh
+> tool preview library/bash -m bash__exec
+> ```
+>
+> Preview a specific method to see its input and output schemas.
+
+##
+
 ### Install Tools
 
 > ```sh
@@ -447,6 +463,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 | `detect`    | Scan a project and show what tool-cli finds                 |
 | `validate`  | Check your manifest for errors                              |
 | `info`      | Show what a tool exposes                                    |
+| `preview`   | Preview a registry tool without installing                  |
 | `call`      | Call a tool method directly                                 |
 | `run`       | Start a tool as a server                                    |
 | `pack`      | Bundle into `.mcpb`/`.mcpbx` (supports multi-platform)      |

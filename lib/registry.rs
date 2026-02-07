@@ -305,6 +305,35 @@ impl RegistryClient {
         &self.url
     }
 
+    /// Get the download URL for the main bundle of a version.
+    /// This URL goes through the backend for download tracking.
+    pub fn get_download_url(&self, namespace: &str, name: &str, version: &str) -> String {
+        format!(
+            "{}{}/artifacts/{}/{}/versions/{}/download",
+            self.url, API_PREFIX, namespace, name, version
+        )
+    }
+
+    /// Get the download URL for a specific file in a version.
+    /// This URL goes through the backend for download tracking.
+    pub fn get_file_download_url(
+        &self,
+        namespace: &str,
+        name: &str,
+        version: &str,
+        filename: &str,
+    ) -> String {
+        format!(
+            "{}{}/artifacts/{}/{}/versions/{}/download/{}",
+            self.url,
+            API_PREFIX,
+            namespace,
+            name,
+            version,
+            urlencoding::encode(filename)
+        )
+    }
+
     /// Check if authentication is configured.
     pub fn has_auth(&self) -> bool {
         self.auth_token.is_some()
