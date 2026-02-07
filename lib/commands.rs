@@ -38,6 +38,15 @@ const SEARCH_EXAMPLES: &str = examples![
     "tool search bash -c               " # "Concise output for scripts",
 ];
 
+const PREVIEW_EXAMPLES: &str = examples![
+    "tool preview appcypher/bash       " # "Preview tool from registry",
+    "tool preview appcypher/bash@1.0.0 " # "Preview specific version",
+    "tool preview ns/tool -m exec      " # "Show specific method details",
+    "tool preview ns/tool --tools      " # "List tools only",
+    "tool preview ns/tool --json       " # "JSON output for parsing",
+    "tool preview ns/tool -c           " # "Concise output",
+];
+
 const INSTALL_EXAMPLES: &str = examples![
     "tool install appcypher/bash              " # "Install from registry (latest)",
     "tool install appcypher/bash@1.0.0        " # "Install specific version",
@@ -399,6 +408,49 @@ pub enum Command {
     Search {
         /// Search query.
         query: String,
+    },
+
+    /// Preview a tool from the registry without installing.
+    #[command(after_help = PREVIEW_EXAMPLES)]
+    Preview {
+        /// Tool reference (`namespace/name[@version]`).
+        tool: String,
+
+        /// Focus on specific methods by name (can be repeated).
+        #[arg(short = 'm', long = "method")]
+        methods: Vec<String>,
+
+        /// Show only input schema (requires -m).
+        #[arg(long = "input")]
+        input_only: bool,
+
+        /// Show only output schema (requires -m).
+        #[arg(long = "output")]
+        output_only: bool,
+
+        /// Show only description.
+        #[arg(short = 'd', long = "description")]
+        description_only: bool,
+
+        /// Show only tools.
+        #[arg(long)]
+        tools: bool,
+
+        /// Show only prompts.
+        #[arg(long)]
+        prompts: bool,
+
+        /// Show all capabilities.
+        #[arg(short, long)]
+        all: bool,
+
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+
+        /// Max depth for expanding nested types in output schemas (default: 3).
+        #[arg(short = 'L', long, default_value = "3")]
+        level: usize,
     },
 
     /// Install tools from the registry or local paths.
