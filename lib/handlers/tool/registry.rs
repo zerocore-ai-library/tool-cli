@@ -200,13 +200,18 @@ async fn preflight_download(
         .map_err(|e| format!("Failed to fetch version info: {}", e))?;
 
     // Determine which bundle to download based on platform preference
-    let (download_url, download_size, selected_platform, bundle_ext) =
-        select_platform_bundle(&version_info, platform, &tool_name, &version)?;
+    let bundle = select_platform_bundle(&version_info, platform, &tool_name, &version)?;
+
+    // Construct backend download URL for tracking
+    let download_url = match &bundle.filename {
+        Some(filename) => client.get_file_download_url(&namespace, &tool_name, &version, filename),
+        None => client.get_download_url(&namespace, &tool_name, &version),
+    };
 
     // Determine output path with correct extension
-    let bundle_name = match &selected_platform {
-        Some(p) => format!("{}@{}-{}.{}", tool_name, version, p, bundle_ext),
-        None => format!("{}@{}.{}", tool_name, version, bundle_ext),
+    let bundle_name = match &bundle.selected_platform {
+        Some(p) => format!("{}@{}-{}.{}", tool_name, version, p, bundle.extension),
+        None => format!("{}@{}.{}", tool_name, version, bundle.extension),
     };
 
     let output_path = match output_dir {
@@ -220,21 +225,34 @@ async fn preflight_download(
         namespace,
         tool_name,
         version,
-        download_size,
+        download_size: bundle.size,
         download_url,
         output_path,
-        platform: selected_platform,
+        platform: bundle.selected_platform,
     })
 }
 
+/// Result of platform bundle selection.
+/// Contains info needed to construct backend download URL.
+struct BundleSelection {
+    /// Filename if downloading a specific file, None for main download
+    filename: Option<String>,
+    /// Download size in bytes
+    size: u64,
+    /// Selected platform (e.g., "darwin-arm64"), None for universal
+    selected_platform: Option<String>,
+    /// File extension (mcpb or mcpbx)
+    extension: String,
+}
+
 /// Select the appropriate bundle based on platform preference.
-/// Returns (download_url, size, selected_platform, extension).
+/// Returns info needed to construct the backend download URL.
 fn select_platform_bundle(
     version_info: &crate::registry::VersionInfo,
     platform: Option<&str>,
     tool_name: &str,
     version: &str,
-) -> Result<(String, u64, Option<String>, String), String> {
+) -> Result<BundleSelection, String> {
     let files = version_info.files.as_ref();
 
     // Helper to check if a filename is a platform-specific bundle
@@ -264,7 +282,12 @@ fn select_platform_bundle(
             } else {
                 "mcpb"
             };
-            return Ok((info.url.clone(), info.size, None, ext.to_string()));
+            return Ok(BundleSelection {
+                filename: Some(filename.clone()),
+                size: info.size,
+                selected_platform: None,
+                extension: ext.to_string(),
+            });
         }
         // Fall back to main_download_url only if it's actually a bundle
         if let Some(url) = &version_info.main_download_url
@@ -276,7 +299,12 @@ fn select_platform_bundle(
             } else {
                 "mcpb"
             };
-            return Ok((url.clone(), size, None, ext.to_string()));
+            return Ok(BundleSelection {
+                filename: None, // Use main download endpoint
+                size,
+                selected_platform: None,
+                extension: ext.to_string(),
+            });
         }
         return Err(format!("No universal bundle for {}@{}", tool_name, version));
     }
@@ -308,12 +336,12 @@ fn select_platform_bundle(
                     } else {
                         "mcpb"
                     };
-                    return Ok((
-                        info.url.clone(),
-                        info.size,
-                        Some(variant.to_string()),
-                        ext.to_string(),
-                    ));
+                    return Ok(BundleSelection {
+                        filename: Some(filename.clone()),
+                        size: info.size,
+                        selected_platform: Some(variant.to_string()),
+                        extension: ext.to_string(),
+                    });
                 }
             }
         }
@@ -333,7 +361,12 @@ fn select_platform_bundle(
             } else {
                 "mcpb"
             };
-            return Ok((info.url.clone(), info.size, None, ext.to_string()));
+            return Ok(BundleSelection {
+                filename: Some(filename.clone()),
+                size: info.size,
+                selected_platform: None,
+                extension: ext.to_string(),
+            });
         }
     }
 
@@ -347,7 +380,12 @@ fn select_platform_bundle(
         } else {
             "mcpb"
         };
-        return Ok((url.clone(), size, None, ext.to_string()));
+        return Ok(BundleSelection {
+            filename: None, // Use main download endpoint
+            size,
+            selected_platform: None,
+            extension: ext.to_string(),
+        });
     }
 
     Err(format!(
@@ -629,11 +667,17 @@ async fn preflight_tool(name: &str, platform: Option<&str>) -> PreflightResult {
     };
 
     // Select the appropriate platform bundle
-    let (download_url, download_size, _selected_platform, _ext) =
-        match select_platform_bundle(&version_info, platform, &tool_name, &version) {
-            Ok(result) => result,
-            Err(msg) => return PreflightResult::Failed(msg),
-        };
+    let bundle = match select_platform_bundle(&version_info, platform, &tool_name, &version) {
+        Ok(result) => result,
+        Err(msg) => return PreflightResult::Failed(msg),
+    };
+
+    // Construct backend download URL for tracking
+    let download_url = match &bundle.filename {
+        Some(filename) => client.get_file_download_url(&namespace, &tool_name, &version, filename),
+        None => client.get_download_url(&namespace, &tool_name, &version),
+    };
+    let download_size = bundle.size;
 
     // Check if already installed
     let target_dir = DEFAULT_TOOLS_PATH
