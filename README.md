@@ -42,12 +42,6 @@
 
 <br />
 
-<div align="center">
-    <a href="https://tool.store/blog/building-context-efficient-agents" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://tool.store/blog/building-context-efficient-agents" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
-</div>
-
-<br />
-
 <div align='center'>• • •</div>
 
 <br />
@@ -371,7 +365,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 <table>
 <tr>
 <td align="center" width="180">
-<img src="https://avatars.githubusercontent.com/u/76263028?s=200&v=4" width="50" height="50" alt="Anthropic"/>
+<img src="https://github.com/user-attachments/assets/2a57726d-c1f0-4826-a4ff-adef71cd3842" width="50" height="50" alt="Anthropic"/>
 <br />
 <code>claude-desktop</code>
 </td>
@@ -386,7 +380,7 @@ Once you've installed some tools, you probably want to use them in your favorite
 <code>vscode</code>
 </td>
 <td align="center" width="180">
-<img src="https://avatars.githubusercontent.com/u/76263028?s=200&v=4" width="50" height="50" alt="Claude Code"/>
+<img src="https://github.com/user-attachments/assets/33950c03-0925-437d-8cf2-edbc2adf731b" width="50" height="50" alt="Claude Code"/>
 <br />
 <code>claude-code</code>
 </td>
