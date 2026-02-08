@@ -3,6 +3,7 @@
 use colored::Colorize;
 use serde_json::json;
 
+use super::registry::{execute_ensure, preflight_ensure};
 use crate::commands::HostCommand;
 use crate::error::{ToolError, ToolResult};
 use crate::hosts::{
@@ -10,6 +11,7 @@ use crate::hosts::{
     load_metadata, save_config, save_metadata, tool_ref_to_server_name,
 };
 use crate::prompt::init_theme;
+use crate::references::PluginRef;
 use crate::resolver::FilePluginResolver;
 
 //--------------------------------------------------------------------------------------------------
@@ -68,13 +70,32 @@ async fn host_add(
         tools
     };
 
-    // Validate user-specified tools are installed
+    // Quick local check: which tools need fetching from registry? (no network calls)
+    let mut needs_fetch: Vec<String> = Vec::new();
     if user_specified {
         let resolver = FilePluginResolver::default();
         for tool_ref in &tools_to_add {
-            if let Ok(None) | Err(_) = resolver.resolve_tool(tool_ref).await {
+            // Check if already installed locally
+            if let Ok(Some(_)) = resolver.resolve_tool(tool_ref).await {
+                continue;
+            }
+
+            // Not installed - check if it has a namespace (can be fetched from registry)
+            let plugin_ref = match tool_ref.parse::<PluginRef>() {
+                Ok(p) => p,
+                Err(_) => {
+                    return Err(ToolError::Generic(format!(
+                        "Tool '{}' not found. Use namespace/name format for registry tools, or run `tool install {}` first.",
+                        tool_ref, tool_ref
+                    )));
+                }
+            };
+
+            if plugin_ref.namespace().is_some() {
+                needs_fetch.push(tool_ref.clone());
+            } else {
                 return Err(ToolError::Generic(format!(
-                    "Tool '{}' is not installed. Run `tool install {}` first.",
+                    "Tool '{}' not found. Use namespace/name format for registry tools, or run `tool install {}` first.",
                     tool_ref, tool_ref
                 )));
             }
@@ -134,6 +155,9 @@ async fn host_add(
     if dry_run {
         if concise {
             println!("#action\ttool");
+            for tool in &needs_fetch {
+                println!("fetch\t{}", tool);
+            }
             for tool in &added {
                 println!("add\t{}", tool);
             }
@@ -141,6 +165,15 @@ async fn host_add(
                 println!("skip\t{}", tool);
             }
         } else {
+            // Show tools that would be fetched from registry
+            if !needs_fetch.is_empty() {
+                println!("  {} Would fetch from registry:\n", "→".bright_blue());
+                for tool in &needs_fetch {
+                    println!("  {} {}", "↓".bright_cyan(), tool.bright_cyan());
+                }
+                println!();
+            }
+
             println!(
                 "  {} Would modify: {}\n",
                 "→".bright_blue(),
@@ -184,17 +217,54 @@ async fn host_add(
     if !yes {
         init_theme();
         println!();
-        let proceed = cliclack::confirm(format!(
-            "Add {} tool(s) to {}?",
-            added.len(),
-            host.display_name()
-        ))
-        .initial_value(true)
-        .interact()?;
+
+        // Build confirm message based on what will happen
+        let confirm_msg = if !needs_fetch.is_empty() {
+            format!(
+                "Fetch {} tool(s) from registry and add {} tool(s) to {}?",
+                needs_fetch.len(),
+                added.len(),
+                host.display_name()
+            )
+        } else {
+            format!("Add {} tool(s) to {}?", added.len(), host.display_name())
+        };
+
+        let proceed = cliclack::confirm(confirm_msg)
+            .initial_value(true)
+            .interact()?;
 
         if !proceed {
             cliclack::outro_cancel("Cancelled.")?;
             return Err(ToolError::Cancelled);
+        }
+    }
+
+    // Fetch tools from registry if needed (after confirmation)
+    if !needs_fetch.is_empty() {
+        let preflight = preflight_ensure(&needs_fetch, None).await?;
+
+        // Check for preflight failures
+        if !preflight.failed.is_empty() {
+            let (tool, msg) = &preflight.failed[0];
+            return Err(ToolError::Generic(format!(
+                "Failed to resolve '{}': {}",
+                tool, msg
+            )));
+        }
+
+        // Execute the install
+        if !preflight.to_install.is_empty() {
+            let install_result = execute_ensure(preflight).await?;
+
+            // Check for install failures
+            if !install_result.failed.is_empty() {
+                let (tool, msg) = &install_result.failed[0];
+                return Err(ToolError::Generic(format!(
+                    "Failed to install '{}': {}",
+                    tool, msg
+                )));
+            }
         }
     }
 

@@ -48,6 +48,32 @@ pub enum UninstallResult {
     Failed(String),
 }
 
+/// Result of ensuring tools are installed.
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct EnsureInstalledResult {
+    /// Tools that were already installed locally.
+    pub already_installed: Vec<String>,
+    /// Tools that were auto-installed from the registry.
+    pub auto_installed: Vec<String>,
+    /// Tools that failed to install (tool_ref, error message).
+    pub failed: Vec<(String, String)>,
+}
+
+/// Preflight result for ensuring tools are installed.
+/// Contains information about what needs to be installed without actually installing.
+#[derive(Debug, Default)]
+pub struct EnsurePreflight {
+    /// Tools that are already installed locally.
+    pub already_installed: Vec<String>,
+    /// Tools that need to be fetched from registry (tool_ref, preflight info).
+    pub to_install: Vec<(String, RegistryPreflight)>,
+    /// Non-namespaced tools that were not found locally.
+    pub not_found_local: Vec<String>,
+    /// Tools that failed preflight checks (tool_ref, error message).
+    pub failed: Vec<(String, String)>,
+}
+
 /// Result of attempting to link a local tool.
 #[derive(Debug, Clone)]
 pub enum LinkResult {
@@ -94,16 +120,25 @@ pub struct ArtifactEntry {
 }
 
 /// Pre-flight information for a registry download.
+#[derive(Debug)]
 #[allow(dead_code)]
-struct RegistryPreflight {
-    name: String,
-    namespace: String,
-    tool_name: String,
-    version: String,
-    download_size: u64,
-    download_url: String,
-    target_dir: PathBuf,
-    temp_file: PathBuf,
+pub struct RegistryPreflight {
+    /// Original tool reference.
+    pub name: String,
+    /// Namespace.
+    pub namespace: String,
+    /// Tool name.
+    pub tool_name: String,
+    /// Version to install.
+    pub version: String,
+    /// Download size in bytes.
+    pub download_size: u64,
+    /// Download URL.
+    pub download_url: String,
+    /// Target installation directory.
+    pub target_dir: PathBuf,
+    /// Temporary file path for download.
+    pub temp_file: PathBuf,
 }
 
 /// Result of pre-flight check.
@@ -952,6 +987,211 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
     }
 
     Ok(())
+}
+
+/// Check which tools need to be installed (preflight phase, no side effects).
+///
+/// For each tool, this checks if it's already installed locally or needs to be
+/// fetched from the registry. Returns preflight information without downloading.
+pub async fn preflight_ensure(
+    names: &[String],
+    platform: Option<&str>,
+) -> ToolResult<EnsurePreflight> {
+    use futures_util::future::join_all;
+
+    let resolver = FilePluginResolver::default();
+    let mut result = EnsurePreflight::default();
+
+    // Phase 1: Check which tools are already installed vs need fetching
+    let mut to_check: Vec<String> = Vec::new();
+
+    for name in names {
+        // Check if already installed
+        if let Ok(Some(_)) = resolver.resolve_tool(name).await {
+            result.already_installed.push(name.clone());
+            continue;
+        }
+
+        // Not installed - check if it has a namespace (can be fetched from registry)
+        let plugin_ref = match name.parse::<PluginRef>() {
+            Ok(p) => p,
+            Err(_) => {
+                result.not_found_local.push(name.clone());
+                continue;
+            }
+        };
+
+        if plugin_ref.namespace().is_some() {
+            // Has namespace - can try to fetch from registry
+            to_check.push(name.clone());
+        } else {
+            // No namespace - can't fetch, report as not found
+            result.not_found_local.push(name.clone());
+        }
+    }
+
+    // If nothing to check, return early
+    if to_check.is_empty() {
+        return Ok(result);
+    }
+
+    // Phase 2: Run preflight for tools to install (no output here - just gather info)
+    let preflight_futures: Vec<_> = to_check
+        .iter()
+        .map(|name| preflight_tool(name, platform))
+        .collect();
+    let preflight_results = join_all(preflight_futures).await;
+
+    // Separate successful preflights from failures
+    for (name, preflight_result) in to_check.iter().zip(preflight_results) {
+        match preflight_result {
+            PreflightResult::Registry(preflight) => {
+                result.to_install.push((name.clone(), preflight));
+            }
+            PreflightResult::AlreadyInstalled => {
+                // Race condition: installed between check and preflight
+                result.already_installed.push(name.clone());
+            }
+            PreflightResult::Local(_) => {
+                // Shouldn't happen since we're only processing namespaced tools
+                result.already_installed.push(name.clone());
+            }
+            PreflightResult::Failed(msg) => {
+                result.failed.push((name.clone(), msg));
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Execute the install based on preflight results.
+///
+/// Downloads and installs tools that were identified in the preflight phase.
+pub async fn execute_ensure(preflight: EnsurePreflight) -> ToolResult<EnsureInstalledResult> {
+    use futures_util::future::join_all;
+
+    let mut result = EnsureInstalledResult {
+        already_installed: preflight.already_installed,
+        auto_installed: Vec::new(),
+        failed: preflight
+            .failed
+            .into_iter()
+            .chain(
+                preflight
+                    .not_found_local
+                    .into_iter()
+                    .map(|t| (t.clone(), format!("Tool '{}' not found locally", t))),
+            )
+            .collect(),
+    };
+
+    // If nothing to install, return early
+    if preflight.to_install.is_empty() {
+        return Ok(result);
+    }
+
+    let is_single = preflight.to_install.len() == 1;
+
+    if is_single {
+        println!(
+            "  {} Fetching {} from registry...",
+            "→".bright_blue(),
+            preflight.to_install[0].0.bright_cyan()
+        );
+    } else {
+        println!(
+            "  {} Fetching {} tools from registry...",
+            "→".bright_blue(),
+            preflight.to_install.len().to_string().bright_cyan()
+        );
+    }
+
+    let mut registry_preflights = preflight.to_install;
+
+    if is_single && registry_preflights.len() == 1 {
+        // Single package: show progress bar
+        let (name, preflight) = registry_preflights.remove(0);
+
+        let pb = ProgressBar::new(preflight.download_size);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  [{bar:40.cyan/dim}] {bytes}/{total_bytes} {bytes_per_sec}")
+                .unwrap()
+                .progress_chars("█░░"),
+        );
+        pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+        match download_and_install(preflight, pb.clone()).await {
+            Ok(success) => {
+                pb.finish_and_clear();
+                println!(
+                    "  {} Installed {}/{}@{} ({})",
+                    "✓".bright_green(),
+                    success.namespace.bright_cyan(),
+                    success.tool_name.bright_cyan(),
+                    success.version.bright_cyan(),
+                    format_size(success.size)
+                );
+                result.auto_installed.push(name);
+            }
+            Err(msg) => {
+                pb.finish_and_clear();
+                result.failed.push((name, msg));
+            }
+        }
+    } else {
+        // Multiple packages: parallel download with multi-progress
+        let mp = MultiProgress::new();
+        let style = ProgressStyle::default_bar()
+            .template("  {msg:<30} [{bar:25.cyan/dim}] {bytes:>10}/{total_bytes:<10}")
+            .unwrap()
+            .progress_chars("█░░");
+
+        let handles: Vec<_> = registry_preflights
+            .into_iter()
+            .map(|(name, preflight)| {
+                let pb = mp.add(ProgressBar::new(preflight.download_size));
+                pb.set_style(style.clone());
+                pb.set_message(format!("{}/{}", preflight.namespace, preflight.tool_name));
+                pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+                tokio::spawn(async move {
+                    let install_result = download_and_install(preflight, pb.clone()).await;
+                    pb.finish_and_clear();
+                    (name, install_result)
+                })
+            })
+            .collect();
+
+        let download_results = join_all(handles).await;
+
+        for task_result in download_results {
+            match task_result {
+                Ok((name, Ok(success))) => {
+                    println!(
+                        "  {} Installed {}/{}@{} ({})",
+                        "✓".bright_green(),
+                        success.namespace.bright_cyan(),
+                        success.tool_name.bright_cyan(),
+                        success.version.bright_cyan(),
+                        format_size(success.size)
+                    );
+                    result.auto_installed.push(name);
+                }
+                Ok((name, Err(msg))) => {
+                    result.failed.push((name, msg));
+                }
+                Err(e) => {
+                    result
+                        .failed
+                        .push(("unknown".to_string(), format!("Task panicked: {}", e)));
+                }
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 /// Extract a ZIP bundle to a directory.
