@@ -56,6 +56,7 @@ colored = "3.0"
 console = "0.15"
 urlencoding = "2.1"
 sha2 = "0.10"
+strsim = "0.11"
 
 # Logging (to suppress rmcp tracing output by default)
 tracing = "0.1"
