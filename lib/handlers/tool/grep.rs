@@ -2,6 +2,9 @@
 //!
 //! Searches the unified JSON structure from `tool list --json --full`
 //! and returns matches with JavaScript accessor paths.
+//!
+//! By default, uses static_responses from manifest for fast, offline search.
+//! Use `--live` to connect to the MCP server instead.
 
 use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
@@ -31,6 +34,15 @@ struct GrepMatch {
     server: String,
 }
 
+/// Simplified tool info for grep searches.
+/// Abstracts over static manifest data and live MCP responses.
+struct GrepToolInfo {
+    name: String,
+    description: Option<String>,
+    input_schema: serde_json::Value,
+    output_schema: Option<serde_json::Value>,
+}
+
 //--------------------------------------------------------------------------------------------------
 // Functions
 //--------------------------------------------------------------------------------------------------
@@ -51,6 +63,7 @@ pub async fn grep_tool(
     concise: bool,
     no_header: bool,
     _level: usize,
+    live: bool,
 ) -> ToolResult<()> {
     use regex::RegexBuilder;
 
@@ -104,25 +117,10 @@ pub async fn grep_tool(
 
     // Search each tool
     for (tool_ref, tool_path) in &tools_to_search {
-        // Load manifest and resolve config
+        // Load manifest
         let resolved_plugin = match load_tool_from_path(tool_path) {
             Ok(p) => p,
             Err(_) => continue, // Skip tools that can't be loaded
-        };
-
-        let user_config = BTreeMap::new();
-        let system_config =
-            match allocate_system_config(resolved_plugin.template.system_config.as_ref()) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-        let resolved = match resolved_plugin
-            .template
-            .resolve(&user_config, &system_config)
-        {
-            Ok(r) => r,
-            Err(_) => continue,
         };
 
         let tool_name = resolved_plugin.template.name.clone().unwrap_or_else(|| {
@@ -133,10 +131,87 @@ pub async fn grep_tool(
                 .to_string()
         });
 
-        // Get tool info
-        let capabilities = match get_tool_info(&resolved, &tool_name, false).await {
-            Ok(result) => result,
-            Err(_) => continue, // Skip tools that can't be connected
+        // Get tool info - prefer static manifest data unless --live is specified
+        let tools: Vec<GrepToolInfo> = if live {
+            // --live: connect to MCP server (requires resolving config)
+            let user_config = BTreeMap::new();
+            let system_config =
+                match allocate_system_config(resolved_plugin.template.system_config.as_ref()) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+            let resolved = match resolved_plugin
+                .template
+                .resolve(&user_config, &system_config)
+            {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            match get_tool_info(&resolved, &tool_name, false).await {
+                Ok(caps) => caps
+                    .tools
+                    .into_iter()
+                    .map(|t| GrepToolInfo {
+                        name: t.name.to_string(),
+                        description: t.description.map(|s| s.to_string()),
+                        input_schema: serde_json::Value::Object((*t.input_schema).clone()),
+                        output_schema: t
+                            .output_schema
+                            .map(|s| serde_json::Value::Object((*s).clone())),
+                    })
+                    .collect(),
+                Err(_) => continue,
+            }
+        } else {
+            // Default: use static_responses from manifest (no config resolution needed)
+            let static_tools = resolved_plugin
+                .template
+                .static_responses()
+                .and_then(|sr| sr.tools_list)
+                .filter(|_| resolved_plugin.template.tools_generated != Some(true));
+
+            if let Some(tools_list) = static_tools {
+                tools_list
+                    .tools
+                    .into_iter()
+                    .map(|t| GrepToolInfo {
+                        name: t.name,
+                        description: Some(t.description),
+                        input_schema: t.input_schema.unwrap_or(serde_json::json!({})),
+                        output_schema: t.output_schema,
+                    })
+                    .collect()
+            } else {
+                // Fallback to live MCP call (requires resolving config)
+                let user_config = BTreeMap::new();
+                let system_config =
+                    match allocate_system_config(resolved_plugin.template.system_config.as_ref()) {
+                        Ok(c) => c,
+                        Err(_) => continue,
+                    };
+                let resolved = match resolved_plugin
+                    .template
+                    .resolve(&user_config, &system_config)
+                {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                match get_tool_info(&resolved, &tool_name, false).await {
+                    Ok(caps) => caps
+                        .tools
+                        .into_iter()
+                        .map(|t| GrepToolInfo {
+                            name: t.name.to_string(),
+                            description: t.description.map(|s| s.to_string()),
+                            input_schema: serde_json::Value::Object((*t.input_schema).clone()),
+                            output_schema: t
+                                .output_schema
+                                .map(|s| serde_json::Value::Object((*s).clone())),
+                        })
+                        .collect(),
+                    Err(_) => continue,
+                }
+            }
         };
 
         // Extract server name from tool_ref (e.g., "appcypher/filesystem@1.0" -> "appcypher/filesystem")
@@ -168,7 +243,7 @@ pub async fn grep_tool(
         }
 
         // Search each tool in this server
-        for tool_info in &capabilities.tools {
+        for tool_info in &tools {
             let mcp_tool_name = &tool_info.name;
 
             // If -m specified, skip tools that don't match
