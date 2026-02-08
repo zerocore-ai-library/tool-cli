@@ -22,6 +22,7 @@ pub mod scaffold;
 pub mod security;
 pub mod self_update;
 pub mod styles;
+pub mod suggest;
 pub mod system_config;
 pub mod tree;
 pub mod validate;

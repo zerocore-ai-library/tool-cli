@@ -4,15 +4,146 @@ use crate::error::{ToolError, ToolResult};
 use crate::mcp::call_tool;
 use crate::mcpb::McpbUserConfigField;
 use crate::styles::Spinner;
+use crate::suggest::{
+    extract_missing_param_from_error, extract_params_from_schema, extract_unknown_tool_from_error,
+    find_similar_tools, format_suggestions, is_missing_param_error,
+};
 use colored::Colorize;
 use std::collections::BTreeMap;
 
-use super::common::{PrepareToolOptions, prepare_tool};
+use super::common::{PrepareToolOptions, PreparedTool, prepare_tool};
 use super::config_cmd::{load_tool_config, tool_config_exists};
 
 //--------------------------------------------------------------------------------------------------
 // Functions
 //--------------------------------------------------------------------------------------------------
+
+/// Get available tool names from a prepared tool's manifest.
+///
+/// First tries static_responses (full tool schemas), then falls back to
+/// top-level tools list.
+fn get_available_tools(prepared: &PreparedTool) -> Vec<String> {
+    // Try static_responses first (more complete)
+    if let Some(static_resp) = prepared.plugin.template.static_responses()
+        && let Some(tools_list) = static_resp.tools_list
+    {
+        return tools_list.tools.iter().map(|t| t.name.clone()).collect();
+    }
+
+    // Fall back to top-level tools
+    if let Some(ref tools) = prepared.plugin.template.tools {
+        return tools.iter().map(|t| t.name.clone()).collect();
+    }
+
+    Vec::new()
+}
+
+/// Get the input schema for a specific tool from static_responses.
+fn get_tool_input_schema(prepared: &PreparedTool, tool_name: &str) -> Option<serde_json::Value> {
+    let static_resp = prepared.plugin.template.static_responses()?;
+    let tools_list = static_resp.tools_list?;
+
+    tools_list
+        .tools
+        .iter()
+        .find(|t| t.name == tool_name)
+        .and_then(|t| t.input_schema.clone())
+}
+
+/// Print enhanced error message for missing required parameters.
+///
+/// Shows all required and optional parameters from the tool's schema.
+fn print_missing_param_error(error_text: &str, method: &str, prepared: &PreparedTool) {
+    let missing_param = extract_missing_param_from_error(error_text);
+
+    println!(
+        "  {} Missing required parameter{} for {} on {}\n",
+        "✗".bright_red(),
+        missing_param
+            .as_ref()
+            .map(|p| format!(": {}", p.bright_white()))
+            .unwrap_or_default(),
+        method.bold(),
+        prepared.tool_name.bold()
+    );
+
+    // Get the tool's input schema and show all parameters
+    if let Some(schema) = get_tool_input_schema(prepared, method) {
+        let params = extract_params_from_schema(&schema);
+
+        if !params.is_empty() {
+            let required_params: Vec<_> = params.iter().filter(|p| p.required).collect();
+            let optional_params: Vec<_> = params.iter().filter(|p| !p.required).collect();
+
+            if !required_params.is_empty() {
+                println!("  {}:", "Required".dimmed());
+                for param in &required_params {
+                    let desc = param
+                        .description
+                        .as_ref()
+                        .map(|d| format!(" - {}", d.dimmed()))
+                        .unwrap_or_default();
+                    println!(
+                        "  · {} ({}){}",
+                        param.name.bright_cyan(),
+                        param.param_type.dimmed(),
+                        desc
+                    );
+                }
+            }
+
+            if !optional_params.is_empty() {
+                if !required_params.is_empty() {
+                    println!();
+                }
+                println!("  {}:", "Optional".dimmed());
+                for param in &optional_params {
+                    let desc = param
+                        .description
+                        .as_ref()
+                        .map(|d| format!(" - {}", d.dimmed()))
+                        .unwrap_or_default();
+                    println!(
+                        "  · {} ({}){}",
+                        param.name.dimmed(),
+                        param.param_type.dimmed(),
+                        desc
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Print enhanced error message for unknown tool with fuzzy suggestions.
+fn print_unknown_tool_error(unknown_tool: &str, prepared: &PreparedTool) {
+    let available_tools = get_available_tools(prepared);
+    let suggestions = find_similar_tools(unknown_tool, &available_tools);
+
+    println!(
+        "  {} Tool {} not found on {}\n",
+        "✗".bright_red(),
+        format!("`{}`", unknown_tool).bright_white(),
+        prepared.tool_name.bold()
+    );
+
+    if let Some(hint) = format_suggestions(&suggestions) {
+        println!("  · {} {}", "hint:".bright_cyan().bold(), hint);
+    }
+
+    // Show available tools if there are few
+    if !available_tools.is_empty() && available_tools.len() <= 10 {
+        println!("  {}:", "Available tools".dimmed());
+        for tool in &available_tools {
+            println!("  · {}", tool.bright_cyan());
+        }
+    } else if !available_tools.is_empty() {
+        println!(
+            "  · Run {} to see available tools",
+            format!("tool info {} --tools", prepared.tool_name).bright_cyan()
+        );
+    }
+}
 
 /// Expand shorthand method syntax.
 ///
@@ -147,6 +278,20 @@ pub async fn tool_call(
             if let Some(s) = spinner {
                 s.fail(None);
             }
+
+            // Check for enhanced error handling
+            if let ToolError::Generic(ref msg) = e {
+                if is_missing_param_error(msg) {
+                    print_missing_param_error(msg, &method, &prepared);
+                    std::process::exit(1);
+                }
+
+                if let Some(unknown_tool) = extract_unknown_tool_from_error(msg) {
+                    print_unknown_tool_error(&unknown_tool, &prepared);
+                    std::process::exit(1);
+                }
+            }
+
             return Err(e);
         }
     };
@@ -210,6 +355,30 @@ pub async fn tool_call(
             std::process::exit(1);
         }
         return Ok(());
+    }
+
+    // Check for special error types in result content that we can enhance
+    if is_error {
+        // Extract text content to check for known error patterns
+        let error_text: String = result
+            .result
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let rmcp::model::RawContent::Text(text) = &**c {
+                    Some(text.text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Handle missing required parameter errors with enhanced output
+        if is_missing_param_error(&error_text) {
+            print_missing_param_error(&error_text, &method, &prepared);
+            std::process::exit(1);
+        }
     }
 
     // Print header matching rad tool format
