@@ -83,6 +83,7 @@ const GREP_EXAMPLES: &str = examples![
     "tool grep database -m query       " # "Search within specific method",
     "tool grep \"^get_\" -i              " # "Case-insensitive regex",
     "tool grep file -l                 " # "List matching paths only",
+    "tool grep file --live             " # "Connect to server instead of manifest",
 ];
 
 const INFO_EXAMPLES: &str = examples![
@@ -536,6 +537,10 @@ pub enum Command {
         /// Max depth for expanding nested types in output schemas (default: 3).
         #[arg(short = 'L', long, default_value = "3")]
         level: usize,
+
+        /// Connect to MCP server instead of using static manifest data.
+        #[arg(long)]
+        live: bool,
     },
 
     /// Inspect a tool's capabilities.

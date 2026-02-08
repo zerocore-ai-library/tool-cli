@@ -522,6 +522,7 @@ async fn run() -> ToolResult<()> {
             list_only,
             json,
             level,
+            live,
         } => {
             handlers::grep_tool(
                 &pattern,
@@ -537,6 +538,7 @@ async fn run() -> ToolResult<()> {
                 cli.concise,
                 cli.no_header,
                 level,
+                live,
             )
             .await
         }
