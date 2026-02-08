@@ -20,7 +20,7 @@
 <br />
 
 <div align='center'>
-  <a href="https://discord.gg/ck5xz7vR" target="_blank">
+  <a href="https://discord.com/invite/rd49qgj5" target="_blank">
     <img src="https://img.shields.io/badge/join discord-%2300acee.svg?color=mediumslateblue&style=for-the-badge&logo=discord&logoColor=white" alt=discord style="margin-bottom: 5px;"/>
   </a>
   <a href="https://tool.store/docs" target="_blank">
@@ -322,10 +322,10 @@ If your tool includes platform-specific binaries (native executables, compiled c
 > See all tools that have saved configuration.
 >
 > ```sh
-> tool config unset library/terminal API_KEY
+> tool config unset library/terminal
 > ```
 >
-> Remove specific config keys, or use `--all` to clear everything.
+> Remove config and credentials for a tool, or use `--all` for all tools.
 
 ##
 
@@ -365,9 +365,19 @@ Once you've installed some tools, you probably want to use them in your favorite
 <table>
 <tr>
 <td align="center" width="180">
-<img src="https://github.com/user-attachments/assets/2a57726d-c1f0-4826-a4ff-adef71cd3842" width="50" height="50" alt="Anthropic"/>
+<img src="https://github.com/user-attachments/assets/33950c03-0925-437d-8cf2-edbc2adf731b" width="50" height="50" alt="Claude Code"/>
 <br />
-<code>claude-desktop</code>
+<code>claude-code</code>
+</td>
+<td align="center" width="180">
+<img src="https://github.com/user-attachments/assets/9bd08b42-6cfc-4c32-80df-0e04d2ec5544" width="50" height="50" alt="OpenCode"/>
+<br />
+<code>opencode</code>
+</td>
+<td align="center" width="180">
+<img src="https://avatars.githubusercontent.com/u/14957082?s=200&v=4" width="50" height="50" alt="Codex"/>
+<br />
+<code>codex</code>
 </td>
 <td align="center" width="180">
 <img src="https://www.cursor.com/brand/icon.svg" width="50" height="50" alt="Cursor"/>
@@ -380,14 +390,9 @@ Once you've installed some tools, you probably want to use them in your favorite
 <code>vscode</code>
 </td>
 <td align="center" width="180">
-<img src="https://github.com/user-attachments/assets/33950c03-0925-437d-8cf2-edbc2adf731b" width="50" height="50" alt="Claude Code"/>
+<img src="https://github.com/user-attachments/assets/2a57726d-c1f0-4826-a4ff-adef71cd3842" width="50" height="50" alt="Claude Desktop"/>
 <br />
-<code>claude-code</code>
-</td>
-<td align="center" width="180">
-<img src="https://avatars.githubusercontent.com/u/14957082?s=200&v=4" width="50" height="50" alt="Codex"/>
-<br />
-<code>codex</code>
+<code>claude-desktop</code>
 </td>
 </tr>
 <tr>
@@ -415,11 +420,6 @@ Once you've installed some tools, you probably want to use them in your favorite
 <img src="https://avatars.githubusercontent.com/u/211522643?s=200&v=4" width="50" height="50" alt="Roo Code"/>
 <br />
 <code>roo-code</code>
-</td>
-<td align="center" width="180">
-<img src="https://github.com/user-attachments/assets/9bd08b42-6cfc-4c32-80df-0e04d2ec5544" width="50" height="50" alt="OpenCode"/>
-<br />
-<code>opencode</code>
 </td>
 </tr>
 </table>

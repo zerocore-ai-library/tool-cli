@@ -1,7 +1,7 @@
 //! Tool config command handlers.
 
 use crate::commands::ConfigCommand;
-use crate::constants::DEFAULT_CONFIG_PATH;
+use crate::constants::{DEFAULT_CONFIG_PATH, DEFAULT_CREDENTIALS_PATH};
 use crate::error::{ToolError, ToolResult};
 use crate::mcp::connect_with_oauth;
 use crate::mcpb::{McpbTransport, McpbUserConfigField, McpbUserConfigType};
@@ -17,7 +17,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io::{self, IsTerminal, Write};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use super::common::resolve_tool;
@@ -59,12 +59,7 @@ pub async fn config_tool(cmd: ConfigCommand, concise: bool, no_header: bool) -> 
             config_get(tool, key, json, concise, no_header).await
         }
         ConfigCommand::List { tool, json } => config_list(tool, json, concise, no_header).await,
-        ConfigCommand::Unset {
-            tool,
-            keys,
-            all,
-            yes,
-        } => config_unset(tool, keys, all, yes, concise).await,
+        ConfigCommand::Unset { tool, all, yes } => config_unset(tool, all, yes, concise).await,
     }
 }
 
@@ -751,29 +746,13 @@ fn config_type_str(t: &McpbUserConfigType) -> String {
 }
 
 /// Handle `config unset` subcommand.
-async fn config_unset(
-    tool: Option<String>,
-    keys: Vec<String>,
-    all: bool,
-    yes: bool,
-    concise: bool,
-) -> ToolResult<()> {
+async fn config_unset(tool: Option<String>, all: bool, yes: bool, concise: bool) -> ToolResult<()> {
     match (tool, all) {
-        // `tool config unset --all` or `tool config unset --all <keys...>`
-        (None, true) => unset_all_tools(keys, yes, concise).await,
+        // `tool config unset --all`
+        (None, true) => unset_all_tools(yes, concise).await,
 
-        // `tool config unset <tool> --all`
-        (Some(tool), true) => unset_tool_all_keys(&tool, yes, concise).await,
-
-        // `tool config unset <tool> <keys...>`
-        (Some(tool), false) => {
-            if keys.is_empty() {
-                return Err(ToolError::Generic(
-                    "No keys specified. Use --all to remove all keys.".into(),
-                ));
-            }
-            unset_tool_keys(&tool, &keys, concise).await
-        }
+        // `tool config unset <tool>` (--all is redundant with a tool specified)
+        (Some(tool), _) => unset_tool(&tool, yes, concise).await,
 
         // `tool config unset` (no tool, no --all)
         (None, false) => Err(ToolError::Generic(
@@ -782,64 +761,22 @@ async fn config_unset(
     }
 }
 
-/// Unset specific keys from a single tool.
-async fn unset_tool_keys(tool: &str, keys: &[String], concise: bool) -> ToolResult<()> {
-    let (plugin_ref, schema) = resolve_tool_for_config(tool).await?;
-
-    let mut config = load_tool_config(&plugin_ref).unwrap_or_default();
-    let mut removed = Vec::new();
-    let mut not_found = Vec::new();
-
-    for key in keys {
-        if config.remove(key).is_some() {
-            removed.push(key.as_str());
-        } else {
-            not_found.push(key.as_str());
-        }
-    }
-
-    if !removed.is_empty() {
-        if config.is_empty() {
-            delete_tool_config(&plugin_ref)?;
-        } else {
-            save_tool_config_with_schema(&plugin_ref, &config, schema.as_ref())?;
-        }
-    }
-
-    if concise {
-        println!("ok");
-    } else {
-        if !removed.is_empty() {
-            println!(
-                "\n  {} Removed {} from {}\n",
-                "✓".bright_green(),
-                removed.join(", "),
-                plugin_ref
-            );
-        }
-        if !not_found.is_empty() {
-            println!(
-                "  {} Keys not found: {}\n",
-                "!".bright_yellow(),
-                not_found.join(", ")
-            );
-        }
-    }
-
-    Ok(())
-}
-
-/// Unset all keys from a single tool.
-async fn unset_tool_all_keys(tool: &str, yes: bool, concise: bool) -> ToolResult<()> {
+/// Unset all config and credentials for a single tool.
+async fn unset_tool(tool: &str, yes: bool, concise: bool) -> ToolResult<()> {
     let (plugin_ref, _schema) = resolve_tool_for_config(tool).await?;
 
-    let config_path = get_config_path(&plugin_ref);
-    if !config_path.exists() {
+    let config_dir = get_config_dir(&plugin_ref);
+    let cred_dir = get_credentials_dir(&plugin_ref);
+
+    let has_config = config_dir.exists();
+    let has_credentials = cred_dir.exists();
+
+    if !has_config && !has_credentials {
         if concise {
             println!("ok");
         } else {
             println!(
-                "\n  {} No configuration to remove for {}\n",
+                "\n  {} No configuration or credentials to remove for {}\n",
                 "!".bright_yellow(),
                 plugin_ref
             );
@@ -849,37 +786,46 @@ async fn unset_tool_all_keys(tool: &str, yes: bool, concise: bool) -> ToolResult
 
     // Confirm if not --yes
     if !yes && !concise {
+        init_theme();
         println!();
-        println!(
-            "  {} This will remove all configuration for {}",
-            "!".bright_yellow(),
-            plugin_ref
-        );
-        println!();
-        print!("  Continue? [y/N] ");
-        io::stdout().flush().ok();
 
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| ToolError::Generic(format!("Failed to read input: {}", e)))?;
+        let what = match (has_config, has_credentials) {
+            (true, true) => "configuration and credentials",
+            (true, false) => "configuration",
+            (false, true) => "credentials",
+            (false, false) => unreachable!(),
+        };
 
-        if !input.trim().eq_ignore_ascii_case("y") {
-            println!();
-            println!("  {} Cancelled", "✗".bright_red());
-            println!();
-            return Ok(());
+        let proceed = cliclack::confirm(format!("Remove {} for {}?", what, plugin_ref))
+            .initial_value(true)
+            .interact()?;
+
+        if !proceed {
+            cliclack::outro_cancel("Cancelled.")?;
+            return Err(ToolError::Cancelled);
         }
     }
 
-    delete_tool_config(&plugin_ref)?;
+    if has_config {
+        delete_tool_config(&plugin_ref)?;
+    }
+    if has_credentials {
+        delete_tool_credentials(&plugin_ref)?;
+    }
 
     if concise {
         println!("ok");
     } else {
+        let what = match (has_config, has_credentials) {
+            (true, true) => "configuration and credentials",
+            (true, false) => "configuration",
+            (false, true) => "credentials",
+            (false, false) => unreachable!(),
+        };
         println!(
-            "\n  {} Removed all configuration for {}\n",
+            "\n  {} Removed {} for {}\n",
             "✓".bright_green(),
+            what,
             plugin_ref
         );
     }
@@ -887,16 +833,24 @@ async fn unset_tool_all_keys(tool: &str, yes: bool, concise: bool) -> ToolResult
     Ok(())
 }
 
-/// Unset config for all tools, optionally filtering by keys.
-async fn unset_all_tools(keys: Vec<String>, yes: bool, concise: bool) -> ToolResult<()> {
-    let tools = list_configured_tools()?;
+/// Unset config and credentials for all tools.
+async fn unset_all_tools(yes: bool, concise: bool) -> ToolResult<()> {
+    let config_tools: std::collections::HashSet<String> = list_configured_tools()?
+        .into_iter()
+        .map(|(name, _, _)| name)
+        .collect();
+    let cred_tools: std::collections::HashSet<String> =
+        list_tools_with_credentials()?.into_iter().collect();
 
-    if tools.is_empty() {
+    // Union of tools with config or credentials
+    let all_tools: std::collections::HashSet<&String> = config_tools.union(&cred_tools).collect();
+
+    if all_tools.is_empty() {
         if concise {
             println!("ok");
         } else {
             println!(
-                "\n  {} No tools have saved configuration.\n",
+                "\n  {} No tools have saved configuration or credentials.\n",
                 "!".bright_yellow()
             );
         }
@@ -905,79 +859,61 @@ async fn unset_all_tools(keys: Vec<String>, yes: bool, concise: bool) -> ToolRes
 
     // Confirm if not --yes
     if !yes && !concise {
+        init_theme();
         println!();
-        let message = if keys.is_empty() {
-            format!("remove all configuration for {} tool(s)", tools.len())
-        } else {
-            format!("remove {} from {} tool(s)", keys.join(", "), tools.len())
-        };
-        println!("  {} This will {}", "!".bright_yellow(), message);
-        println!();
-        print!("  Continue? [y/N] ");
-        io::stdout().flush().ok();
 
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| ToolError::Generic(format!("Failed to read input: {}", e)))?;
+        let proceed = cliclack::confirm(format!(
+            "Remove all configuration and credentials for {} tool(s)?",
+            all_tools.len()
+        ))
+        .initial_value(true)
+        .interact()?;
 
-        if !input.trim().eq_ignore_ascii_case("y") {
-            println!();
-            println!("  {} Cancelled", "✗".bright_red());
-            println!();
-            return Ok(());
+        if !proceed {
+            cliclack::outro_cancel("Cancelled.")?;
+            return Err(ToolError::Cancelled);
         }
-        println!();
     }
 
     let config_root = DEFAULT_CONFIG_PATH.clone();
+    let cred_root = DEFAULT_CREDENTIALS_PATH.clone();
     let mut removed_count = 0usize;
 
-    if keys.is_empty() {
-        // Remove all config for all tools
-        for (name, _, _) in &tools {
-            let tool_dir = config_root.join(name);
-            if tool_dir.exists() {
-                std::fs::remove_dir_all(&tool_dir)?;
-                removed_count += 1;
-                if !concise {
-                    println!("  {} Removed all config for {}", "✓".bright_green(), name);
-                }
-            }
+    for name in all_tools {
+        let has_config = config_tools.contains(name);
+        let has_creds = cred_tools.contains(name);
+
+        // Handle namespaced tools (e.g., "library/bash")
+        let config_dir = if name.contains('/') {
+            let parts: Vec<&str> = name.splitn(2, '/').collect();
+            config_root.join(parts[0]).join(parts[1])
+        } else {
+            config_root.join(name)
+        };
+
+        let cred_dir = if name.contains('/') {
+            let parts: Vec<&str> = name.splitn(2, '/').collect();
+            cred_root.join(parts[0]).join(parts[1])
+        } else {
+            cred_root.join(name)
+        };
+
+        if has_config && config_dir.exists() {
+            std::fs::remove_dir_all(&config_dir)?;
         }
-    } else {
-        // Remove specific keys from all tools
-        for (name, config_path, _) in &tools {
-            let mut config = load_config_from_path(config_path)?;
-            let mut changed = false;
+        if has_creds && cred_dir.exists() {
+            std::fs::remove_dir_all(&cred_dir)?;
+        }
 
-            for key in &keys {
-                if config.remove(key).is_some() {
-                    changed = true;
-                }
-            }
-
-            if changed {
-                if config.is_empty() {
-                    // Delete the entire config directory
-                    if let Some(parent) = config_path.parent() {
-                        std::fs::remove_dir_all(parent)?;
-                    }
-                } else {
-                    // Save updated config (without encryption since we don't have schema)
-                    let json = serde_json::to_string_pretty(&config)?;
-                    std::fs::write(config_path, json)?;
-                }
-                removed_count += 1;
-                if !concise {
-                    println!(
-                        "  {} Removed {} from {}",
-                        "✓".bright_green(),
-                        keys.join(", "),
-                        name
-                    );
-                }
-            }
+        removed_count += 1;
+        if !concise {
+            let what = match (has_config, has_creds) {
+                (true, true) => "config and credentials",
+                (true, false) => "config",
+                (false, true) => "credentials",
+                (false, false) => continue,
+            };
+            println!("  {} Removed {} for {}", "✓".bright_green(), what, name);
         }
     }
 
@@ -987,7 +923,7 @@ async fn unset_all_tools(keys: Vec<String>, yes: bool, concise: bool) -> ToolRes
         println!();
         if removed_count == 0 {
             println!(
-                "  {} No matching configuration found.\n",
+                "  {} No matching configuration or credentials found.\n",
                 "!".bright_yellow()
             );
         } else {
@@ -1030,9 +966,9 @@ async fn resolve_tool_for_config(
             ))
         })?;
 
-    if !tool_config_exists(&plugin_ref) {
+    if !tool_config_exists(&plugin_ref) && !tool_credentials_exist(&plugin_ref) {
         return Err(ToolError::Generic(format!(
-            "No configuration found for '{}'",
+            "No configuration or credentials found for '{}'",
             tool
         )));
     }
@@ -1077,6 +1013,11 @@ pub fn tool_config_exists(plugin_ref: &PluginRef) -> bool {
     get_config_path(plugin_ref).exists()
 }
 
+/// Check if saved credentials exist for a tool.
+fn tool_credentials_exist(plugin_ref: &PluginRef) -> bool {
+    get_credentials_dir(plugin_ref).exists()
+}
+
 fn get_config_path(plugin_ref: &PluginRef) -> PathBuf {
     let mut path = DEFAULT_CONFIG_PATH.clone();
 
@@ -1098,6 +1039,28 @@ fn get_config_dir(plugin_ref: &PluginRef) -> PathBuf {
     path.join(plugin_ref.name())
 }
 
+/// Get credentials directory path for a tool reference (without version).
+fn get_credentials_dir(plugin_ref: &PluginRef) -> PathBuf {
+    let mut path = DEFAULT_CREDENTIALS_PATH.clone();
+
+    if let Some(ns) = plugin_ref.namespace() {
+        path = path.join(ns);
+    }
+
+    path.join(plugin_ref.name())
+}
+
+/// Delete credentials for a tool.
+fn delete_tool_credentials(plugin_ref: &PluginRef) -> ToolResult<()> {
+    let cred_dir = get_credentials_dir(plugin_ref);
+
+    if cred_dir.exists() {
+        std::fs::remove_dir_all(&cred_dir)?;
+    }
+
+    Ok(())
+}
+
 /// Load saved config for a tool.
 pub fn load_tool_config(plugin_ref: &PluginRef) -> ToolResult<BTreeMap<String, String>> {
     let config_path = get_config_path(plugin_ref);
@@ -1107,28 +1070,6 @@ pub fn load_tool_config(plugin_ref: &PluginRef) -> ToolResult<BTreeMap<String, S
     }
 
     let content = std::fs::read_to_string(&config_path)?;
-
-    // Check if config is encrypted
-    if let Ok(envelope) = serde_json::from_str::<EncryptedConfigEnvelope>(&content)
-        && envelope.encrypted
-    {
-        return decrypt_config(&envelope);
-    }
-
-    // Plain config
-    let config: BTreeMap<String, String> = serde_json::from_str(&content)
-        .map_err(|e| ToolError::Generic(format!("Failed to parse config file: {}", e)))?;
-
-    Ok(config)
-}
-
-/// Load config from a specific path (used for batch operations).
-fn load_config_from_path(path: &PathBuf) -> ToolResult<BTreeMap<String, String>> {
-    if !path.exists() {
-        return Ok(BTreeMap::new());
-    }
-
-    let content = std::fs::read_to_string(path)?;
 
     // Check if config is encrypted
     if let Ok(envelope) = serde_json::from_str::<EncryptedConfigEnvelope>(&content)
@@ -1298,6 +1239,55 @@ fn list_configured_tools() -> ToolResult<Vec<(String, PathBuf, usize)>> {
 
     // Sort by name
     tools.sort_by(|a, b| a.0.cmp(&b.0));
+
+    Ok(tools)
+}
+
+/// List all tools with saved credentials.
+fn list_tools_with_credentials() -> ToolResult<Vec<String>> {
+    let cred_root = DEFAULT_CREDENTIALS_PATH.clone();
+
+    if !cred_root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut tools = Vec::new();
+
+    // Walk credentials directory
+    for entry in std::fs::read_dir(&cred_root)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            // Check if this is a namespace directory or a tool directory
+            let cred_file = path.join("enc.json");
+            if cred_file.exists() {
+                // This is a tool directory (no namespace)
+                tools.push(name);
+            } else {
+                // This might be a namespace directory
+                for sub_entry in std::fs::read_dir(&path)? {
+                    let sub_entry = sub_entry?;
+                    let sub_path = sub_entry.path();
+
+                    if sub_path.is_dir() {
+                        let sub_name = sub_entry.file_name().to_string_lossy().to_string();
+                        let sub_cred_file = sub_path.join("enc.json");
+
+                        if sub_cred_file.exists() {
+                            let full_name = format!("{}/{}", name, sub_name);
+                            tools.push(full_name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by name
+    tools.sort();
 
     Ok(tools)
 }

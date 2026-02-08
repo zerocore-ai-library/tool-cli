@@ -199,11 +199,8 @@ const CONFIG_GET_EXAMPLES: &str = examples![
 ];
 
 const CONFIG_UNSET_EXAMPLES: &str = examples![
-    "tool config unset bash API_KEY    " # "Remove specific key",
-    "tool config unset bash K1 K2 K3   " # "Remove multiple keys",
-    "tool config unset bash --all      " # "Remove all keys for tool",
-    "tool config unset --all           " # "Remove config for all tools",
-    "tool config unset --all API_KEY   " # "Remove key from all tools",
+    "tool config unset bash            " # "Remove config and credentials",
+    "tool config unset --all           " # "Remove for all tools",
     "tool config unset --all -y        " # "Skip confirmation prompt",
 ];
 
@@ -908,16 +905,13 @@ pub enum ConfigCommand {
         json: bool,
     },
 
-    /// Remove configuration keys.
+    /// Remove tool configuration and credentials.
     #[command(alias = "u", after_help = CONFIG_UNSET_EXAMPLES)]
     Unset {
-        /// Tool reference (required unless --all is used).
+        /// Tool reference.
         tool: Option<String>,
 
-        /// Keys to remove.
-        keys: Vec<String>,
-
-        /// Remove all keys for the tool, or all config for all tools if no tool specified.
+        /// Remove for all tools.
         #[arg(long)]
         all: bool,
 
