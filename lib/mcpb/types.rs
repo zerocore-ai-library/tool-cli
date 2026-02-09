@@ -316,13 +316,24 @@ impl FromStr for McpbServerType {
     }
 }
 
-/// Icon with size specification.
+/// Icon with optional size and theme specification.
+///
+/// Per MCPB spec:
+/// - `src` is required (path to PNG file or https:// URL)
+/// - `size` is optional (format: "WIDTHxHEIGHT", e.g., "32x32")
+/// - `theme` is optional ("light", "dark", "high-contrast", or custom)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpbIcon {
-    /// Icon size (e.g., "16x16", "32x32").
-    pub size: String,
-    /// Path to icon file.
-    pub path: String,
+    /// Path to icon file (relative path or https:// URL).
+    pub src: String,
+
+    /// Icon size (e.g., "16x16", "32x32", "128x128").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
+
+    /// Theme variant (e.g., "light", "dark", "high-contrast").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
 }
 
 /// Repository information.

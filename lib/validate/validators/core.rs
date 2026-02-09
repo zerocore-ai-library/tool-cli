@@ -6,7 +6,9 @@ use std::path::Path;
 
 use super::super::codes::ErrorCode;
 use super::super::result::{ValidationIssue, ValidationResult};
-use super::fields::{validate_file_references, validate_formats, validate_required_fields};
+use super::fields::{
+    validate_file_references, validate_formats, validate_icons, validate_required_fields,
+};
 use super::platforms::{
     validate_binary_override_paths, validate_compatibility_platforms, validate_platform_alignment,
     validate_platform_override_keys,
@@ -92,31 +94,34 @@ pub fn validate_manifest(dir: &Path) -> ValidationResult {
     // 7. Validate file references
     validate_file_references(dir, &manifest, &mut result);
 
-    // 8. Validate variable references
+    // 8. Validate icon formats (size, PNG format)
+    validate_icons(&manifest, &mut result);
+
+    // 9. Validate variable references
     validate_variable_references(&manifest, &mut result);
 
-    // 9. Check for recommended fields (warnings)
+    // 10. Check for recommended fields (warnings)
     validate_recommended_fields(dir, &manifest, &mut result);
 
-    // 10. Validate tools declarations (with raw JSON for extra field detection)
+    // 11. Validate tools declarations (with raw JSON for extra field detection)
     validate_tools(&manifest, &raw_json, &mut result);
 
-    // 11. Validate all standard-defined fields for extra fields
+    // 12. Validate all standard-defined fields for extra fields
     validate_standard_fields(&raw_json, &mut result);
 
-    // 12. Validate platform override keys
+    // 13. Validate platform override keys
     validate_platform_override_keys(&manifest, &mut result);
 
-    // 13. Validate platform override alignment (tool.store namespace covers spec-level)
+    // 14. Validate platform override alignment (tool.store namespace covers spec-level)
     validate_platform_alignment(&raw_json, &mut result);
 
-    // 14. Validate binary paths in platform_overrides exist
+    // 15. Validate binary paths in platform_overrides exist
     validate_binary_override_paths(dir, &manifest, &raw_json, &mut result);
 
-    // 15. Validate compatibility.platforms matches platform_overrides
+    // 16. Validate compatibility.platforms matches platform_overrides
     validate_compatibility_platforms(&raw_json, &mut result);
 
-    // 16. Validate script names don't conflict with built-in subcommands
+    // 17. Validate script names don't conflict with built-in subcommands
     validate_script_names(&raw_json, &mut result);
 
     result

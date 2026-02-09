@@ -91,6 +91,14 @@ pub enum ErrorCode {
     /// E019: Standard-defined field has extra fields not in MCPB spec.
     #[serde(rename = "E019")]
     ExtraFieldsInStandardField,
+
+    /// E020: Icon size format is invalid (must be WIDTHxHEIGHT).
+    #[serde(rename = "E020")]
+    InvalidIconSize,
+
+    /// E021: Icon src field is required and cannot be empty.
+    #[serde(rename = "E021")]
+    MissingIconSrc,
 }
 
 /// Validation warning codes.
@@ -166,6 +174,10 @@ pub enum WarningCode {
     /// W018: Script name conflicts with a built-in tool-cli subcommand.
     #[serde(rename = "W018")]
     ReservedScriptName,
+
+    /// W019: Icon file is not PNG format (MCPB spec recommends PNG).
+    #[serde(rename = "W019")]
+    NonPngIcon,
 }
 
 /// A validation code that can be either an error or warning.
@@ -205,6 +217,8 @@ impl fmt::Display for ErrorCode {
             ErrorCode::DuplicateToolName => "E017",
             ErrorCode::InvalidInputSchema => "E018",
             ErrorCode::ExtraFieldsInStandardField => "E019",
+            ErrorCode::InvalidIconSize => "E020",
+            ErrorCode::MissingIconSrc => "E021",
         };
         write!(f, "{}", code)
     }
@@ -230,6 +244,7 @@ impl fmt::Display for WarningCode {
             WarningCode::CompatibilityPlatformMismatch => "W016",
             WarningCode::MissingMcpbIgnore => "W017",
             WarningCode::ReservedScriptName => "W018",
+            WarningCode::NonPngIcon => "W019",
         };
         write!(f, "{}", code)
     }

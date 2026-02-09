@@ -121,13 +121,26 @@ pub struct FileInfo {
     pub checksum: String,
 }
 
+/// Icon info with CDN URL and optional metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IconInfo {
+    /// CDN URL for the icon.
+    pub src: String,
+    /// Icon size specification (e.g., "32x32", "128x128").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
+    /// Theme variant (e.g., "light", "dark", "high-contrast").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+}
+
 /// Version info from the registry.
 #[derive(Debug, Clone, Deserialize)]
 pub struct VersionInfo {
     /// Version string.
     pub version: String,
-    /// Icon URL (if provided).
-    pub icon_url: Option<String>,
+    /// Icons array (first icon is primary/fallback).
+    pub icons: Option<Vec<IconInfo>>,
     /// Main download size in bytes.
     pub main_download_size: Option<u64>,
     /// Main download checksum.
@@ -195,7 +208,8 @@ struct PublishVersionRequest {
     main_file: String,
     manifest: serde_json::Value,
     description: Option<String>,
-    icon_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icons: Option<Vec<IconInfo>>,
 }
 
 /// A streaming body with known size that reports upload progress.
@@ -776,7 +790,7 @@ impl RegistryClient {
         main_file: &str,
         manifest: serde_json::Value,
         description: Option<&str>,
-        icon_url: Option<String>,
+        icons: Option<Vec<IconInfo>>,
     ) -> ToolResult<PublishResult> {
         let token = self
             .auth_token
@@ -794,7 +808,7 @@ impl RegistryClient {
             main_file: main_file.to_string(),
             manifest,
             description: description.map(String::from),
-            icon_url,
+            icons,
         };
 
         let response = self

@@ -5,7 +5,7 @@ use crate::constants::MCPB_MANIFEST_FILE;
 use crate::error::{ToolError, ToolResult};
 use crate::format::format_description;
 use crate::mcpb::McpbManifest;
-use crate::pack::{PackOptions, compute_sha256, pack_bundle};
+use crate::pack::{PackError, PackOptions, compute_sha256, pack_bundle};
 use crate::references::PluginRef;
 use crate::registry::RegistryClient;
 use crate::resolver::FilePluginResolver;
@@ -1952,7 +1952,10 @@ pub async fn publish_mcpb(
         }
         Err(e) => {
             spinner.fail(None);
-            return Err(ToolError::Generic(format!("Pack failed: {}", e)));
+            return Err(match e {
+                PackError::ValidationFailed(result) => ToolError::ValidationFailed(result),
+                e => ToolError::Generic(format!("Pack failed: {}", e)),
+            });
         }
     };
 
@@ -1962,27 +1965,19 @@ pub async fn publish_mcpb(
     let bundle_size = bundle.len() as u64;
     println!("  · Size: {}", format_size(bundle_size).bright_white());
 
-    // Read icon if present
-    let icon_data = if let Some(ref icon_path) = pack_result.icon_path {
-        match std::fs::read(icon_path) {
-            Ok(bytes) => {
-                println!(
-                    "  · Icon: {}",
-                    format_size(bytes.len() as u64).bright_white()
-                );
-                Some(bytes)
-            }
-            Err(_) => None,
-        }
-    } else {
-        None
-    };
-
-    // Clean up temp bundle and icon
-    let _ = std::fs::remove_file(&pack_result.output_path);
-    if let Some(ref icon_path) = pack_result.icon_path {
-        let _ = std::fs::remove_file(icon_path);
+    // Report icons if present
+    if !pack_result.icons.is_empty() {
+        let total_icon_size: u64 = pack_result.icons.iter().map(|i| i.bytes.len() as u64).sum();
+        println!(
+            "  · Icons: {} ({} file{})",
+            format_size(total_icon_size).bright_white(),
+            pack_result.icons.len(),
+            if pack_result.icons.len() > 1 { "s" } else { "" }
+        );
     }
+
+    // Clean up temp bundle (icons are in memory, no files to clean)
+    let _ = std::fs::remove_file(&pack_result.output_path);
 
     if dry_run {
         println!(
@@ -2042,24 +2037,14 @@ pub async fn publish_mcpb(
         sha256: sha256.clone(),
     }];
 
-    // Add icon to upload if present
-    let icon_filename = if let Some(ref icon_bytes) = icon_data {
-        // Use the original icon filename from manifest
-        manifest.icon.as_ref().map(|icon_name| {
-            let mut icon_hasher = Sha256::new();
-            icon_hasher.update(icon_bytes);
-            let icon_sha256 = format!("{:x}", icon_hasher.finalize());
-
-            files.push(crate::registry::FileSpec {
-                name: icon_name.clone(),
-                size: icon_bytes.len() as i64,
-                sha256: icon_sha256,
-            });
-            icon_name.clone()
-        })
-    } else {
-        None
-    };
+    // Add all icons to upload
+    for icon in &pack_result.icons {
+        files.push(crate::registry::FileSpec {
+            name: icon.name.clone(),
+            size: icon.bytes.len() as i64,
+            sha256: icon.checksum.clone(),
+        });
+    }
 
     let file_count = files.len();
     println!(
@@ -2074,8 +2059,8 @@ pub async fn publish_mcpb(
 
     // Build list of files to upload
     let mut files_to_upload: Vec<(String, Vec<u8>)> = vec![(file_name.clone(), bundle)];
-    if let (Some(icon_bytes), Some(icon_name)) = (icon_data, icon_filename) {
-        files_to_upload.push((icon_name, icon_bytes));
+    for icon in &pack_result.icons {
+        files_to_upload.push((icon.name.clone(), icon.bytes.clone()));
     }
 
     // Upload all files in parallel
@@ -2146,17 +2131,59 @@ pub async fn publish_mcpb(
         }
     };
 
-    // Derive icon_url from manifest.icon + uploaded files
-    let icon_url = manifest_json
-        .get("icon")
-        .and_then(|icon| icon.as_str())
-        .and_then(|icon_filename| {
-            upload_info
-                .uploads
+    // Derive icons array with CDN URLs
+    let icons: Option<Vec<crate::registry::IconInfo>> = {
+        let mut icons_list = Vec::new();
+
+        // Build from manifest.icons array (preserves order, size, theme)
+        if let Some(manifest_icons) = manifest_json.get("icons").and_then(|v| v.as_array()) {
+            for icon in manifest_icons {
+                let src = match icon.get("src").and_then(|v| v.as_str()) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let cdn_url = upload_info
+                    .uploads
+                    .iter()
+                    .find(|t| t.name == src)
+                    .map(|t| t.cdn_url.clone());
+
+                if let Some(url) = cdn_url {
+                    icons_list.push(crate::registry::IconInfo {
+                        src: url,
+                        size: icon.get("size").and_then(|v| v.as_str()).map(String::from),
+                        theme: icon.get("theme").and_then(|v| v.as_str()).map(String::from),
+                    });
+                }
+            }
+        }
+
+        // Handle legacy `icon` field - prepend as primary if not already in list
+        if let Some(icon_filename) = manifest_json.get("icon").and_then(|v| v.as_str()) {
+            let already_in_list = icons_list
                 .iter()
-                .find(|target| target.name == icon_filename)
-                .map(|target| target.cdn_url.clone())
-        });
+                .any(|i| i.src.ends_with(&format!("/{}", icon_filename)));
+
+            if !already_in_list
+                && let Some(target) = upload_info.uploads.iter().find(|t| t.name == icon_filename)
+            {
+                icons_list.insert(
+                    0,
+                    crate::registry::IconInfo {
+                        src: target.cdn_url.clone(),
+                        size: None,
+                        theme: None,
+                    },
+                );
+            }
+        }
+
+        if icons_list.is_empty() {
+            None
+        } else {
+            Some(icons_list)
+        }
+    };
 
     let result = match client
         .publish_version(
@@ -2167,7 +2194,7 @@ pub async fn publish_mcpb(
             &file_name,
             manifest_json,
             description,
-            icon_url,
+            icons,
         )
         .await
     {
@@ -2256,7 +2283,7 @@ fn detect_available_platforms(manifest: &McpbManifest) -> Vec<String> {
 #[allow(clippy::too_many_arguments)]
 async fn publish_multi_artifact_impl(
     dir: &Path,
-    manifest: &McpbManifest,
+    _manifest: &McpbManifest,
     manifest_content: &str,
     namespace: &str,
     tool_name: &str,
@@ -2362,7 +2389,7 @@ async fn publish_multi_artifact_impl(
         spinner.succeed(Some("Bundles packed"));
 
         // Process pack results
-        let mut icon_info: Option<(PathBuf, Vec<u8>, String)> = None;
+        let mut icons_info: Option<Vec<crate::pack::ExtractedIcon>> = None;
 
         for result in pack_results {
             let (platform, pack_result) =
@@ -2396,25 +2423,18 @@ async fn publish_multi_artifact_impl(
                     );
                     files_to_upload.push((bundle_filename, bundle_bytes, bundle_checksum));
 
-                    // Keep track of icon from first successful pack
-                    if icon_info.is_none()
-                        && let Some(icon_path) = &pack_result.icon_path
-                        && let Ok(icon_bytes) = std::fs::read(icon_path)
-                    {
-                        let icon_checksum = compute_sha256(&icon_bytes);
-                        icon_info = Some((icon_path.clone(), icon_bytes, icon_checksum));
+                    // Keep track of icons from first successful pack
+                    if icons_info.is_none() && !pack_result.icons.is_empty() {
+                        icons_info = Some(pack_result.icons.clone());
                     }
 
                     let _ = std::fs::remove_file(&pack_result.output_path);
-                    if let Some(icon_path) = &pack_result.icon_path {
-                        let _ = std::fs::remove_file(icon_path);
-                    }
                 }
                 Err(e) => {
-                    return Err(ToolError::Generic(format!(
-                        "Pack failed for {}: {}",
-                        platform, e
-                    )));
+                    return Err(match e {
+                        PackError::ValidationFailed(result) => ToolError::ValidationFailed(result),
+                        e => ToolError::Generic(format!("Pack failed for {}: {}", platform, e)),
+                    });
                 }
             }
         }
@@ -2452,40 +2472,38 @@ async fn publish_multi_artifact_impl(
                     );
                     files_to_upload.push((bundle_filename, bundle_bytes, bundle_checksum));
 
-                    // Use icon from universal bundle if not already set
-                    if icon_info.is_none()
-                        && let Some(icon_path) = &pack_result.icon_path
-                        && let Ok(icon_bytes) = std::fs::read(icon_path)
-                    {
-                        let icon_checksum = compute_sha256(&icon_bytes);
-                        icon_info = Some((icon_path.clone(), icon_bytes, icon_checksum));
+                    // Use icons from universal bundle if not already set
+                    if icons_info.is_none() && !pack_result.icons.is_empty() {
+                        icons_info = Some(pack_result.icons.clone());
                     }
 
                     let _ = std::fs::remove_file(&pack_result.output_path);
-                    if let Some(icon_path) = &pack_result.icon_path {
-                        let _ = std::fs::remove_file(icon_path);
-                    }
                 }
                 Err(e) => {
-                    return Err(ToolError::Generic(format!(
-                        "Pack failed for universal: {}",
-                        e
-                    )));
+                    return Err(match e {
+                        PackError::ValidationFailed(result) => ToolError::ValidationFailed(result),
+                        e => ToolError::Generic(format!("Pack failed for universal: {}", e)),
+                    });
                 }
             }
         }
 
-        // Add icon if found
-        if let Some((_icon_path, icon_bytes, icon_checksum)) = icon_info
-            && let Some(icon_name) = &manifest.icon
-        {
-            let icon_filename = icon_name.clone();
+        // Add all icons if found
+        if let Some(ref icons) = icons_info {
+            let total_icon_size: u64 = icons.iter().map(|i| i.bytes.len() as u64).sum();
             println!(
-                "  · icon: {} ({})",
-                icon_filename,
-                format_size(icon_bytes.len() as u64)
+                "  · icons: {} ({} file{})",
+                format_size(total_icon_size),
+                icons.len(),
+                if icons.len() > 1 { "s" } else { "" }
             );
-            files_to_upload.push((icon_filename, icon_bytes, icon_checksum));
+            for icon in icons {
+                files_to_upload.push((
+                    icon.name.clone(),
+                    icon.bytes.clone(),
+                    icon.checksum.clone(),
+                ));
+            }
         }
     }
 
@@ -2644,17 +2662,59 @@ async fn publish_multi_artifact_impl(
     let manifest_json: serde_json::Value = serde_json::from_str(manifest_content)
         .map_err(|e| ToolError::Generic(format!("Failed to parse manifest: {}", e)))?;
 
-    // Derive icon_url from manifest.icon + uploaded files
-    let icon_url = manifest_json
-        .get("icon")
-        .and_then(|icon| icon.as_str())
-        .and_then(|icon_filename| {
-            upload_info
-                .uploads
+    // Derive icons array with CDN URLs
+    let icons: Option<Vec<crate::registry::IconInfo>> = {
+        let mut icons_list = Vec::new();
+
+        // Build from manifest.icons array (preserves order, size, theme)
+        if let Some(manifest_icons) = manifest_json.get("icons").and_then(|v| v.as_array()) {
+            for icon in manifest_icons {
+                let src = match icon.get("src").and_then(|v| v.as_str()) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let cdn_url = upload_info
+                    .uploads
+                    .iter()
+                    .find(|t| t.name == src)
+                    .map(|t| t.cdn_url.clone());
+
+                if let Some(url) = cdn_url {
+                    icons_list.push(crate::registry::IconInfo {
+                        src: url,
+                        size: icon.get("size").and_then(|v| v.as_str()).map(String::from),
+                        theme: icon.get("theme").and_then(|v| v.as_str()).map(String::from),
+                    });
+                }
+            }
+        }
+
+        // Handle legacy `icon` field - prepend as primary if not already in list
+        if let Some(icon_filename) = manifest_json.get("icon").and_then(|v| v.as_str()) {
+            let already_in_list = icons_list
                 .iter()
-                .find(|target| target.name == icon_filename)
-                .map(|target| target.cdn_url.clone())
-        });
+                .any(|i| i.src.ends_with(&format!("/{}", icon_filename)));
+
+            if !already_in_list
+                && let Some(target) = upload_info.uploads.iter().find(|t| t.name == icon_filename)
+            {
+                icons_list.insert(
+                    0,
+                    crate::registry::IconInfo {
+                        src: target.cdn_url.clone(),
+                        size: None,
+                        theme: None,
+                    },
+                );
+            }
+        }
+
+        if icons_list.is_empty() {
+            None
+        } else {
+            Some(icons_list)
+        }
+    };
 
     let result = match client
         .publish_version(
@@ -2665,7 +2725,7 @@ async fn publish_multi_artifact_impl(
             "version.json",
             manifest_json,
             description,
-            icon_url,
+            icons,
         )
         .await
     {
