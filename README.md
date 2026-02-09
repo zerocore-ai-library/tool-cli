@@ -145,20 +145,22 @@ Get your first MCP tool published in three steps.
 > ```
 >
 > ```sh
-> tool publish my-tool --strict
+> tool publish my-tool
 > ```
 >
 > Log in once, then publish. Now anyone can install your tool.
 >
 > <details>
-> <summary>Just want to bundle it?</summary>
+> <summary>Have native binaries or platform-specific deps?</summary>
 > <blockquote>
 >
+> Use multi-platform publishing to create separate bundles for each OS/architecture:
+>
 > ```sh
-> tool pack my-tool
+> tool publish my-tool --multi-platform
 > ```
 >
-> Creates a `.mcpb` or `.mcpbx` file you can distribute yourself.
+> See [Multi-Platform Bundles](#multi-platform-bundles) for details.
 >
 > </blockquote>
 > </details>
@@ -171,43 +173,54 @@ Get your first MCP tool published in three steps.
 
 ## Multi-Platform Bundles
 
-If your tool includes platform-specific binaries (native executables, compiled code), you can publish separate bundles for each platform. Users automatically get the right bundle for their system. Learn more about [multi-platform packaging](https://tool.store/docs/advanced/multi-platform).
+Most MCP tools are pure JavaScript or Python and work everywhere with a single bundle. But if your tool has **platform-specific dependencies**, you need multi-platform publishing:
 
-### Packing for Multiple Platforms
+- **Native binaries** (Rust, Go, C++)
+- **Node.js with native addons** (better-sqlite3, sharp, etc.)
+- **Python with compiled extensions** (numpy, pandas, etc.)
 
-> ```sh
-> tool pack --multi-platform
-> ```
->
-> This creates separate bundles for each platform defined in your manifest's `platform_overrides`, plus a universal bundle:
->
-> ```
-> my-tool-1.0.0-darwin-arm64.mcpb   # Apple Silicon Mac
-> my-tool-1.0.0-darwin-x64.mcpb     # Intel Mac
-> my-tool-1.0.0-linux-x64.mcpb      # Linux x64
-> my-tool-1.0.0.mcpb                # Universal (all platforms)
-> ```
+Multi-platform creates separate bundles for each OS/architecture. Users automatically get the right one. Learn more about [multi-platform packaging](https://tool.store/docs/advanced/multi-platform).
 
-##
+> Reference-mode `.mcpbx` bundles that point to remote servers or external commands like `npx` and `uvx` don't need multi-platform publishing since they don't bundle any code.
 
-### Publishing Multi-Platform
+### Publishing
 
-> ```sh
-> tool publish --multi-platform
-> ```
->
-> Packs and uploads all platform variants in parallel.
->
-> <details>
-> <summary>Using pre-built bundles</summary>
-> <blockquote>
-> If you've already built the bundles (e.g., in CI), you can specify paths directly:
->
 > ```sh
 > tool publish --multi-platform \
->   --darwin-arm64 ./dist/mac-arm.mcpb \
->   --linux-x64 ./dist/linux.mcpb \
->   --universal ./dist/all.mcpb
+>   --darwin-arm64 ./dist/my-tool-darwin-arm64.mcpb \
+>   --darwin-x64 ./dist/my-tool-darwin-x64.mcpb \
+>   --linux-arm64 ./dist/my-tool-linux-arm64.mcpb \
+>   --linux-x64 ./dist/my-tool-linux-x64.mcpb
+> ```
+>
+> Specify the bundle for each platform. Typically done in CI after building on each runner.
+>
+> For compiled languages (Rust, Go), you can optionally bundle all the binaries into a single universal bundle using `--universal ./dist/my-tool.mcpb`.
+>
+> <details>
+> <summary>GitHub Actions</summary>
+> <blockquote>
+>
+> Use [zerocore-ai/tool-action](https://github.com/zerocore-ai/tool-action) to automate multi-platform builds:
+>
+> ```yaml
+> - uses: zerocore-ai/tool-action/setup@v1
+> - uses: zerocore-ai/tool-action/pack@v1
+>   with:
+>     target: ${{ matrix.target }}
+> ```
+>
+> </blockquote>
+> </details>
+>
+> <details>
+> <summary>Auto-detect from manifest</summary>
+> <blockquote>
+>
+> If all platform binaries are available locally, this packs and uploads all variants defined in your manifest's `platform_overrides`:
+>
+> ```sh
+> tool publish --multi-platform
 > ```
 >
 > </blockquote>

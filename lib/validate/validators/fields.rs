@@ -1,12 +1,17 @@
 //! Required fields and format validation.
 
 use crate::mcpb::{McpbManifest, McpbServerType};
+use regex::Regex;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use super::super::codes::{ErrorCode, WarningCode};
 use super::super::result::{ValidationIssue, ValidationResult};
 use super::core::missing_field;
 use super::paths::{is_path_safe, validate_file_path};
+
+/// Regex for valid icon size format: WIDTHxHEIGHT (e.g., "32x32", "128x128")
+static SIZE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+x\d+$").unwrap());
 
 //--------------------------------------------------------------------------------------------------
 // Constants
@@ -162,8 +167,8 @@ pub fn validate_file_references(
         for (i, icon_entry) in icons.iter().enumerate() {
             validate_file_path(
                 dir,
-                &icon_entry.path,
-                &format!("icons[{}].path", i),
+                &icon_entry.src,
+                &format!("icons[{}].src", i),
                 "manifest.json",
                 result,
             );
@@ -184,4 +189,103 @@ pub fn is_valid_package_name(name: &str) -> bool {
         _ => return false,
     }
     chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Validate icon fields according to MCPB spec.
+///
+/// Validates:
+/// - `icons[].src` is required and non-empty (Error)
+/// - `icons[].size` format is WIDTHxHEIGHT if present (Error)
+/// - Icon files should be PNG format (Warning)
+pub fn validate_icons(manifest: &McpbManifest, result: &mut ValidationResult) {
+    // Validate legacy `icon` field format
+    if let Some(icon) = &manifest.icon {
+        validate_icon_format(icon, "icon", result);
+    }
+
+    // Validate `icons` array
+    if let Some(icons) = &manifest.icons {
+        for (i, icon_entry) in icons.iter().enumerate() {
+            let field_prefix = format!("icons[{}]", i);
+
+            // Error: src is required and cannot be empty
+            if icon_entry.src.is_empty() {
+                result.errors.push(ValidationIssue {
+                    code: ErrorCode::MissingIconSrc.into(),
+                    message: "icon src is required".into(),
+                    location: format!("manifest.json:{}.src", field_prefix),
+                    details: "`src` field is required and cannot be empty".into(),
+                    help: Some("add a path to the icon file (e.g., \"icon.png\")".into()),
+                });
+            } else {
+                // Validate format if src is present
+                validate_icon_format(&icon_entry.src, &format!("{}.src", field_prefix), result);
+            }
+
+            // Error: size must match WIDTHxHEIGHT format if present
+            if let Some(size) = &icon_entry.size
+                && !SIZE_PATTERN.is_match(size)
+            {
+                result.errors.push(ValidationIssue {
+                    code: ErrorCode::InvalidIconSize.into(),
+                    message: "invalid icon size format".into(),
+                    location: format!("manifest.json:{}.size", field_prefix),
+                    details: format!(
+                        "`{}` is not valid. Must be WIDTHxHEIGHT (e.g., \"32x32\")",
+                        size
+                    ),
+                    help: Some("use format: WIDTHxHEIGHT (e.g., \"16x16\", \"128x128\")".into()),
+                });
+            }
+        }
+    }
+}
+
+/// Validate icon file format (warn if not PNG).
+fn validate_icon_format(src: &str, field: &str, result: &mut ValidationResult) {
+    // Skip URL validation for https:// icons
+    if src.starts_with("https://") {
+        if !src.to_lowercase().ends_with(".png") {
+            result.warnings.push(ValidationIssue {
+                code: WarningCode::NonPngIcon.into(),
+                message: "icon should be PNG format".into(),
+                location: format!("manifest.json:{}", field),
+                details: format!("`{}` is not a .png file", src),
+                help: Some("MCPB spec recommends PNG format for icons".into()),
+            });
+        }
+        return;
+    }
+
+    // Check file extension for local paths
+    let extension = Path::new(src)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+
+    match extension {
+        Some(ext) if ext == "png" => {
+            // Valid PNG extension
+        }
+        Some(ext) => {
+            // Warning: non-PNG format
+            result.warnings.push(ValidationIssue {
+                code: WarningCode::NonPngIcon.into(),
+                message: "icon should be PNG format".into(),
+                location: format!("manifest.json:{}", field),
+                details: format!("`{}` uses .{} format", src, ext),
+                help: Some("MCPB spec recommends PNG format for icons".into()),
+            });
+        }
+        None => {
+            // Warning: no extension
+            result.warnings.push(ValidationIssue {
+                code: WarningCode::NonPngIcon.into(),
+                message: "icon should be PNG format".into(),
+                location: format!("manifest.json:{}", field),
+                details: format!("`{}` has no file extension", src),
+                help: Some("MCPB spec recommends PNG format for icons".into()),
+            });
+        }
+    }
 }

@@ -56,8 +56,11 @@ fn print_error(e: &ToolError) {
             println!("    {}: {}", "Bundle".dimmed(), bundle_path);
             if let Some(script) = build_script {
                 println!();
-                println!("    {}", "hint:".bright_blue().bold());
-                println!("      Run build script first: {}", script.bright_white());
+                println!(
+                    "  · {}: Run build script first: {}",
+                    "hint".bright_blue(),
+                    script.bright_white()
+                );
             }
         }
         ToolError::AmbiguousReference {
@@ -76,7 +79,7 @@ fn print_error(e: &ToolError) {
                 println!("    {}", line);
             }
             println!();
-            println!("    {}: {}", "hint".bright_blue().bold(), suggestion);
+            println!("  · {}: {}", "hint".bright_blue(), suggestion);
         }
         ToolError::NotFound { kind, reference } => {
             println!(
@@ -103,8 +106,8 @@ fn print_error(e: &ToolError) {
             );
             println!();
             println!(
-                "    {}: Set {} environment variable",
-                "hint".bright_blue().bold(),
+                "  · {}: Set {} environment variable",
+                "hint".bright_blue(),
                 "CREDENTIALS_SECRET_KEY".bright_white()
             );
         }
@@ -122,8 +125,8 @@ fn print_error(e: &ToolError) {
             println!("    {}: {}", "Searched".dimmed(), path.display());
             println!();
             println!(
-                "    {}: Run {} to create one",
-                "hint".bright_blue().bold(),
+                "  · {}: Run {} to create one",
+                "hint".bright_blue(),
                 "tool init".bright_white()
             );
         }
@@ -132,12 +135,21 @@ fn print_error(e: &ToolError) {
             println!();
             for err in &result.errors {
                 println!(
-                    "    {} → {}",
-                    format!("error[{}]", err.code).bright_red(),
-                    err.location
+                    "  {}: → {}",
+                    format!("error[{}]", err.code).bright_red().bold(),
+                    err.location.bold()
                 );
-                println!("      {}", err.message);
+                println!("  · {}", err.details.dimmed());
+                if let Some(help) = &err.help {
+                    println!("  · {}: {}", "help".bright_green().dimmed(), help.dimmed());
+                }
+                println!();
             }
+            println!(
+                "  · {}: Run {} for detailed validation",
+                "hint".bright_blue(),
+                "tool validate".bright_white()
+            );
         }
         ToolError::Cancelled => {
             println!("  {} Operation cancelled", "✗".bright_red());

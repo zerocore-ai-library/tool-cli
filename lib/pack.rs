@@ -120,8 +120,24 @@ impl std::fmt::Debug for PackOptions {
     }
 }
 
-/// Icon extraction result: (path, size, checksum).
-type IconResult = (Option<PathBuf>, Option<u64>, Option<String>);
+/// Extracted icon information.
+#[derive(Debug, Clone)]
+pub struct ExtractedIcon {
+    /// Original filename from manifest (e.g., "icon.png", "icon-dark.png").
+    pub name: String,
+
+    /// Icon file bytes.
+    pub bytes: Vec<u8>,
+
+    /// SHA-256 checksum of the icon file.
+    pub checksum: String,
+
+    /// Icon size specification from manifest (e.g., "32x32").
+    pub size: Option<String>,
+
+    /// Theme variant from manifest (e.g., "light", "dark").
+    pub theme: Option<String>,
+}
 
 /// Result of packing operation.
 #[derive(Debug)]
@@ -147,14 +163,8 @@ pub struct PackResult {
     /// SHA-256 checksum of the bundle.
     pub checksum: String,
 
-    /// Path to extracted icon file (if icon was present in manifest).
-    pub icon_path: Option<PathBuf>,
-
-    /// Size of the icon file in bytes.
-    pub icon_size: Option<u64>,
-
-    /// SHA-256 checksum of the icon file.
-    pub icon_checksum: Option<String>,
+    /// Extracted icons from manifest (if extract_icon was enabled).
+    pub icons: Vec<ExtractedIcon>,
 }
 
 /// Options for collecting bundle files.
@@ -373,11 +383,11 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
     let bundle_bytes = std::fs::read(&output_path)?;
     let checksum = compute_sha256(&bundle_bytes);
 
-    // Extract icon as separate file if requested (for registry upload)
-    let (icon_path, icon_size, icon_checksum) = if options.extract_icon {
-        extract_icon(dir, &manifest, &output_path)?
+    // Extract icons if requested (for registry upload)
+    let icons = if options.extract_icon {
+        extract_icons(dir, &manifest)?
     } else {
-        (None, None, None)
+        Vec::new()
     };
 
     Ok(PackResult {
@@ -388,9 +398,7 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
         ignored_files,
         extension: ext.to_string(),
         checksum,
-        icon_path,
-        icon_size,
-        icon_checksum,
+        icons,
     })
 }
 
@@ -594,11 +602,11 @@ pub fn pack_bundle_for_platform(
     let bundle_bytes = std::fs::read(&output_path)?;
     let checksum = compute_sha256(&bundle_bytes);
 
-    // Extract icon as separate file if requested (for registry upload)
-    let (icon_path, icon_size, icon_checksum) = if options.extract_icon {
-        extract_icon(dir, &manifest, &output_path)?
+    // Extract icons if requested (for registry upload)
+    let icons = if options.extract_icon {
+        extract_icons(dir, &manifest)?
     } else {
-        (None, None, None)
+        Vec::new()
     };
 
     Ok(PackResult {
@@ -609,9 +617,7 @@ pub fn pack_bundle_for_platform(
         ignored_files,
         extension: ext.to_string(),
         checksum,
-        icon_path,
-        icon_size,
-        icon_checksum,
+        icons,
     })
 }
 
@@ -1072,49 +1078,70 @@ pub fn compute_sha256(data: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-/// Extract icon from manifest as a separate file alongside the bundle.
+/// Extract all icons from manifest.
 ///
-/// Returns (icon_path, icon_size, icon_checksum) if icon was extracted.
-fn extract_icon(
-    dir: &Path,
-    manifest: &McpbManifest,
-    bundle_path: &Path,
-) -> Result<IconResult, PackError> {
-    // Get icon path from manifest
-    let icon_field = match &manifest.icon {
-        Some(icon) => icon,
-        None => return Ok((None, None, None)),
-    };
+/// Processes both the legacy `icon` field and the `icons` array.
+/// The `icon` field is prepended as the primary icon if not already in the array.
+fn extract_icons(dir: &Path, manifest: &McpbManifest) -> Result<Vec<ExtractedIcon>, PackError> {
+    let mut extracted = Vec::new();
+    let mut seen = std::collections::HashSet::new();
 
-    // Resolve icon source path
-    let icon_src = dir.join(icon_field);
-    if !icon_src.exists() {
-        return Ok((None, None, None));
+    // 1. Process `icons` array first (preserves order, size, theme)
+    if let Some(ref icons) = manifest.icons {
+        for icon in icons {
+            // Skip duplicates
+            if seen.contains(&icon.src) {
+                continue;
+            }
+
+            // Skip https:// URLs (can't extract remote icons)
+            if icon.src.starts_with("https://") {
+                continue;
+            }
+
+            let icon_path = dir.join(&icon.src);
+            if icon_path.exists() {
+                let bytes = std::fs::read(&icon_path)?;
+                let checksum = compute_sha256(&bytes);
+                extracted.push(ExtractedIcon {
+                    name: icon.src.clone(),
+                    bytes,
+                    checksum,
+                    size: icon.size.clone(),
+                    theme: icon.theme.clone(),
+                });
+                seen.insert(icon.src.clone());
+            }
+        }
     }
 
-    // Determine icon destination path (same directory as bundle)
-    let icon_ext = icon_src
-        .extension()
-        .map(|e| e.to_string_lossy().to_string())
-        .unwrap_or_else(|| "png".to_string());
-    let icon_dest = bundle_path.with_file_name(format!(
-        "{}-icon.{}",
-        bundle_path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy(),
-        icon_ext
-    ));
+    // 2. Process legacy `icon` field (prepend as primary if not already in list)
+    if let Some(ref icon_name) = manifest.icon {
+        // Skip if already processed from icons array
+        if !seen.contains(icon_name) {
+            // Skip https:// URLs
+            if !icon_name.starts_with("https://") {
+                let icon_path = dir.join(icon_name);
+                if icon_path.exists() {
+                    let bytes = std::fs::read(&icon_path)?;
+                    let checksum = compute_sha256(&bytes);
+                    // Prepend as primary icon
+                    extracted.insert(
+                        0,
+                        ExtractedIcon {
+                            name: icon_name.clone(),
+                            bytes,
+                            checksum,
+                            size: None,
+                            theme: None,
+                        },
+                    );
+                }
+            }
+        }
+    }
 
-    // Copy icon to destination
-    std::fs::copy(&icon_src, &icon_dest)?;
-
-    // Read icon and compute checksum
-    let icon_bytes = std::fs::read(&icon_dest)?;
-    let icon_size = icon_bytes.len() as u64;
-    let icon_checksum = compute_sha256(&icon_bytes);
-
-    Ok((Some(icon_dest), Some(icon_size), Some(icon_checksum)))
+    Ok(extracted)
 }
 
 //--------------------------------------------------------------------------------------------------

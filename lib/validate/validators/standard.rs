@@ -40,7 +40,7 @@ const ALLOWED_MCP_CONFIG_FIELDS: &[&str] = &[
 const ALLOWED_COMPATIBILITY_FIELDS: &[&str] = &["claude_desktop", "platforms", "runtimes"];
 
 /// Allowed fields in icons array items per MCPB spec.
-const ALLOWED_ICON_FIELDS: &[&str] = &["src", "size"];
+const ALLOWED_ICON_FIELDS: &[&str] = &["src", "size", "theme"];
 
 /// Allowed fields in user_config entries per MCPB spec.
 const ALLOWED_USER_CONFIG_FIELDS: &[&str] = &[
