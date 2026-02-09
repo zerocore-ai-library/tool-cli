@@ -54,7 +54,13 @@
 > curl -fsSL https://cli.tool.store | sh
 > ```
 >
-> Windows (or any system with Rust):
+> Windows:
+>
+> ```powershell
+> irm https://cli.tool.store/windows | iex
+> ```
+>
+> Or with Cargo (any platform):
 >
 > ```sh
 > cargo install --git https://github.com/zerocore-ai/tool-cli --locked
