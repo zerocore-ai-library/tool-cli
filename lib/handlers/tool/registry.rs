@@ -650,6 +650,11 @@ pub async fn download_tools(
 async fn preflight_tool(name: &str, platform: Option<&str>) -> PreflightResult {
     use crate::constants::DEFAULT_TOOLS_PATH;
 
+    // Check if this is a bundle file (.mcpb or .mcpbx)
+    if is_bundle_file(name) {
+        return PreflightResult::Local(install_bundle_file(name).await);
+    }
+
     // Check if this looks like a local path
     if is_local_path(name) {
         return PreflightResult::Local(install_local_tool(name).await);
@@ -1268,6 +1273,14 @@ fn is_local_path(input: &str) -> bool {
         || PathBuf::from(input).join(MCPB_MANIFEST_FILE).exists()
 }
 
+/// Check if the input looks like a bundle file (.mcpb or .mcpbx).
+fn is_bundle_file(input: &str) -> bool {
+    use crate::constants::{MCPB_EXT, MCPBX_EXT};
+
+    let lower = input.to_lowercase();
+    lower.ends_with(&format!(".{}", MCPB_EXT)) || lower.ends_with(&format!(".{}", MCPBX_EXT))
+}
+
 /// Install a tool from a local path by creating a symlink.
 async fn install_local_tool(path: &str) -> InstallResult {
     use crate::constants::DEFAULT_TOOLS_PATH;
@@ -1405,6 +1418,155 @@ async fn install_local_tool(path: &str) -> InstallResult {
     InstallResult::InstalledLocal
 }
 
+/// Install a tool from a bundle file (.mcpb or .mcpbx) by extracting it.
+async fn install_bundle_file(path: &str) -> InstallResult {
+    use crate::constants::DEFAULT_TOOLS_PATH;
+    use crate::mcpb::McpbManifest;
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    // Resolve the path
+    let source_path = if path.starts_with('~') {
+        match dirs::home_dir() {
+            Some(home) => home.join(&path[2..]),
+            None => {
+                let msg = "Could not determine home directory".to_string();
+                println!("  {} {}", "✗".bright_red(), msg);
+                return InstallResult::Failed(msg);
+            }
+        }
+    } else {
+        PathBuf::from(path)
+    };
+
+    let source_path = match source_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            let msg = format!("Bundle file not found: {}", path);
+            println!("  {} {}", "✗".bright_red(), msg);
+            return InstallResult::Failed(msg);
+        }
+    };
+
+    // Open the bundle as a ZIP archive
+    let file = match std::fs::File::open(&source_path) {
+        Ok(f) => f,
+        Err(e) => {
+            let msg = format!("Failed to open bundle: {}", e);
+            println!("  {} {}", "✗".bright_red(), msg);
+            return InstallResult::Failed(msg);
+        }
+    };
+
+    let mut archive = match ZipArchive::new(file) {
+        Ok(a) => a,
+        Err(e) => {
+            let msg = format!("Failed to read bundle (invalid ZIP): {}", e);
+            println!("  {} {}", "✗".bright_red(), msg);
+            return InstallResult::Failed(msg);
+        }
+    };
+
+    // Read manifest.json from inside the bundle
+    let manifest: McpbManifest = {
+        let mut manifest_entry = match archive.by_name(MCPB_MANIFEST_FILE) {
+            Ok(entry) => entry,
+            Err(_) => {
+                let msg = format!("Bundle missing {}", MCPB_MANIFEST_FILE);
+                println!("  {} {}", "✗".bright_red(), msg);
+                return InstallResult::Failed(msg);
+            }
+        };
+
+        let mut contents = String::new();
+        if let Err(e) = manifest_entry.read_to_string(&mut contents) {
+            let msg = format!("Failed to read manifest from bundle: {}", e);
+            println!("  {} {}", "✗".bright_red(), msg);
+            return InstallResult::Failed(msg);
+        }
+
+        match serde_json::from_str(&contents) {
+            Ok(m) => m,
+            Err(e) => {
+                let msg = format!("Failed to parse manifest: {}", e);
+                println!("  {} {}", "✗".bright_red(), msg);
+                return InstallResult::Failed(msg);
+            }
+        }
+    };
+
+    let tool_name = match manifest.name.as_ref() {
+        Some(n) => n,
+        None => {
+            let msg = "manifest.json must include a name field".to_string();
+            println!("  {} {}", "✗".bright_red(), msg);
+            return InstallResult::Failed(msg);
+        }
+    };
+    let version = manifest.version.as_ref();
+
+    // Build target directory name (unnamespaced)
+    let target_name = match version {
+        Some(v) => format!("{}@{}", tool_name, v),
+        None => tool_name.clone(),
+    };
+
+    let target_path = DEFAULT_TOOLS_PATH.join(&target_name);
+
+    println!(
+        "  {} Extracting {} from {}",
+        "→".bright_blue(),
+        target_name.bright_cyan(),
+        source_path.display().to_string().dimmed()
+    );
+
+    // Check if target already exists
+    if target_path.exists() {
+        // Check if manifest matches (same tool already installed)
+        let existing_manifest_path = target_path.join(MCPB_MANIFEST_FILE);
+        if existing_manifest_path.exists() {
+            println!(
+                "  {} Already installed {}",
+                "✓".bright_green(),
+                target_name.bright_cyan()
+            );
+            return InstallResult::AlreadyInstalled;
+        }
+
+        // Remove existing directory
+        if let Err(e) = std::fs::remove_dir_all(&target_path) {
+            let msg = format!("Failed to remove existing directory: {}", e);
+            println!("  {} {}", "✗".bright_red(), msg);
+            return InstallResult::Failed(msg);
+        }
+    }
+
+    // Create target directory
+    if let Err(e) = std::fs::create_dir_all(&target_path) {
+        let msg = format!("Failed to create target directory: {}", e);
+        println!("  {} {}", "✗".bright_red(), msg);
+        return InstallResult::Failed(msg);
+    }
+
+    // Extract the bundle
+    if let Err(e) = extract_bundle(&source_path, &target_path) {
+        let msg = format!("Failed to extract bundle: {}", e);
+        println!("  {} {}", "✗".bright_red(), msg);
+        // Clean up partial extraction
+        let _ = std::fs::remove_dir_all(&target_path);
+        return InstallResult::Failed(msg);
+    }
+
+    println!(
+        "  {} Installed {} {}",
+        "✓".bright_green(),
+        target_name.bright_cyan(),
+        "(extracted)".dimmed()
+    );
+
+    InstallResult::InstalledLocal
+}
+
 //--------------------------------------------------------------------------------------------------
 // Functions: Local Tool Linking
 //--------------------------------------------------------------------------------------------------
@@ -1505,6 +1667,7 @@ fn create_symlink(source: &Path, target: &Path) -> ToolResult<()> {
 
 /// Remove a single installed tool.
 async fn remove_tool(name: &str) -> (String, UninstallResult) {
+    use crate::constants::DEFAULT_TOOLS_PATH;
     use tokio::fs;
 
     let resolver = FilePluginResolver::default();
@@ -1535,6 +1698,22 @@ async fn remove_tool(name: &str) -> (String, UninstallResult) {
         );
     }
 
+    // Clean up empty parent namespace directory if applicable
+    if let Some(parent_dir) = tool_dir.parent() {
+        // Only clean up if the parent is not the root tools directory
+        if parent_dir != DEFAULT_TOOLS_PATH.as_path() {
+            // Check if the parent directory is now empty
+            let is_empty = std::fs::read_dir(parent_dir)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false);
+
+            if is_empty {
+                // Remove the empty namespace directory
+                let _ = std::fs::remove_dir(parent_dir);
+            }
+        }
+    }
+
     (resolved.plugin_ref.to_string(), UninstallResult::Removed)
 }
 
@@ -1542,37 +1721,59 @@ async fn remove_tool(name: &str) -> (String, UninstallResult) {
 pub async fn remove_tools(names: &[String], all: bool, yes: bool) -> ToolResult<()> {
     use futures_util::future::join_all;
 
-    // Get list of tools to remove
-    let tools_to_remove = if all {
+    let resolver = FilePluginResolver::default();
+
+    // Get list of tools to remove and orphaned entries
+    let (tools_to_remove, orphans) = if all {
         if !names.is_empty() {
             return Err(ToolError::Generic(
                 "Cannot specify tool names with --all".into(),
             ));
         }
-        let resolver = FilePluginResolver::default();
         let installed = resolver.list_tools().await?;
-        if installed.is_empty() {
+        let orphans = resolver.list_orphaned_entries()?;
+
+        if installed.is_empty() && orphans.is_empty() {
             println!("\n  No tools installed.\n");
             return Ok(());
         }
-        installed.into_iter().map(|t| t.to_string()).collect()
+        (
+            installed.into_iter().map(|t| t.to_string()).collect(),
+            orphans,
+        )
     } else {
         if names.is_empty() {
             return Err(ToolError::Generic(
                 "No tools specified. Use --all to remove all tools.".into(),
             ));
         }
-        names.to_vec()
+        (names.to_vec(), Vec::new())
     };
 
+    let total_items = tools_to_remove.len() + orphans.len();
+
     // Confirm if --all and not --yes
-    if all && !yes {
+    if all && !yes && total_items > 0 {
         println!();
-        println!(
-            "  {} This will uninstall {} tool(s)",
-            "!".bright_yellow(),
-            tools_to_remove.len()
-        );
+        if !tools_to_remove.is_empty() {
+            println!(
+                "  {} This will uninstall {} tool(s)",
+                "!".bright_yellow(),
+                tools_to_remove.len()
+            );
+        }
+        if !orphans.is_empty() {
+            println!(
+                "  {} This will clean up {} orphaned {}",
+                "!".bright_yellow(),
+                orphans.len(),
+                if orphans.len() == 1 {
+                    "entry"
+                } else {
+                    "entries"
+                }
+            );
+        }
         println!();
         print!("  Continue? [y/N] ");
         io::stdout().flush().ok();
@@ -1591,45 +1792,84 @@ pub async fn remove_tools(names: &[String], all: bool, yes: bool) -> ToolResult<
         println!();
     }
 
-    // Run all removals concurrently
-    let futures: Vec<_> = tools_to_remove
-        .iter()
-        .map(|name| remove_tool(name))
-        .collect();
-    let results = join_all(futures).await;
-
     let mut removed_count = 0usize;
     let mut not_found_count = 0usize;
     let mut failed_count = 0usize;
+    let mut orphans_cleaned = 0usize;
 
-    // Print results
-    for (tool_name, result) in &results {
+    // Remove tools
+    if !tools_to_remove.is_empty() {
+        let futures: Vec<_> = tools_to_remove
+            .iter()
+            .map(|name| remove_tool(name))
+            .collect();
+        let results = join_all(futures).await;
+
+        // Print results
+        for (tool_name, result) in &results {
+            match result {
+                UninstallResult::Removed => {
+                    println!(
+                        "  {} Removed {}",
+                        "✓".bright_green(),
+                        tool_name.bright_cyan()
+                    );
+                    removed_count += 1;
+                }
+                UninstallResult::NotFound => {
+                    println!(
+                        "  {} Tool {} not found",
+                        "✗".bright_red(),
+                        tool_name.bright_white().bold()
+                    );
+                    not_found_count += 1;
+                }
+                UninstallResult::Failed(msg) => {
+                    println!("  {} {}: {}", "✗".bright_red(), tool_name, msg);
+                    failed_count += 1;
+                }
+            }
+        }
+    }
+
+    // Clean up orphaned entries
+    for orphan_path in &orphans {
+        let display_name = orphan_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| orphan_path.display().to_string());
+
+        let result = if orphan_path.is_symlink() {
+            // Remove broken symlink
+            std::fs::remove_file(orphan_path)
+        } else {
+            // Remove directory
+            std::fs::remove_dir_all(orphan_path)
+        };
+
         match result {
-            UninstallResult::Removed => {
+            Ok(()) => {
                 println!(
-                    "  {} Removed {}",
+                    "  {} Cleaned up {}",
                     "✓".bright_green(),
-                    tool_name.bright_cyan()
+                    display_name.bright_yellow()
                 );
-                removed_count += 1;
+                orphans_cleaned += 1;
             }
-            UninstallResult::NotFound => {
+            Err(e) => {
                 println!(
-                    "  {} Tool {} not found",
+                    "  {} Failed to clean up {}: {}",
                     "✗".bright_red(),
-                    tool_name.bright_white().bold()
+                    display_name,
+                    e
                 );
-                not_found_count += 1;
-            }
-            UninstallResult::Failed(msg) => {
-                println!("  {} {}: {}", "✗".bright_red(), tool_name, msg);
                 failed_count += 1;
             }
         }
     }
 
-    // Print summary if multiple tools were requested
-    if tools_to_remove.len() > 1 {
+    // Print summary if multiple items were processed
+    if total_items > 1 {
         println!();
         if removed_count > 0 {
             println!(
@@ -1639,6 +1879,17 @@ pub async fn remove_tools(names: &[String], all: bool, yes: bool) -> ToolResult<
                     "package"
                 } else {
                     "packages"
+                }
+            );
+        }
+        if orphans_cleaned > 0 {
+            println!(
+                "Cleaned up {} orphaned {}",
+                orphans_cleaned.to_string().bright_green(),
+                if orphans_cleaned == 1 {
+                    "entry"
+                } else {
+                    "entries"
                 }
             );
         }

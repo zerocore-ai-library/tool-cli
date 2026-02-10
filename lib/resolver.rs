@@ -309,6 +309,105 @@ impl FilePluginResolver {
         Ok(tools)
     }
 
+    /// List orphaned entries (broken symlinks, empty directories) in the tools directory.
+    ///
+    /// Returns paths to entries that exist in the filesystem but don't contain valid tools.
+    pub fn list_orphaned_entries(&self) -> ToolResult<Vec<PathBuf>> {
+        let mut orphans = Vec::new();
+
+        for search_path in &self.search_paths {
+            if !search_path.exists() {
+                continue;
+            }
+
+            self.collect_orphans_recursive(search_path, &mut orphans)?;
+        }
+
+        Ok(orphans)
+    }
+
+    /// Recursively collect orphaned entries.
+    fn collect_orphans_recursive(&self, dir: &Path, orphans: &mut Vec<PathBuf>) -> ToolResult<()> {
+        if !dir.exists() {
+            return Ok(());
+        }
+
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                let entry_name = entry.file_name().to_string_lossy().to_string();
+
+                // Skip hidden files
+                if entry_name.starts_with('.') {
+                    continue;
+                }
+
+                // Check for broken symlinks first
+                if entry_path.is_symlink() && !entry_path.exists() {
+                    // Broken symlink - target doesn't exist
+                    orphans.push(entry_path);
+                    continue;
+                }
+
+                if entry_path.is_dir() {
+                    let manifest_path = entry_path.join(MCPB_MANIFEST_FILE);
+                    if manifest_path.exists() {
+                        // Valid tool directory, not an orphan
+                        continue;
+                    }
+
+                    // Check if this is an empty directory or empty namespace
+                    let is_empty = std::fs::read_dir(&entry_path)
+                        .map(|mut entries| entries.next().is_none())
+                        .unwrap_or(false);
+
+                    if is_empty {
+                        // Empty directory
+                        orphans.push(entry_path);
+                    } else {
+                        // Non-empty directory without manifest - might be a namespace
+                        // Recurse to find orphans inside, then check if it becomes empty
+                        let orphans_before = orphans.len();
+                        self.collect_orphans_recursive(&entry_path, orphans)?;
+
+                        // Check if any valid tools exist in this namespace
+                        let has_valid_tools = self.namespace_has_valid_tools(&entry_path);
+                        if !has_valid_tools {
+                            // No valid tools in this namespace, mark the whole dir as orphan
+                            // Remove any child orphans we just added (we'll remove the parent instead)
+                            orphans.truncate(orphans_before);
+                            orphans.push(entry_path);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check if a namespace directory contains any valid tools.
+    fn namespace_has_valid_tools(&self, namespace_dir: &Path) -> bool {
+        if let Ok(entries) = std::fs::read_dir(namespace_dir) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+
+                // Skip broken symlinks
+                if entry_path.is_symlink() && !entry_path.exists() {
+                    continue;
+                }
+
+                if entry_path.is_dir() {
+                    let manifest_path = entry_path.join(MCPB_MANIFEST_FILE);
+                    if manifest_path.exists() {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Recursively collect tools from a directory.
     #[allow(clippy::only_used_in_recursion)]
     fn collect_tools_recursive(
