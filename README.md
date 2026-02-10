@@ -118,17 +118,15 @@ Get your first MCP tool published in three steps.
 > MCP tools often use `toolname__method` naming. You can use `.` as shorthand.
 >
 > ```sh
-> tool call bash -m .exec -p command="ls -la"     # expands to bash__exec
+> tool call bash -m .exec -p command="ls -la"  # expands to bash__exec
 > ```
 >
 > ```sh
-> tool call files -m .fs.read -p path="/tmp"      # expands to files__fs__read
+> tool call files -m .fs.read -p path="/tmp"   # expands to files__fs__read
 > ```
 >
 > </blockquote>
 > </details>
->
-> <br />
 >
 > ```sh
 > tool run my-tool
@@ -190,16 +188,16 @@ Multi-platform creates separate bundles for each OS/architecture. Users automati
 >   --darwin-arm64 ./dist/my-tool-darwin-arm64.mcpb \
 >   --darwin-x64 ./dist/my-tool-darwin-x64.mcpb \
 >   --linux-arm64 ./dist/my-tool-linux-arm64.mcpb \
->   --linux-x64 ./dist/my-tool-linux-x64.mcpb
+>   --linux-x64 ./dist/my-tool-linux-x64.mcpb \
+>   --win32-arm64 ./dist/my-tool-win32-arm64.mcpb \
+>   --win32-x64 ./dist/my-tool-win32-x64.mcpb
 > ```
 >
 > Specify the bundle for each platform. Typically done in CI after building on each runner.
 >
 > For compiled languages (Rust, Go), you can optionally bundle all the binaries into a single universal bundle using `--universal ./dist/my-tool.mcpb`.
 >
-> <details>
-> <summary>GitHub Actions</summary>
-> <blockquote>
+> #### GitHub Actions
 >
 > Use [zerocore-ai/tool-action](https://github.com/zerocore-ai/tool-action) to automate multi-platform builds:
 >
@@ -209,9 +207,6 @@ Multi-platform creates separate bundles for each OS/architecture. Users automati
 >   with:
 >     target: ${{ matrix.target }}
 > ```
->
-> </blockquote>
-> </details>
 >
 > <details>
 > <summary>Auto-detect from manifest</summary>
