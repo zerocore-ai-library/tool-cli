@@ -1144,6 +1144,217 @@ fn extract_icons(dir: &Path, manifest: &McpbManifest) -> Result<Vec<ExtractedIco
     Ok(extracted)
 }
 
+/// Read manifest.json from an MCPB bundle (ZIP file).
+///
+/// Returns the parsed manifest and the raw manifest JSON bytes.
+pub fn read_manifest_from_bundle(
+    bundle_bytes: &[u8],
+) -> Result<(McpbManifest, Vec<u8>), PackError> {
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let cursor = Cursor::new(bundle_bytes);
+    let mut archive = ZipArchive::new(cursor)?;
+
+    // Find and read manifest.json
+    let mut manifest_entry = archive.by_name(MCPB_MANIFEST_FILE)?;
+
+    let mut manifest_bytes = Vec::new();
+    manifest_entry.read_to_end(&mut manifest_bytes)?;
+
+    let manifest: McpbManifest = serde_json::from_slice(&manifest_bytes)?;
+
+    Ok((manifest, manifest_bytes))
+}
+
+/// Extract icons from an MCPB bundle (ZIP file).
+///
+/// Reads the manifest from the bundle and extracts all referenced icons.
+/// Processes both the legacy `icon` field and the `icons` array.
+pub fn extract_icons_from_bundle(bundle_bytes: &[u8]) -> Result<Vec<ExtractedIcon>, PackError> {
+    use std::io::Cursor;
+    use zip::ZipArchive;
+
+    let (manifest, _) = read_manifest_from_bundle(bundle_bytes)?;
+
+    let cursor = Cursor::new(bundle_bytes);
+    let mut archive: ZipArchive<Cursor<&[u8]>> = ZipArchive::new(cursor)?;
+
+    let mut extracted = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // 1. Process `icons` array first (preserves order, size, theme)
+    if let Some(ref icons) = manifest.icons {
+        for icon in icons {
+            // Skip duplicates
+            if seen.contains(&icon.src) {
+                continue;
+            }
+
+            // Skip https:// URLs (can't extract remote icons)
+            if icon.src.starts_with("https://") {
+                continue;
+            }
+
+            // Try to read the icon from the archive
+            if let Ok(mut entry) = archive.by_name(&icon.src) {
+                let mut bytes = Vec::new();
+                if entry.read_to_end(&mut bytes).is_ok() {
+                    let checksum = compute_sha256(&bytes);
+                    extracted.push(ExtractedIcon {
+                        name: icon.src.clone(),
+                        bytes,
+                        checksum,
+                        size: icon.size.clone(),
+                        theme: icon.theme.clone(),
+                    });
+                    seen.insert(icon.src.clone());
+                }
+            }
+        }
+    }
+
+    // 2. Process legacy `icon` field (prepend as primary if not already in list)
+    if let Some(ref icon_name) = manifest.icon {
+        // Skip if already processed from icons array
+        if !seen.contains(icon_name) {
+            // Skip https:// URLs
+            if !icon_name.starts_with("https://") {
+                // Need to reopen archive since we consumed it above
+                let cursor = Cursor::new(bundle_bytes);
+                if let Ok(mut archive) = ZipArchive::new(cursor)
+                    && let Ok(mut entry) = archive.by_name(icon_name)
+                {
+                    let mut bytes: Vec<u8> = Vec::new();
+                    if entry.read_to_end(&mut bytes).is_ok() {
+                        let checksum = compute_sha256(&bytes);
+                        // Prepend as primary icon
+                        extracted.insert(
+                            0,
+                            ExtractedIcon {
+                                name: icon_name.clone(),
+                                bytes,
+                                checksum,
+                                size: None,
+                                theme: None,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(extracted)
+}
+
+/// Compute identity hash from manifest JSON bytes.
+///
+/// Extracts critical fields that must match across all platform bundles,
+/// normalizes them, and returns a SHA-256 hash. Platform-specific fields
+/// are excluded from the hash.
+///
+/// Critical fields: name, version, manifest_version, description, author,
+/// server.type, tools, prompts, user_config, system_config, icon, icons,
+/// license, keywords, and static_responses from _meta.
+pub fn compute_manifest_identity_hash(manifest_bytes: &[u8]) -> Result<String, PackError> {
+    let manifest_json: serde_json::Value = serde_json::from_slice(manifest_bytes)?;
+
+    // Extract critical fields into a normalized structure
+    let mut identity = serde_json::Map::new();
+
+    // Core identity fields
+    if let Some(v) = manifest_json.get("name") {
+        identity.insert("name".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("version") {
+        identity.insert("version".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("manifest_version") {
+        identity.insert("manifest_version".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("description") {
+        identity.insert("description".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("display_name") {
+        identity.insert("display_name".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("long_description") {
+        identity.insert("long_description".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("author") {
+        identity.insert("author".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("license") {
+        identity.insert("license".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("keywords") {
+        identity.insert("keywords".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("homepage") {
+        identity.insert("homepage".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("repository") {
+        identity.insert("repository".to_string(), v.clone());
+    }
+
+    // Server type (must match, but not entry_point or mcp_config)
+    if let Some(server) = manifest_json.get("server") {
+        if let Some(v) = server.get("type") {
+            identity.insert("server.type".to_string(), v.clone());
+        }
+        if let Some(v) = server.get("transport") {
+            identity.insert("server.transport".to_string(), v.clone());
+        }
+    }
+
+    // Capabilities
+    if let Some(v) = manifest_json.get("tools") {
+        identity.insert("tools".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("tools_generated") {
+        identity.insert("tools_generated".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("prompts") {
+        identity.insert("prompts".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("prompts_generated") {
+        identity.insert("prompts_generated".to_string(), v.clone());
+    }
+
+    // Configuration schemas
+    if let Some(v) = manifest_json.get("user_config") {
+        identity.insert("user_config".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("system_config") {
+        identity.insert("system_config".to_string(), v.clone());
+    }
+
+    // Icons
+    if let Some(v) = manifest_json.get("icon") {
+        identity.insert("icon".to_string(), v.clone());
+    }
+    if let Some(v) = manifest_json.get("icons") {
+        identity.insert("icons".to_string(), v.clone());
+    }
+
+    // Static responses from _meta (full tool schemas)
+    if let Some(meta) = manifest_json.get("_meta")
+        && let Some(store_meta) = meta.get("store.tool.mcpb")
+    {
+        if let Some(v) = store_meta.get("static_responses") {
+            identity.insert("static_responses".to_string(), v.clone());
+        }
+        if let Some(v) = store_meta.get("scripts") {
+            identity.insert("scripts".to_string(), v.clone());
+        }
+    }
+
+    // Serialize with sorted keys for consistent hashing
+    let normalized = serde_json::to_string(&serde_json::Value::Object(identity))?;
+    Ok(compute_sha256(normalized.as_bytes()))
+}
+
 //--------------------------------------------------------------------------------------------------
 // Tests
 //--------------------------------------------------------------------------------------------------
