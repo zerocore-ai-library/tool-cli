@@ -137,7 +137,6 @@ const PACK_EXAMPLES: &str = examples![
     "tool pack ./my-tool               " # "Pack specific directory",
     "tool pack -o release.mcpb         " # "Custom output filename",
     "tool pack --no-validate           " # "Skip validation step",
-    "tool pack --include-dotfiles      " # "Include dotfiles (except .git)",
     "tool pack -v                      " # "Show files being added",
     "tool pack --multi-platform        " # "Pack bundles for each platform override",
 ];
@@ -708,10 +707,6 @@ pub enum Command {
         /// Treat warnings as errors.
         #[arg(long)]
         strict: bool,
-
-        /// Include dotfiles (except .git/).
-        #[arg(long)]
-        include_dotfiles: bool,
 
         /// Show files being added.
         #[arg(short, long)]

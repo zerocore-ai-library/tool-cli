@@ -141,10 +141,25 @@ pub struct RegistryPreflight {
     pub temp_file: PathBuf,
 }
 
+/// Pre-flight information for a bundle file extraction.
+#[derive(Debug)]
+pub struct BundlePreflight {
+    /// Original path to the bundle file.
+    pub source_path: PathBuf,
+    /// Display name (name@version).
+    pub display_name: String,
+    /// Number of entries in the bundle (for progress).
+    pub entry_count: u64,
+    /// Target installation directory.
+    pub target_dir: PathBuf,
+}
+
 /// Result of pre-flight check.
 enum PreflightResult {
     /// Ready for registry download
     Registry(RegistryPreflight),
+    /// Ready for bundle extraction
+    Bundle(BundlePreflight),
     /// Local install (already handled)
     Local(InstallResult),
     /// Already installed
@@ -652,7 +667,7 @@ async fn preflight_tool(name: &str, platform: Option<&str>) -> PreflightResult {
 
     // Check if this is a bundle file (.mcpb or .mcpbx)
     if is_bundle_file(name) {
-        return PreflightResult::Local(install_bundle_file(name).await);
+        return preflight_bundle_file(name);
     }
 
     // Check if this looks like a local path
@@ -819,6 +834,7 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
 
     // Separate registry downloads from immediate results
     let mut registry_preflights = Vec::new();
+    let mut bundle_preflights = Vec::new();
     let mut local_count = 0usize;
     let mut already_installed = Vec::new();
     let mut failed = Vec::new();
@@ -827,6 +843,9 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
         match result {
             PreflightResult::Registry(preflight) => {
                 registry_preflights.push(preflight);
+            }
+            PreflightResult::Bundle(preflight) => {
+                bundle_preflights.push(preflight);
             }
             PreflightResult::Local(install_result) => match install_result {
                 InstallResult::InstalledLocal => local_count += 1,
@@ -857,9 +876,13 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
         println!("  {} {}: {}", "✗".bright_red(), name, msg);
     }
 
+    // Track counts for determining single-item display
+    let registry_count = registry_preflights.len();
+    let bundle_count = bundle_preflights.len();
+
     // Phase 2: Download and install registry packages
     if !registry_preflights.is_empty() {
-        let count = registry_preflights.len();
+        let count = registry_count;
 
         if is_single {
             // Single package: match download format exactly
@@ -991,6 +1014,107 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
         }
     }
 
+    // Phase 2b: Extract bundle files
+    if !bundle_preflights.is_empty() {
+        if bundle_count == 1 && registry_count == 0 && local_count == 0 {
+            // Single bundle: simple output
+            let preflight = bundle_preflights.remove(0);
+            println!(
+                "  {} Extracting {}",
+                "→".bright_blue(),
+                preflight.display_name.bright_cyan()
+            );
+
+            let pb = ProgressBar::new(preflight.entry_count);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("  [{bar:40.cyan/dim}] {pos}/{len} files")
+                    .unwrap()
+                    .progress_chars("█░░"),
+            );
+            pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+            match extract_bundle_with_preflight(&preflight, pb.clone()) {
+                Ok(()) => {
+                    pb.finish_and_clear();
+                    println!(
+                        "  {} Installed {} {}",
+                        "✓".bright_green(),
+                        preflight.display_name.bright_cyan(),
+                        "(extracted)".dimmed()
+                    );
+                }
+                Err(msg) => {
+                    pb.finish_and_clear();
+                    println!("  {} {}: {}", "✗".bright_red(), preflight.display_name, msg);
+                }
+            }
+        } else {
+            // Multiple bundles: parallel extraction with multi-progress
+            println!(
+                "  {} Extracting {} bundles",
+                "→".bright_blue(),
+                bundle_count.to_string().bright_cyan()
+            );
+
+            let mp = MultiProgress::new();
+            let style = ProgressStyle::default_bar()
+                .template("  {msg:<30} [{bar:25.cyan/dim}] {pos:>5}/{len:<5}")
+                .unwrap()
+                .progress_chars("█░░");
+
+            // Create progress bars and spawn extraction tasks
+            let handles: Vec<_> = bundle_preflights
+                .into_iter()
+                .map(|preflight| {
+                    let pb = mp.add(ProgressBar::new(preflight.entry_count));
+                    pb.set_style(style.clone());
+                    pb.set_message(preflight.display_name.clone());
+                    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+                    let display_name = preflight.display_name.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let result = extract_bundle_with_preflight(&preflight, pb.clone());
+                        pb.finish_and_clear();
+                        (display_name, result)
+                    })
+                })
+                .collect();
+
+            // Wait for all extractions to complete
+            let results = futures_util::future::join_all(handles).await;
+
+            // Print results
+            let mut bundle_failed = 0usize;
+
+            for result in results {
+                match result {
+                    Ok((name, Ok(()))) => {
+                        println!(
+                            "  {} Installed {} {}",
+                            "✓".bright_green(),
+                            name.bright_cyan(),
+                            "(extracted)".dimmed()
+                        );
+                    }
+                    Ok((name, Err(msg))) => {
+                        println!("  {} {}: {}", "✗".bright_red(), name, msg);
+                        bundle_failed += 1;
+                    }
+                    Err(_) => {
+                        println!("  {} Extraction task panicked", "✗".bright_red());
+                        bundle_failed += 1;
+                    }
+                }
+            }
+
+            failed.extend(std::iter::repeat_n(
+                ("bundle".to_string(), "extraction failed".to_string()),
+                bundle_failed,
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -1057,7 +1181,7 @@ pub async fn preflight_ensure(
                 // Race condition: installed between check and preflight
                 result.already_installed.push(name.clone());
             }
-            PreflightResult::Local(_) => {
+            PreflightResult::Local(_) | PreflightResult::Bundle(_) => {
                 // Shouldn't happen since we're only processing namespaced tools
                 result.already_installed.push(name.clone());
             }
@@ -1261,6 +1385,71 @@ fn extract_bundle(bundle_path: &std::path::Path, target_dir: &std::path::Path) -
     Ok(())
 }
 
+/// Extract a bundle file using preflight info, with progress bar.
+fn extract_bundle_with_preflight(
+    preflight: &BundlePreflight,
+    pb: ProgressBar,
+) -> Result<(), String> {
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    // Create target directory
+    std::fs::create_dir_all(&preflight.target_dir)
+        .map_err(|e| format!("Failed to create target directory: {}", e))?;
+
+    // Open the bundle
+    let file = std::fs::File::open(&preflight.source_path)
+        .map_err(|e| format!("Failed to open bundle: {}", e))?;
+
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| format!("Failed to read ZIP archive: {}", e))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("Failed to read archive entry: {}", e))?;
+
+        let entry_path = entry
+            .enclosed_name()
+            .ok_or_else(|| "Invalid entry path in archive".to_string())?;
+
+        let dest_path = preflight.target_dir.join(entry_path);
+
+        if let Some(parent) = dest_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory {:?}: {}", parent, e))?;
+        }
+
+        #[cfg(unix)]
+        let unix_mode = entry.unix_mode();
+
+        if entry.is_dir() {
+            std::fs::create_dir_all(&dest_path)
+                .map_err(|e| format!("Failed to create directory {:?}: {}", dest_path, e))?;
+        } else {
+            let mut content = Vec::new();
+            entry
+                .read_to_end(&mut content)
+                .map_err(|e| format!("Failed to read entry content: {}", e))?;
+
+            std::fs::write(&dest_path, &content)
+                .map_err(|e| format!("Failed to write file {:?}: {}", dest_path, e))?;
+
+            #[cfg(unix)]
+            if let Some(mode) = unix_mode {
+                use std::os::unix::fs::PermissionsExt;
+                let permissions = std::fs::Permissions::from_mode(mode);
+                std::fs::set_permissions(&dest_path, permissions)
+                    .map_err(|e| format!("Failed to set permissions on {:?}: {}", dest_path, e))?;
+            }
+        }
+
+        pb.inc(1);
+    }
+
+    Ok(())
+}
+
 /// Check if the input looks like a local path rather than a registry reference.
 fn is_local_path(input: &str) -> bool {
     // Explicit path indicators
@@ -1279,6 +1468,100 @@ fn is_bundle_file(input: &str) -> bool {
 
     let lower = input.to_lowercase();
     lower.ends_with(&format!(".{}", MCPB_EXT)) || lower.ends_with(&format!(".{}", MCPBX_EXT))
+}
+
+/// Pre-flight check for a bundle file. Validates the bundle and returns metadata.
+fn preflight_bundle_file(path: &str) -> PreflightResult {
+    use crate::constants::DEFAULT_TOOLS_PATH;
+    use crate::mcpb::McpbManifest;
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    // Resolve the path
+    let source_path = if path.starts_with('~') {
+        match dirs::home_dir() {
+            Some(home) => home.join(&path[2..]),
+            None => {
+                return PreflightResult::Failed("Could not determine home directory".to_string());
+            }
+        }
+    } else {
+        PathBuf::from(path)
+    };
+
+    let source_path = match source_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return PreflightResult::Failed(format!("Bundle file not found: {}", path));
+        }
+    };
+
+    // Open the bundle as a ZIP archive
+    let file = match std::fs::File::open(&source_path) {
+        Ok(f) => f,
+        Err(e) => {
+            return PreflightResult::Failed(format!("Failed to open bundle: {}", e));
+        }
+    };
+
+    let mut archive = match ZipArchive::new(file) {
+        Ok(a) => a,
+        Err(e) => {
+            return PreflightResult::Failed(format!("Failed to read bundle (invalid ZIP): {}", e));
+        }
+    };
+
+    let entry_count = archive.len() as u64;
+
+    // Read manifest.json from inside the bundle
+    let manifest: McpbManifest = {
+        let mut manifest_entry = match archive.by_name(MCPB_MANIFEST_FILE) {
+            Ok(entry) => entry,
+            Err(_) => {
+                return PreflightResult::Failed(format!("Bundle missing {}", MCPB_MANIFEST_FILE));
+            }
+        };
+
+        let mut contents = String::new();
+        if let Err(e) = manifest_entry.read_to_string(&mut contents) {
+            return PreflightResult::Failed(format!("Failed to read manifest from bundle: {}", e));
+        }
+
+        match serde_json::from_str(&contents) {
+            Ok(m) => m,
+            Err(e) => {
+                return PreflightResult::Failed(format!("Failed to parse manifest: {}", e));
+            }
+        }
+    };
+
+    let tool_name = match manifest.name.as_ref() {
+        Some(n) => n.clone(),
+        None => {
+            return PreflightResult::Failed("manifest.json must include a name field".to_string());
+        }
+    };
+    let version = manifest.version.clone();
+
+    // Build target directory name (unnamespaced)
+    let display_name = match &version {
+        Some(v) => format!("{}@{}", tool_name, v),
+        None => tool_name.clone(),
+    };
+
+    let target_dir = DEFAULT_TOOLS_PATH.join(&display_name);
+
+    // Check if already installed
+    if target_dir.join(MCPB_MANIFEST_FILE).exists() {
+        return PreflightResult::AlreadyInstalled;
+    }
+
+    PreflightResult::Bundle(BundlePreflight {
+        source_path,
+        display_name,
+        entry_count,
+        target_dir,
+    })
 }
 
 /// Install a tool from a local path by creating a symlink.
@@ -1417,156 +1700,6 @@ async fn install_local_tool(path: &str) -> InstallResult {
 
     InstallResult::InstalledLocal
 }
-
-/// Install a tool from a bundle file (.mcpb or .mcpbx) by extracting it.
-async fn install_bundle_file(path: &str) -> InstallResult {
-    use crate::constants::DEFAULT_TOOLS_PATH;
-    use crate::mcpb::McpbManifest;
-    use std::io::Read;
-    use zip::ZipArchive;
-
-    // Resolve the path
-    let source_path = if path.starts_with('~') {
-        match dirs::home_dir() {
-            Some(home) => home.join(&path[2..]),
-            None => {
-                let msg = "Could not determine home directory".to_string();
-                println!("  {} {}", "✗".bright_red(), msg);
-                return InstallResult::Failed(msg);
-            }
-        }
-    } else {
-        PathBuf::from(path)
-    };
-
-    let source_path = match source_path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => {
-            let msg = format!("Bundle file not found: {}", path);
-            println!("  {} {}", "✗".bright_red(), msg);
-            return InstallResult::Failed(msg);
-        }
-    };
-
-    // Open the bundle as a ZIP archive
-    let file = match std::fs::File::open(&source_path) {
-        Ok(f) => f,
-        Err(e) => {
-            let msg = format!("Failed to open bundle: {}", e);
-            println!("  {} {}", "✗".bright_red(), msg);
-            return InstallResult::Failed(msg);
-        }
-    };
-
-    let mut archive = match ZipArchive::new(file) {
-        Ok(a) => a,
-        Err(e) => {
-            let msg = format!("Failed to read bundle (invalid ZIP): {}", e);
-            println!("  {} {}", "✗".bright_red(), msg);
-            return InstallResult::Failed(msg);
-        }
-    };
-
-    // Read manifest.json from inside the bundle
-    let manifest: McpbManifest = {
-        let mut manifest_entry = match archive.by_name(MCPB_MANIFEST_FILE) {
-            Ok(entry) => entry,
-            Err(_) => {
-                let msg = format!("Bundle missing {}", MCPB_MANIFEST_FILE);
-                println!("  {} {}", "✗".bright_red(), msg);
-                return InstallResult::Failed(msg);
-            }
-        };
-
-        let mut contents = String::new();
-        if let Err(e) = manifest_entry.read_to_string(&mut contents) {
-            let msg = format!("Failed to read manifest from bundle: {}", e);
-            println!("  {} {}", "✗".bright_red(), msg);
-            return InstallResult::Failed(msg);
-        }
-
-        match serde_json::from_str(&contents) {
-            Ok(m) => m,
-            Err(e) => {
-                let msg = format!("Failed to parse manifest: {}", e);
-                println!("  {} {}", "✗".bright_red(), msg);
-                return InstallResult::Failed(msg);
-            }
-        }
-    };
-
-    let tool_name = match manifest.name.as_ref() {
-        Some(n) => n,
-        None => {
-            let msg = "manifest.json must include a name field".to_string();
-            println!("  {} {}", "✗".bright_red(), msg);
-            return InstallResult::Failed(msg);
-        }
-    };
-    let version = manifest.version.as_ref();
-
-    // Build target directory name (unnamespaced)
-    let target_name = match version {
-        Some(v) => format!("{}@{}", tool_name, v),
-        None => tool_name.clone(),
-    };
-
-    let target_path = DEFAULT_TOOLS_PATH.join(&target_name);
-
-    println!(
-        "  {} Extracting {} from {}",
-        "→".bright_blue(),
-        target_name.bright_cyan(),
-        source_path.display().to_string().dimmed()
-    );
-
-    // Check if target already exists
-    if target_path.exists() {
-        // Check if manifest matches (same tool already installed)
-        let existing_manifest_path = target_path.join(MCPB_MANIFEST_FILE);
-        if existing_manifest_path.exists() {
-            println!(
-                "  {} Already installed {}",
-                "✓".bright_green(),
-                target_name.bright_cyan()
-            );
-            return InstallResult::AlreadyInstalled;
-        }
-
-        // Remove existing directory
-        if let Err(e) = std::fs::remove_dir_all(&target_path) {
-            let msg = format!("Failed to remove existing directory: {}", e);
-            println!("  {} {}", "✗".bright_red(), msg);
-            return InstallResult::Failed(msg);
-        }
-    }
-
-    // Create target directory
-    if let Err(e) = std::fs::create_dir_all(&target_path) {
-        let msg = format!("Failed to create target directory: {}", e);
-        println!("  {} {}", "✗".bright_red(), msg);
-        return InstallResult::Failed(msg);
-    }
-
-    // Extract the bundle
-    if let Err(e) = extract_bundle(&source_path, &target_path) {
-        let msg = format!("Failed to extract bundle: {}", e);
-        println!("  {} {}", "✗".bright_red(), msg);
-        // Clean up partial extraction
-        let _ = std::fs::remove_dir_all(&target_path);
-        return InstallResult::Failed(msg);
-    }
-
-    println!(
-        "  {} Installed {} {}",
-        "✓".bright_green(),
-        target_name.bright_cyan(),
-        "(extracted)".dimmed()
-    );
-
-    InstallResult::InstalledLocal
-}
-
 //--------------------------------------------------------------------------------------------------
 // Functions: Local Tool Linking
 //--------------------------------------------------------------------------------------------------
@@ -2192,7 +2325,6 @@ pub async fn publish_mcpb(
         validate: true,
         output: None,
         verbose: false,
-        include_dotfiles: false,
         extract_icon: true,
         on_progress: None,
     };
@@ -2680,7 +2812,6 @@ async fn publish_multi_artifact_impl(
             validate: true,
             output: None,
             verbose: false,
-            include_dotfiles: false,
             extract_icon: true,
             on_progress: None,
         };

@@ -310,21 +310,9 @@ async fn run() -> ToolResult<()> {
             output,
             no_validate,
             strict,
-            include_dotfiles,
             verbose,
             multi_platform,
-        } => {
-            handlers::pack_mcpb(
-                path,
-                output,
-                no_validate,
-                strict,
-                include_dotfiles,
-                verbose,
-                multi_platform,
-            )
-            .await
-        }
+        } => handlers::pack_mcpb(path, output, no_validate, strict, verbose, multi_platform).await,
 
         Command::Run {
             tool,
