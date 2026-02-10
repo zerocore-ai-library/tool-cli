@@ -32,13 +32,14 @@
 
 - <img src="https://octicons-col.vercel.app/download/f88349" height="14"/> &nbsp;**Growing marketplace:** discover and install MCPs from [tool.store](https://tool.store)
 - <img src="https://octicons-col.vercel.app/plug/f88349" height="14"/> &nbsp;**Works with your stack:** Claude Code, Cursor, OpenCode, VS Code, and more
+- <img src="https://octicons-col.vercel.app/rocket/f88349" height="14"/> &nbsp;**Ship your own MCP:** create your own MCP server interactively with `tool init`
 - <img src="https://octicons-col.vercel.app/server/f88349" height="14"/> &nbsp;**Unified proxy:** run all your MCPs through a single `tool run` interface
 - <img src="https://octicons-col.vercel.app/command-palette/f88349" height="14"/> &nbsp;**MCPs as CLIs:** invoke any tool directly from your terminal with `tool call`
 - <img src="https://octicons-col.vercel.app/gear/f88349" height="14"/> &nbsp;**Configure once:** set it up once, use it everywhere
-- <img src="https://octicons-col.vercel.app/terminal/f88349" height="14"/> &nbsp;**Built for both humans and agents:** clean output that works in terminals and AI workflows
+- <img src="https://octicons-col.vercel.app/dependabot/f88349" height="14"/> &nbsp;**Built for both humans and agents:** clean output that works in terminals and AI workflows
 - <img src="https://octicons-col.vercel.app/shield-lock/f88349" height="14"/> &nbsp;**Encrypted by default:** API keys and secrets are encrypted at rest
 - <img src="https://octicons-col.vercel.app/passkey-fill/f88349" height="14"/> &nbsp;**OAuth just works:** browser flow, token refresh, secure storage handled for you
-- <img src="https://octicons-col.vercel.app/rocket/f88349" height="14"/> &nbsp;**Ship your own MCP:** scaffold, test, and publish with `tool init`
+- <img src="https://octicons-col.vercel.app/device-desktop/f88349" height="14"/> &nbsp;**Fully local:** your API keys and tokens never leave your machine
 
 <br />
 
@@ -79,6 +80,12 @@ Get your first MCP tool published in three steps.
 > ```
 >
 > This gives you a working MCP server with a valid `manifest.json`. Just follow the prompts to pick your language and transport.
+>
+> For bundled packages, you need to run build.
+>
+> ```sh
+> tool build my-tool
+> ```
 >
 > <details>
 > <summary>Already have an MCP server?</summary>
@@ -169,83 +176,9 @@ Get your first MCP tool published in three steps.
 
 <br />
 
-## Multi-Platform Bundles
-
-Most MCP tools are pure JavaScript or Python and work everywhere with a single bundle. But if your tool has **platform-specific dependencies**, you need multi-platform publishing:
-
-- **Native binaries** (Rust, Go, C++)
-- **Node.js with native addons** (better-sqlite3, sharp, etc.)
-- **Python with compiled extensions** (numpy, pandas, etc.)
-
-Multi-platform creates separate bundles for each OS/architecture. Users automatically get the right one. Learn more about [multi-platform packaging](https://tool.store/docs/advanced/multi-platform).
-
-> Reference-mode `.mcpbx` bundles that point to remote servers or external commands like `npx` and `uvx` don't need multi-platform publishing since they don't bundle any code.
-
-### Publishing
-
-> ```sh
-> tool publish --multi-platform \
->   --darwin-arm64 ./dist/my-tool-darwin-arm64.mcpb \
->   --darwin-x64 ./dist/my-tool-darwin-x64.mcpb \
->   --linux-arm64 ./dist/my-tool-linux-arm64.mcpb \
->   --linux-x64 ./dist/my-tool-linux-x64.mcpb \
->   --win32-arm64 ./dist/my-tool-win32-arm64.mcpb \
->   --win32-x64 ./dist/my-tool-win32-x64.mcpb
-> ```
->
-> Specify the bundle for each platform. Typically done in CI after building on each runner.
->
-> For compiled languages (Rust, Go), you can optionally bundle all the binaries into a single universal bundle using `--universal ./dist/my-tool.mcpb`.
->
-> #### GitHub Actions
->
-> Use [zerocore-ai/tool-action](https://github.com/zerocore-ai/tool-action) to automate multi-platform builds:
->
-> ```yaml
-> - uses: zerocore-ai/tool-action/setup@v1
-> - uses: zerocore-ai/tool-action/pack@v1
->   with:
->     target: ${{ matrix.target }}
-> ```
->
-> <details>
-> <summary>Auto-detect from manifest</summary>
-> <blockquote>
->
-> If all platform binaries are available locally, this packs and uploads all variants defined in your manifest's `platform_overrides`:
->
-> ```sh
-> tool publish --multi-platform
-> ```
->
-> </blockquote>
-> </details>
-
-##
-
-### Installing with Platform Selection
-
-> ```sh
-> tool install library/bash
-> ```
->
-> Automatically downloads the bundle matching your system (e.g., `darwin-arm64` on Apple Silicon). Falls back to universal if no platform match.
->
-> ```sh
-> tool install library/bash --platform=universal
-> ```
->
-> Explicitly install the universal bundle instead.
-
-<br />
-
-<div align='center'>• • •</div>
-
-<br />
-
 ## Using Tools
 
-`tool-cli` essentially turns your MCP servers into CLIs. You can inspect, call, and compose tools directly from the terminal — no client needed. This is also the foundation for building [context-efficient agents](cookbooks/).
+`tool-cli` essentially turns your MCP servers into CLIs. You can inspect, call, and compose tools directly from the terminal. It is the foundation for building [code-mode agents](cookbooks/).
 
 ### Find Tools
 
@@ -306,11 +239,11 @@ Multi-platform creates separate bundles for each OS/architecture. Users automati
 > You can also use `--expose` to bridge between transports.
 >
 > ```sh
-> tool run <namespace/remote-mcp> --expose stdio      # HTTP backend to stdio
+> tool run <namespace/remote-mcp> --expose stdio # HTTP backend to stdio
 > ```
 >
 > ```sh
-> tool run <namespace/local-mcp> --expose http --port 3000   # stdio backend to HTTP
+> tool run <namespace/local-mcp> --expose http --port 3000 # stdio backend to HTTP
 > ```
 
 ##
@@ -453,9 +386,69 @@ Once you've installed some tools, you probably want to use them in your favorite
 
 <br />
 
-<div align="center">
-    <a href="https://tool.store/blog/building-context-efficient-agents" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://tool.store/blog/building-context-efficient-agents" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
-</div>
+<div align='center'>• • •</div>
+
+<br />
+
+## Multi-Platform Bundles
+
+Most MCP tools are pure JavaScript or Python and work everywhere with a single bundle. But if your tool has **platform-specific dependencies**, you need multi-platform publishing:
+
+- **Native binaries** (Rust, Go, C++)
+- **Node.js with native addons** (better-sqlite3, sharp, etc.)
+- **Python with compiled extensions** (numpy, pandas, etc.)
+
+Multi-platform creates separate bundles for each OS/architecture. Users automatically get the right one. Learn more about [multi-platform packaging](https://tool.store/docs/advanced/multi-platform).
+
+> Reference-mode `.mcpbx` bundles that point to remote servers or external commands like `npx` and `uvx` don't need multi-platform publishing since they don't bundle any code.
+
+### Publishing
+
+> ```sh
+> tool publish --multi-platform \
+>   --darwin-arm64 ./dist/my-tool-darwin-arm64.mcpb \
+>   --darwin-x64 ./dist/my-tool-darwin-x64.mcpb \
+>   --linux-arm64 ./dist/my-tool-linux-arm64.mcpb \
+>   --linux-x64 ./dist/my-tool-linux-x64.mcpb \
+>   --win32-arm64 ./dist/my-tool-win32-arm64.mcpb \
+>   --win32-x64 ./dist/my-tool-win32-x64.mcpb
+> ```
+>
+> Specify the bundle for each platform. Typically done in CI after building on each runner.
+>
+> #### GitHub Actions
+>
+> Use [zerocore-ai/tool-action](https://github.com/zerocore-ai/tool-action) to automate multi-platform builds:
+>
+> ```yaml
+> - uses: zerocore-ai/tool-action/setup@v1
+> - uses: zerocore-ai/tool-action/pack@v1
+>   with:
+>     target: ${{ matrix.target }}
+> ```
+>
+> <details>
+> <summary>Auto-detect from manifest</summary>
+> <blockquote>
+>
+> If all platform binaries are available locally, this packs and uploads all variants defined in your manifest's `platform_overrides`:
+>
+> ```sh
+> tool publish --multi-platform
+> ```
+>
+> </blockquote>
+> </details>
+
+##
+
+### Installing with Platform Selection
+
+> ```sh
+> tool install library/bash
+> ```
+>
+> Automatically downloads the bundle matching your system (e.g., `darwin-arm64` on Apple Silicon).
 
 <br />
 
@@ -497,6 +490,20 @@ Check out the [CLI docs](https://tool.store/docs/cli) for the full details.
 
 <br />
 
+## The MCPB Extension
+
+[MCPB](https://github.com/modelcontextprotocol/mcpb) is great for what it was designed for: bundled servers that run locally over stdio. But most MCP servers today run via `npx` or `uvx` (nothing to bundle), some are remote HTTP servers (no local code at all), and some need things like host-managed ports or OAuth flows that the spec doesn't cover.
+
+We created [MCPBX](https://tool.store/docs/building-tools/mcpbx) (`.mcpbx`) to fill those gaps. It's a superset of MCPB that adds HTTP transport, reference mode (so you can point to `npx`/`uvx` or a remote URL instead of bundling code), system config for host-managed resources, OAuth config, and template functions for constructing auth headers.
+
+The separate file extension exists so hosts know upfront whether they can handle the manifest. `tool-cli` picks the right format automatically based on what your manifest uses.
+
+<br />
+
+<div align='center'>• • •</div>
+
+<br />
+
 ## Why This Exists
 
 MCP is becoming the standard for AI tool integration. But standards only matter if people can actually use them.
@@ -507,19 +514,9 @@ tool-cli is that toolchain. And tool.store is that registry.
 
 The goal is simple. Make building and sharing MCP tools as easy as publishing an npm package.
 
-<br />
-
-<div align='center'>• • •</div>
-
-<br />
-
-## The MCPB Extension
-
-[MCPB](https://github.com/modelcontextprotocol/mcpb) is great for what it was designed for: bundled servers that run locally over stdio. But most MCP servers today run via `npx` or `uvx` (nothing to bundle), some are remote HTTP servers (no local code at all), and some need things like host-managed ports or OAuth flows that the spec doesn't cover.
-
-We created [MCPBX](https://tool.store/docs/building-tools/mcpbx) (`.mcpbx`) to fill those gaps. It's a superset of MCPB that adds HTTP transport, reference mode (so you can point to `npx`/`uvx` or a remote URL instead of bundling code), system config for host-managed resources, OAuth config, and template functions for constructing auth headers.
-
-The separate file extension exists so hosts know upfront whether they can handle the manifest. `tool-cli` picks the right format automatically based on what your manifest uses.
+<div align="center">
+    <a href="https://tool.store/blog/building-context-efficient-agents" target="_blank"><img src="https://octicons-col.vercel.app/dependabot/f8834b" height="16"/></a> <sup><a href="https://tool.store/blog/building-context-efficient-agents" target="_blank">BUILD <strong>CONTEXT-EFFICIENT</strong> AI AGENTS WITH TOOL-CLI →</a></sup>
+</div>
 
 <br />
 

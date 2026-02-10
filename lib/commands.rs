@@ -803,6 +803,10 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         win32_x64: Option<String>,
 
+        /// Pre-built bundle for win32-arm64 (Windows ARM64).
+        #[arg(long, value_name = "PATH")]
+        win32_arm64: Option<String>,
+
         /// Pre-built universal bundle (all platforms).
         #[arg(long, value_name = "PATH")]
         universal: Option<String>,

@@ -483,6 +483,7 @@ async fn run() -> ToolResult<()> {
             linux_x64,
             linux_arm64,
             win32_x64,
+            win32_arm64,
             universal,
         } => {
             // Collect pre-built artifacts into a map
@@ -501,6 +502,9 @@ async fn run() -> ToolResult<()> {
             }
             if let Some(p) = win32_x64 {
                 prebuilt.insert("win32-x64".to_string(), std::path::PathBuf::from(p));
+            }
+            if let Some(p) = win32_arm64 {
+                prebuilt.insert("win32-arm64".to_string(), std::path::PathBuf::from(p));
             }
             if let Some(p) = universal {
                 prebuilt.insert("universal".to_string(), std::path::PathBuf::from(p));

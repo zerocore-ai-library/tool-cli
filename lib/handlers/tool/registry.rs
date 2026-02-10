@@ -2312,10 +2312,57 @@ async fn publish_multi_artifact_impl(
     // Process explicit artifacts or pack bundles
     if !options.explicit_artifacts.is_empty() {
         // Use explicit artifact files
+        let mut icons_extracted = false;
+        let mut canonical_identity_hash: Option<String> = None;
+        let mut canonical_bundle_path: Option<String> = None;
+
         for (platform, path) in &options.explicit_artifacts {
             let bytes = std::fs::read(path).map_err(|e| {
                 ToolError::Generic(format!("Failed to read {}: {}", path.display(), e))
             })?;
+
+            // Validate bundle: must be a valid ZIP with manifest.json
+            let (bundle_manifest, manifest_bytes) =
+                match crate::pack::read_manifest_from_bundle(&bytes) {
+                    Ok(result) => result,
+                    Err(e) => {
+                        return Err(ToolError::Generic(format!(
+                            "Invalid bundle {}: {}",
+                            path.display(),
+                            e
+                        )));
+                    }
+                };
+
+            // Compute identity hash for validation
+            let identity_hash = crate::pack::compute_manifest_identity_hash(&manifest_bytes)
+                .map_err(|e| {
+                    ToolError::Generic(format!(
+                        "Failed to compute identity hash for {}: {}",
+                        path.display(),
+                        e
+                    ))
+                })?;
+
+            // Validate consistency: all bundles must have matching identity
+            if let Some(ref canonical_hash) = canonical_identity_hash {
+                if &identity_hash != canonical_hash {
+                    let bundle_name = bundle_manifest.name.clone().unwrap_or_default();
+                    let bundle_version = bundle_manifest.version.clone().unwrap_or_default();
+                    return Err(ToolError::Generic(format!(
+                        "Bundle mismatch: {} ({}@{}) has different identity than {}\n\
+                         Critical fields (name, version, tools, user_config, etc.) must match across all bundles.",
+                        path.display(),
+                        bundle_name,
+                        bundle_version,
+                        canonical_bundle_path.as_deref().unwrap_or("first bundle")
+                    )));
+                }
+            } else {
+                canonical_identity_hash = Some(identity_hash);
+                canonical_bundle_path = Some(path.display().to_string());
+            }
+
             let checksum = compute_sha256(&bytes);
             let filename = path
                 .file_name()
@@ -2329,6 +2376,40 @@ async fn publish_multi_artifact_impl(
                 filename,
                 format_size(bytes.len() as u64)
             );
+
+            // Extract icons from the first bundle (all bundles should have the same icons)
+            if !icons_extracted {
+                match crate::pack::extract_icons_from_bundle(&bytes) {
+                    Ok(icons) => {
+                        if !icons.is_empty() {
+                            let total_icon_size: u64 =
+                                icons.iter().map(|i| i.bytes.len() as u64).sum();
+                            println!(
+                                "  · icons: {} ({} file{})",
+                                format_size(total_icon_size),
+                                icons.len(),
+                                if icons.len() > 1 { "s" } else { "" }
+                            );
+                            for icon in icons {
+                                files_to_upload.push((
+                                    icon.name.clone(),
+                                    icon.bytes.clone(),
+                                    icon.checksum.clone(),
+                                ));
+                            }
+                        }
+                        icons_extracted = true;
+                    }
+                    Err(e) => {
+                        // Log warning but continue - icons are optional
+                        eprintln!(
+                            "  {} Warning: Failed to extract icons from bundle: {}",
+                            "⚠".yellow(),
+                            e
+                        );
+                    }
+                }
+            }
 
             version_manifest_artifacts.insert(
                 platform.clone(),
