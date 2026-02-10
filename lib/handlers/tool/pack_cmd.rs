@@ -29,7 +29,6 @@ pub async fn pack_mcpb(
     output: Option<String>,
     no_validate: bool,
     strict: bool,
-    include_dotfiles: bool,
     verbose: bool,
     multi_platform: bool,
 ) -> ToolResult<()> {
@@ -78,11 +77,11 @@ pub async fn pack_mcpb(
 
     // Handle multi-platform packing
     if multi_platform {
-        return pack_multi_platform(&dir, no_validate, include_dotfiles, verbose).await;
+        return pack_multi_platform(&dir, no_validate, verbose).await;
     }
 
     // Single bundle packing with progress bar
-    pack_single_bundle(&dir, output, no_validate, include_dotfiles, verbose)
+    pack_single_bundle(&dir, output, no_validate, verbose)
 }
 
 /// Pack a single bundle with progress bar and scrolling file names.
@@ -90,7 +89,6 @@ fn pack_single_bundle(
     dir: &Path,
     output: Option<String>,
     no_validate: bool,
-    include_dotfiles: bool,
     verbose: bool,
 ) -> ToolResult<()> {
     // Create multi-progress for progress bar + file lines
@@ -128,7 +126,6 @@ fn pack_single_bundle(
     let options = PackOptions {
         output: output.map(PathBuf::from),
         validate: !no_validate,
-        include_dotfiles,
         verbose,
         extract_icon: false,
         on_progress: Some(Arc::new(move |progress| match progress {
@@ -191,12 +188,7 @@ fn pack_single_bundle(
 }
 
 /// Pack bundles for each platform override + universal bundle.
-async fn pack_multi_platform(
-    dir: &Path,
-    no_validate: bool,
-    include_dotfiles: bool,
-    verbose: bool,
-) -> ToolResult<()> {
+async fn pack_multi_platform(dir: &Path, no_validate: bool, verbose: bool) -> ToolResult<()> {
     // Load manifest to get platform overrides
     let manifest = McpbManifest::load(dir)
         .map_err(|e| ToolError::Generic(format!("Failed to load manifest: {}", e)))?;
@@ -212,7 +204,7 @@ async fn pack_multi_platform(
         println!("  Creating single universal bundle instead.");
         println!();
 
-        return pack_single_bundle(dir, None, no_validate, include_dotfiles, verbose);
+        return pack_single_bundle(dir, None, no_validate, verbose);
     }
 
     // Create multi-progress for all bundles
@@ -250,7 +242,6 @@ async fn pack_multi_platform(
         let options = PackOptions {
             output: None,
             validate: !no_validate,
-            include_dotfiles,
             verbose: false,
             extract_icon: false,
             on_progress: Some(Arc::new(move |progress| match progress {
@@ -279,7 +270,6 @@ async fn pack_multi_platform(
     let universal_options = PackOptions {
         output: None,
         validate: !no_validate,
-        include_dotfiles,
         verbose: false,
         extract_icon: false,
         on_progress: Some(Arc::new(move |progress| match progress {

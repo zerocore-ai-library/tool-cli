@@ -81,9 +81,6 @@ pub struct PackOptions {
     /// Whether to validate before packing.
     pub validate: bool,
 
-    /// Include dotfiles (except .git/).
-    pub include_dotfiles: bool,
-
     /// Show files being added.
     pub verbose: bool,
 
@@ -99,7 +96,6 @@ impl Default for PackOptions {
         Self {
             output: None,
             validate: true,
-            include_dotfiles: false,
             verbose: false,
             extract_icon: false,
             on_progress: None,
@@ -112,7 +108,6 @@ impl std::fmt::Debug for PackOptions {
         f.debug_struct("PackOptions")
             .field("output", &self.output)
             .field("validate", &self.validate)
-            .field("include_dotfiles", &self.include_dotfiles)
             .field("verbose", &self.verbose)
             .field("extract_icon", &self.extract_icon)
             .field("on_progress", &self.on_progress.is_some())
@@ -170,9 +165,6 @@ pub struct PackResult {
 /// Options for collecting bundle files.
 #[derive(Debug, Clone, Default)]
 pub struct CollectOptions {
-    /// Include dotfiles (except .git/).
-    pub include_dotfiles: bool,
-
     /// Track ignored files for verbose output.
     pub track_ignored: bool,
 }
@@ -285,13 +277,6 @@ pub fn pack_bundle(dir: &Path, options: &PackOptions) -> Result<PackResult, Pack
             .matched_path_or_any_parents(relative_path, is_dir)
             .is_ignore()
         {
-            if options.verbose {
-                ignored_files.push(path_str);
-            }
-            continue;
-        }
-
-        if !options.include_dotfiles && is_dotfile(&path_str) {
             if options.verbose {
                 ignored_files.push(path_str);
             }
@@ -487,13 +472,6 @@ pub fn pack_bundle_for_platform(
             .matched_path_or_any_parents(relative_path, is_dir)
             .is_ignore()
         {
-            if options.verbose {
-                ignored_files.push(path_str);
-            }
-            continue;
-        }
-
-        if !options.include_dotfiles && is_dotfile(&path_str) {
             if options.verbose {
                 ignored_files.push(path_str);
             }
@@ -883,14 +861,6 @@ pub fn collect_bundle_files(
             continue;
         }
 
-        // Skip dotfiles unless explicitly included
-        if !options.include_dotfiles && is_dotfile(&path_str) {
-            if options.track_ignored {
-                ignored_files.push(path_str);
-            }
-            continue;
-        }
-
         let modified = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
 
         if is_dir {
@@ -925,7 +895,7 @@ pub fn collect_bundle_files(
 
 /// Create a tar.gz bundle from a tool directory for registry upload.
 ///
-/// This applies the same filtering as `pack_bundle` (.mcpbignore, dotfiles, etc.)
+/// This applies the same filtering as `pack_bundle` (.mcpbignore, builtin ignores)
 /// but outputs tar.gz bytes suitable for registry upload.
 pub fn create_tool_bundle(dir: &Path) -> Result<Vec<u8>, PackError> {
     // 1. Check manifest exists
@@ -1018,11 +988,6 @@ fn is_builtin_ignored(path: &Path, base: &Path) -> bool {
     }
 
     false
-}
-
-/// Check if a path is a dotfile (starts with .).
-fn is_dotfile(path: &str) -> bool {
-    path.starts_with('.') || path.split('/').any(|component| component.starts_with('.'))
 }
 
 /// Convert SystemTime to zip DateTime, preserving file modification times.
@@ -1363,15 +1328,6 @@ pub fn compute_manifest_identity_hash(manifest_bytes: &[u8]) -> Result<String, P
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    #[test]
-    fn test_is_dotfile() {
-        assert!(is_dotfile(".git"));
-        assert!(is_dotfile(".DS_Store"));
-        assert!(is_dotfile("foo/.hidden"));
-        assert!(!is_dotfile("manifest.json"));
-        assert!(!is_dotfile("server/index.js"));
-    }
 
     #[test]
     fn test_is_builtin_ignored() {
