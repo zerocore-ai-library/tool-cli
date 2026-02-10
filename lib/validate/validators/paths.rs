@@ -60,18 +60,24 @@ pub fn validate_file_path(
     // Check if file exists
     let full_path = dir.join(path);
     if !full_path.exists() {
-        result.errors.push(ValidationIssue {
-            code: ErrorCode::FileNotFound.into(),
-            message: format!(
-                "{} not found",
-                field.split('.').next_back().unwrap_or(field)
-            ),
-            location: format!("{}:{}", manifest_file, field),
-            details: format!("file `{}` does not exist", path),
-            help: Some(format!(
-                "add the file or remove the {} field",
-                field.split('.').next_back().unwrap_or(field)
-            )),
-        });
+        // For extensionless paths, also check with .exe (Windows binaries)
+        let has_extension = Path::new(path).extension().is_some();
+        let exe_path = dir.join(format!("{}.exe", path));
+
+        if has_extension || !exe_path.exists() {
+            result.errors.push(ValidationIssue {
+                code: ErrorCode::FileNotFound.into(),
+                message: format!(
+                    "{} not found",
+                    field.split('.').next_back().unwrap_or(field)
+                ),
+                location: format!("{}:{}", manifest_file, field),
+                details: format!("file `{}` does not exist", path),
+                help: Some(format!(
+                    "add the file or remove the {} field",
+                    field.split('.').next_back().unwrap_or(field)
+                )),
+            });
+        }
     }
 }
