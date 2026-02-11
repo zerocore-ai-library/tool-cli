@@ -206,7 +206,7 @@ Get your first MCP tool published in three steps.
 > Inspect a tool from the registry without installing it. See its available methods before you commit.
 >
 > ```sh
-> tool preview library/bash -m bash__exec
+> tool preview library/bash -m exec
 > ```
 >
 > Preview a specific method to see its input and output schemas.
@@ -286,7 +286,7 @@ Get your first MCP tool published in three steps.
 > See what a tool exposes. Tools, prompts, resources.
 >
 > ```sh
-> tool call library/bash -m .exec -p command="echo hello"
+> tool call library/bash -m exec -p command="echo hello"
 > ```
 >
 > Call a method directly. Great for testing things out.

@@ -17,7 +17,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 
 use super::common::resolve_tool;
@@ -786,9 +786,6 @@ async fn unset_tool(tool: &str, yes: bool, concise: bool) -> ToolResult<()> {
 
     // Confirm if not --yes
     if !yes && !concise {
-        init_theme();
-        println!();
-
         let what = match (has_config, has_credentials) {
             (true, true) => "configuration and credentials",
             (true, false) => "configuration",
@@ -796,12 +793,26 @@ async fn unset_tool(tool: &str, yes: bool, concise: bool) -> ToolResult<()> {
             (false, false) => unreachable!(),
         };
 
-        let proceed = cliclack::confirm(format!("Remove {} for {}?", what, plugin_ref))
-            .initial_value(true)
-            .interact()?;
+        println!();
+        println!(
+            "  {} This will remove {} for {}",
+            "!".bright_yellow(),
+            what,
+            plugin_ref
+        );
+        println!();
+        print!("  Continue? [y/N] ");
+        io::stdout().flush().ok();
 
-        if !proceed {
-            cliclack::outro_cancel("Cancelled.")?;
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| ToolError::Generic(format!("Failed to read input: {}", e)))?;
+
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!();
+            println!("  {} Cancelled", "✗".bright_red());
+            println!();
             return Err(ToolError::Cancelled);
         }
     }
@@ -859,18 +870,25 @@ async fn unset_all_tools(yes: bool, concise: bool) -> ToolResult<()> {
 
     // Confirm if not --yes
     if !yes && !concise {
-        init_theme();
         println!();
-
-        let proceed = cliclack::confirm(format!(
-            "Remove all configuration and credentials for {} tool(s)?",
+        println!(
+            "  {} This will remove configuration and credentials for {} tool(s)",
+            "!".bright_yellow(),
             all_tools.len()
-        ))
-        .initial_value(true)
-        .interact()?;
+        );
+        println!();
+        print!("  Continue? [y/N] ");
+        io::stdout().flush().ok();
 
-        if !proceed {
-            cliclack::outro_cancel("Cancelled.")?;
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| ToolError::Generic(format!("Failed to read input: {}", e)))?;
+
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!();
+            println!("  {} Cancelled", "✗".bright_red());
+            println!();
             return Err(ToolError::Cancelled);
         }
     }
