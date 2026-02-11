@@ -836,6 +836,10 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
     let mut registry_preflights = Vec::new();
     let mut bundle_preflights = Vec::new();
     let mut local_count = 0usize;
+    let mut installed_count = 0usize;
+    let mut failed_count = 0usize;
+    let mut bundle_installed = 0usize;
+    let mut bundle_failed = 0usize;
     let mut already_installed = Vec::new();
     let mut failed = Vec::new();
 
@@ -915,10 +919,12 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
                         success.version.bright_cyan(),
                         format_size(success.size)
                     );
+                    installed_count += 1;
                 }
                 Err(msg) => {
                     pb.finish_and_clear();
                     println!("  {} Install failed: {}", "✗".bright_red(), msg);
+                    failed_count += 1;
                 }
             }
         } else {
@@ -956,9 +962,6 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
             let results = join_all(handles).await;
 
             // Print results
-            let mut installed_count = 0usize;
-            let mut failed_count = 0usize;
-
             for result in results {
                 match result {
                     Ok(Ok(success)) => {
@@ -981,35 +984,6 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
                         failed_count += 1;
                     }
                 }
-            }
-
-            // Summary line for multiple packages
-            let total = installed_count + local_count;
-            if total > 0 || failed_count > 0 || !already_installed.is_empty() {
-                println!();
-                if total > 0 {
-                    print!(
-                        "Installed {} {}",
-                        total.to_string().bright_green(),
-                        if total == 1 { "package" } else { "packages" }
-                    );
-                }
-                if !already_installed.is_empty() {
-                    if total > 0 {
-                        print!(", ");
-                    }
-                    print!(
-                        "{} already installed",
-                        already_installed.len().to_string().bright_cyan()
-                    );
-                }
-                if failed_count > 0 {
-                    if total > 0 || !already_installed.is_empty() {
-                        print!(", ");
-                    }
-                    print!("{} failed", failed_count.to_string().bright_red());
-                }
-                println!();
             }
         }
     }
@@ -1043,18 +1017,25 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
                         preflight.display_name.bright_cyan(),
                         "(extracted)".dimmed()
                     );
+                    bundle_installed += 1;
                 }
                 Err(msg) => {
                     pb.finish_and_clear();
                     println!("  {} {}: {}", "✗".bright_red(), preflight.display_name, msg);
+                    bundle_failed += 1;
                 }
             }
         } else {
             // Multiple bundles: parallel extraction with multi-progress
             println!(
-                "  {} Extracting {} bundles",
+                "  {} Extracting {} {}",
                 "→".bright_blue(),
-                bundle_count.to_string().bright_cyan()
+                bundle_count.to_string().bright_cyan(),
+                if bundle_count == 1 {
+                    "bundle"
+                } else {
+                    "bundles"
+                }
             );
 
             let mp = MultiProgress::new();
@@ -1085,8 +1066,6 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
             let results = futures_util::future::join_all(handles).await;
 
             // Print results
-            let mut bundle_failed = 0usize;
-
             for result in results {
                 match result {
                     Ok((name, Ok(()))) => {
@@ -1096,6 +1075,7 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
                             name.bright_cyan(),
                             "(extracted)".dimmed()
                         );
+                        bundle_installed += 1;
                     }
                     Ok((name, Err(msg))) => {
                         println!("  {} {}: {}", "✗".bright_red(), name, msg);
@@ -1107,12 +1087,62 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
                     }
                 }
             }
+        }
 
-            failed.extend(std::iter::repeat_n(
-                ("bundle".to_string(), "extraction failed".to_string()),
-                bundle_failed,
+        failed.extend(std::iter::repeat_n(
+            ("bundle".to_string(), "extraction failed".to_string()),
+            bundle_failed,
+        ));
+    }
+
+    // Combined summary at the end
+    let total_installed = installed_count + local_count;
+    let total_failed = failed_count + bundle_failed;
+    let has_any = total_installed > 0
+        || bundle_installed > 0
+        || total_failed > 0
+        || !already_installed.is_empty();
+
+    if has_any {
+        println!();
+        let mut parts = Vec::new();
+
+        if total_installed > 0 {
+            parts.push(format!(
+                "Installed {} {}",
+                total_installed.to_string().bright_green(),
+                if total_installed == 1 {
+                    "package"
+                } else {
+                    "packages"
+                }
             ));
         }
+
+        if bundle_installed > 0 {
+            parts.push(format!(
+                "extracted {} {}",
+                bundle_installed.to_string().bright_green(),
+                if bundle_installed == 1 {
+                    "bundle"
+                } else {
+                    "bundles"
+                }
+            ));
+        }
+
+        if !already_installed.is_empty() {
+            parts.push(format!(
+                "{} already installed",
+                already_installed.len().to_string().bright_cyan()
+            ));
+        }
+
+        if total_failed > 0 {
+            parts.push(format!("{} failed", total_failed.to_string().bright_red()));
+        }
+
+        println!("{}", parts.join(", "));
     }
 
     Ok(())
