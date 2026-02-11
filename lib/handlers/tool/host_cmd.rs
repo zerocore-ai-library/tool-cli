@@ -238,6 +238,8 @@ async fn host_add(
             cliclack::outro_cancel("Cancelled.")?;
             return Err(ToolError::Cancelled);
         }
+
+        cliclack::outro("Done!")?;
     }
 
     // Fetch tools from registry if needed (after confirmation)
@@ -274,10 +276,6 @@ async fn host_add(
     // Save config and metadata
     save_config(&host, &config)?;
     save_metadata(&host, &metadata)?;
-
-    if !yes {
-        cliclack::outro("Done!")?;
-    }
 
     // Output result
     if concise {
