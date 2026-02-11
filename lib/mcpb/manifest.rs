@@ -541,12 +541,12 @@ impl McpbManifest {
         // Determine binary name and command based on platform
         let (binary_name, command) = match platform {
             McpbPlatform::Win32 => (
-                format!("target/release/{}.exe", name),
-                format!("${{__dirname}}\\target\\release\\{}.exe", name),
+                format!("dist/{}.exe", name),
+                format!("${{__dirname}}\\dist\\{}.exe", name),
             ),
             _ => (
-                format!("target/release/{}", name),
-                format!("${{__dirname}}/target/release/{}", name),
+                format!("dist/{}", name),
+                format!("${{__dirname}}/dist/{}", name),
             ),
         };
 
@@ -618,7 +618,7 @@ impl McpbManifest {
             system_config,
             compatibility: Some(McpbCompatibility {
                 claude_desktop: None,
-                platforms: Some(vec![platform]),
+                platforms: Some(vec![platform.clone()]),
                 runtimes: None,
             }),
             privacy_policies: None,
@@ -626,7 +626,16 @@ impl McpbManifest {
             meta: Some(serde_json::json!({
                 "store.tool.mcpb": {
                     "scripts": {
-                        "build": "cargo build --release"
+                        "build": match platform {
+                            McpbPlatform::Win32 => format!(
+                                "cargo build --release && if not exist dist mkdir dist && copy target\\release\\{}.exe dist\\",
+                                name
+                            ),
+                            _ => format!(
+                                "cargo build --release && mkdir -p dist && cp target/release/{} dist/",
+                                name
+                            ),
+                        }
                     }
                 }
             })),

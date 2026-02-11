@@ -66,16 +66,16 @@ impl RustDetector {
     /// Get the entry point path (binary location).
     fn get_entry_point(&self, name: &str, platform: &McpbPlatform) -> String {
         match platform {
-            McpbPlatform::Win32 => format!("target/release/{}.exe", name),
-            _ => format!("target/release/{}", name),
+            McpbPlatform::Win32 => format!("dist/{}.exe", name),
+            _ => format!("dist/{}", name),
         }
     }
 
     /// Get the command path for mcp_config.
     fn get_command_path(&self, name: &str, platform: &McpbPlatform) -> String {
         match platform {
-            McpbPlatform::Win32 => format!("${{__dirname}}\\target\\release\\{}.exe", name),
-            _ => format!("${{__dirname}}/target/release/{}", name),
+            McpbPlatform::Win32 => format!("${{__dirname}}\\dist\\{}.exe", name),
+            _ => format!("${{__dirname}}/dist/{}", name),
         }
     }
 
@@ -180,10 +180,11 @@ impl RustDetector {
 
     /// Check if the binary is already built.
     fn is_built(&self, dir: &Path, name: &str) -> bool {
+        let dist_path = dir.join(format!("dist/{}", name));
         let release_path = dir.join(format!("target/release/{}", name));
         let debug_path = dir.join(format!("target/debug/{}", name));
 
-        release_path.exists() || debug_path.exists()
+        dist_path.exists() || release_path.exists() || debug_path.exists()
     }
 }
 
@@ -330,7 +331,7 @@ impl ProjectDetector for RustDetector {
             system_config: None,
             compatibility: Some(McpbCompatibility {
                 claude_desktop: None,
-                platforms: Some(vec![platform]),
+                platforms: Some(vec![platform.clone()]),
                 runtimes: None,
             }),
             privacy_policies: None,
@@ -338,7 +339,16 @@ impl ProjectDetector for RustDetector {
             meta: Some(serde_json::json!({
                 "store.tool.mcpb": {
                     "scripts": {
-                        "build": "cargo build --release"
+                        "build": match platform {
+                            McpbPlatform::Win32 => format!(
+                                "cargo build --release && if not exist dist mkdir dist && copy target\\release\\{}.exe dist\\",
+                                binary_name
+                            ),
+                            _ => format!(
+                                "cargo build --release && mkdir -p dist && cp target/release/{} dist/",
+                                binary_name
+                            ),
+                        }
                     }
                 }
             })),

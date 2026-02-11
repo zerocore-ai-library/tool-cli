@@ -995,7 +995,7 @@ fn print_init_success(name: &str, mode: &InitMode, is_rust: bool, dir_path: Opti
 
     if !mode.is_reference() {
         if is_rust {
-            println!("  · {}      target/release/{}", "Entry".dimmed(), name);
+            println!("  · {}      dist/{}", "Entry".dimmed(), name);
         } else {
             match mode.server_type() {
                 Some(McpbServerType::Node) => {
