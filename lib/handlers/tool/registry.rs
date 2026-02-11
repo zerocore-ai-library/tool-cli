@@ -2426,8 +2426,9 @@ pub async fn publish_mcpb(
 
     if !artifact_exists {
         let spinner = Spinner::new("Creating artifact entry");
+        let categories = manifest.categories();
         match client
-            .create_artifact(&namespace, tool_name, description)
+            .create_artifact(&namespace, tool_name, description, categories)
             .await
         {
             Ok(()) => {
@@ -2699,7 +2700,7 @@ fn detect_available_platforms(manifest: &McpbManifest) -> Vec<String> {
 #[allow(clippy::too_many_arguments)]
 async fn publish_multi_artifact_impl(
     dir: &Path,
-    _manifest: &McpbManifest,
+    manifest: &McpbManifest,
     manifest_content: &str,
     namespace: &str,
     tool_name: &str,
@@ -3060,8 +3061,9 @@ async fn publish_multi_artifact_impl(
 
     if !artifact_exists {
         let spinner = Spinner::new("Creating artifact entry");
+        let categories = manifest.categories();
         match client
-            .create_artifact(namespace, tool_name, description)
+            .create_artifact(namespace, tool_name, description, categories)
             .await
         {
             Ok(()) => {
