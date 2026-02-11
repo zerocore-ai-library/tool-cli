@@ -974,11 +974,7 @@ pub async fn call_tool(
         eprintln!("-> tools/call: {}", method);
     }
 
-    let result = connection
-        .peer()
-        .call_tool(params)
-        .await
-        .map_err(|e| ToolError::Generic(format!("Tool call failed: {}", e)))?;
+    let result = connection.peer().call_tool(params).await?;
 
     if verbose {
         eprintln!("<- {} content block(s)", result.content.len());
