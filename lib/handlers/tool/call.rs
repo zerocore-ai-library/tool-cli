@@ -5,8 +5,8 @@ use crate::mcp::call_tool;
 use crate::mcpb::McpbUserConfigField;
 use crate::styles::Spinner;
 use crate::suggest::{
-    extract_missing_param_from_error, extract_params_from_schema, extract_unknown_tool_from_error,
-    find_similar_tools, format_suggestions, is_missing_param_error,
+    McpErrorKind, analyze_mcp_error, extract_params_from_schema, find_similar_tools,
+    format_suggestions, is_missing_param_error,
 };
 use colored::Colorize;
 use std::collections::BTreeMap;
@@ -50,23 +50,23 @@ fn get_tool_input_schema(prepared: &PreparedTool, tool_name: &str) -> Option<ser
         .and_then(|t| t.input_schema.clone())
 }
 
-/// Print enhanced error message for missing required parameters.
+/// Print enhanced error message for missing required parameters (typed version).
 ///
 /// Shows all required and optional parameters from the tool's schema.
-fn print_missing_param_error(error_text: &str, method: &str, prepared: &PreparedTool) {
-    let missing_param = extract_missing_param_from_error(error_text);
-
+fn print_missing_param_error_typed(missing_param: &str, method: &str, prepared: &PreparedTool) {
     println!(
-        "  {} Missing required parameter{} for {} on {}\n",
+        "  {} Missing required parameter: {} for {} on {}\n",
         "✗".bright_red(),
-        missing_param
-            .as_ref()
-            .map(|p| format!(": {}", p.bright_white()))
-            .unwrap_or_default(),
+        missing_param.bright_white(),
         method.bold(),
         prepared.tool_name.bold()
     );
 
+    print_tool_params(method, prepared);
+}
+
+/// Print all parameters for a tool method from its schema.
+fn print_tool_params(method: &str, prepared: &PreparedTool) {
     // Get the tool's input schema and show all parameters
     if let Some(schema) = get_tool_input_schema(prepared, method) {
         let params = extract_params_from_schema(&schema);
@@ -279,16 +279,25 @@ pub async fn tool_call(
                 s.fail(None);
             }
 
-            // Check for enhanced error handling
-            if let ToolError::Generic(ref msg) = e {
-                if is_missing_param_error(msg) {
-                    print_missing_param_error(msg, &method, &prepared);
-                    std::process::exit(1);
-                }
-
-                if let Some(unknown_tool) = extract_unknown_tool_from_error(msg) {
-                    print_unknown_tool_error(&unknown_tool, &prepared);
-                    std::process::exit(1);
+            // Check for enhanced error handling with typed MCP errors
+            if let ToolError::Mcp(ref service_error) = e
+                && let Some(kind) = analyze_mcp_error(service_error)
+            {
+                match kind {
+                    McpErrorKind::MissingParam(param) => {
+                        print_missing_param_error_typed(&param, &method, &prepared);
+                        std::process::exit(1);
+                    }
+                    McpErrorKind::UnknownTool(tool) => {
+                        print_unknown_tool_error(&tool, &prepared);
+                        std::process::exit(1);
+                    }
+                    McpErrorKind::Other { code, message } => {
+                        // Fall through to default error display
+                        // but we could add more specific handling here
+                        println!("  {} MCP error ({}): {}\n", "✗".bright_red(), code, message);
+                        std::process::exit(1);
+                    }
                 }
             }
 
@@ -376,7 +385,19 @@ pub async fn tool_call(
 
         // Handle missing required parameter errors with enhanced output
         if is_missing_param_error(&error_text) {
-            print_missing_param_error(&error_text, &method, &prepared);
+            // Try to extract the param name from the error text
+            if let Some(param) = crate::suggest::extract_missing_field_from_message(&error_text) {
+                print_missing_param_error_typed(&param, &method, &prepared);
+            } else {
+                // Fallback: show generic missing param message with params list
+                println!(
+                    "  {} Missing required parameter for {} on {}\n",
+                    "✗".bright_red(),
+                    method.bold(),
+                    prepared.tool_name.bold()
+                );
+                print_tool_params(&method, &prepared);
+            }
             std::process::exit(1);
         }
     }

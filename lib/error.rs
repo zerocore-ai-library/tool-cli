@@ -12,6 +12,10 @@ pub type ToolResult<T> = Result<T, ToolError>;
 /// Error type for tool-cli operations.
 #[derive(Debug, Error)]
 pub enum ToolError {
+    /// MCP service error (connection, protocol, or tool errors).
+    #[error("{0}")]
+    Mcp(#[from] rmcp::service::ServiceError),
+
     /// Invalid tool configuration.
     #[error("Invalid tool configuration: {0}")]
     InvalidToolConfig(String),

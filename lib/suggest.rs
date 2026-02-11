@@ -1,5 +1,6 @@
 //! Fuzzy matching utilities for tool suggestions.
 
+use rmcp::service::ServiceError;
 use strsim::jaro_winkler;
 
 //--------------------------------------------------------------------------------------------------
@@ -111,6 +112,91 @@ pub fn extract_missing_param_from_error(error_msg: &str) -> Option<String> {
 /// Check if an error is a missing parameter error.
 pub fn is_missing_param_error(error_msg: &str) -> bool {
     error_msg.contains("missing required parameter")
+        || error_msg.contains("missing field")
+        || error_msg.contains("failed to deserialize parameters")
+}
+
+//--------------------------------------------------------------------------------------------------
+// Functions: Typed Error Handling
+//--------------------------------------------------------------------------------------------------
+
+/// JSON-RPC error code for invalid params.
+const INVALID_PARAMS: i32 = -32602;
+
+/// JSON-RPC error code for method not found (unknown tool).
+const METHOD_NOT_FOUND: i32 = -32601;
+
+/// Information extracted from an MCP error.
+#[derive(Debug, Clone)]
+pub enum McpErrorKind {
+    /// Missing required parameter with the parameter name.
+    MissingParam(String),
+    /// Unknown tool/method with the tool name.
+    UnknownTool(String),
+    /// Other error with code and message.
+    Other { code: i32, message: String },
+}
+
+/// Analyze a ServiceError and extract structured information.
+pub fn analyze_mcp_error(error: &ServiceError) -> Option<McpErrorKind> {
+    let ServiceError::McpError(mcp_error) = error else {
+        return None;
+    };
+
+    let code = mcp_error.code.0;
+    let message = &mcp_error.message;
+
+    match code {
+        INVALID_PARAMS => {
+            // Try to extract missing parameter name from message
+            // Formats: "missing field `name`" or "missing required parameter: name"
+            if let Some(param) = extract_missing_field_from_message(message) {
+                return Some(McpErrorKind::MissingParam(param));
+            }
+            Some(McpErrorKind::Other {
+                code,
+                message: message.to_string(),
+            })
+        }
+        METHOD_NOT_FOUND => {
+            // Try to extract unknown tool name
+            if let Some(tool) = extract_unknown_tool_from_error(message) {
+                return Some(McpErrorKind::UnknownTool(tool));
+            }
+            Some(McpErrorKind::Other {
+                code,
+                message: message.to_string(),
+            })
+        }
+        _ => Some(McpErrorKind::Other {
+            code,
+            message: message.to_string(),
+        }),
+    }
+}
+
+/// Extract missing field name from various error message formats.
+///
+/// Handles:
+/// - "missing field `name`" (serde)
+/// - "missing required parameter: name"
+pub fn extract_missing_field_from_message(message: &str) -> Option<String> {
+    // Pattern: "missing field `xxx`" (serde format with backticks)
+    if let Some(start) = message.find("missing field `") {
+        let rest = &message[start + 15..]; // skip "missing field `"
+        if let Some(end) = rest.find('`') {
+            return Some(rest[..end].to_string());
+        }
+    }
+
+    // Pattern: "missing required parameter: xxx"
+    if let Some(start) = message.find("missing required parameter:") {
+        let rest = message[start + 27..].trim(); // skip "missing required parameter:"
+        let param = rest.split_whitespace().next()?;
+        return Some(param.to_string());
+    }
+
+    None
 }
 
 /// Extract parameter info from a JSON Schema input_schema.
