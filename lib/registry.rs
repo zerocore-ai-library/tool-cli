@@ -91,7 +91,12 @@ struct ArtifactSummary {
     description: Option<String>,
     #[serde(default)]
     total_downloads: i64,
-    latest_version: Option<String>,
+    latest_version: Option<SearchVersionInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchVersionInfo {
+    version: String,
 }
 
 /// Artifact details from the registry.
@@ -595,6 +600,7 @@ impl RegistryClient {
         namespace: &str,
         name: &str,
         description: Option<&str>,
+        category_slugs: Option<Vec<String>>,
     ) -> ToolResult<()> {
         let token = self
             .auth_token
@@ -609,6 +615,7 @@ impl RegistryClient {
             "slug": name,
             "artifact_type": "tool",
             "description": description,
+            "category_slugs": category_slugs,
         });
 
         let response = self
@@ -968,7 +975,7 @@ impl RegistryClient {
                 namespace: item.artifact.namespace,
                 name: item.artifact.name,
                 description: item.artifact.description,
-                latest_version: item.artifact.latest_version,
+                latest_version: item.artifact.latest_version.map(|v| v.version),
                 total_downloads: item.artifact.total_downloads,
             })
             .collect())

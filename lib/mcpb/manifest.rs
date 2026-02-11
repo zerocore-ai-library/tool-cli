@@ -173,6 +173,28 @@ impl McpbManifest {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
+    /// Get categories from _meta if present.
+    pub fn categories(&self) -> Option<Vec<String>> {
+        self.meta
+            .as_ref()?
+            .get("store.tool.mcpb")?
+            .get("categories")?
+            .as_array()?
+            .iter()
+            .map(|v| v.as_str().map(|s| s.to_string()))
+            .collect()
+    }
+
+    /// Get runtime from _meta if present.
+    pub fn runtime(&self) -> Option<String> {
+        self.meta
+            .as_ref()?
+            .get("store.tool.mcpb")?
+            .get("runtime")?
+            .as_str()
+            .map(|s| s.to_string())
+    }
+
     /// Resolve the manifest with user/system config values.
     ///
     /// This method:
