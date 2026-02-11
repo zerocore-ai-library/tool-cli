@@ -639,7 +639,7 @@ pub async fn download_tools(
             println!();
             if downloaded_count > 0 {
                 print!(
-                    "Downloaded {} {}",
+                    "  Downloaded {} {}",
                     downloaded_count.to_string().bright_green(),
                     if downloaded_count == 1 {
                         "package"
@@ -1142,7 +1142,7 @@ pub async fn add_tools(names: &[String], platform: Option<&str>) -> ToolResult<(
             parts.push(format!("{} failed", total_failed.to_string().bright_red()));
         }
 
-        println!("{}", parts.join(", "));
+        println!("  {}", parts.join(", "));
     }
 
     Ok(())
@@ -2036,7 +2036,7 @@ pub async fn remove_tools(names: &[String], all: bool, yes: bool) -> ToolResult<
         println!();
         if removed_count > 0 {
             println!(
-                "Removed {} {}",
+                "  Removed {} {}",
                 removed_count.to_string().bright_green(),
                 if removed_count == 1 {
                     "package"
@@ -2047,7 +2047,7 @@ pub async fn remove_tools(names: &[String], all: bool, yes: bool) -> ToolResult<
         }
         if orphans_cleaned > 0 {
             println!(
-                "Cleaned up {} orphaned {}",
+                "  Cleaned up {} orphaned {}",
                 orphans_cleaned.to_string().bright_green(),
                 if orphans_cleaned == 1 {
                     "entry"
@@ -2057,10 +2057,13 @@ pub async fn remove_tools(names: &[String], all: bool, yes: bool) -> ToolResult<
             );
         }
         if not_found_count > 0 {
-            println!("Not found: {}", not_found_count.to_string().bright_yellow());
+            println!(
+                "  Not found: {}",
+                not_found_count.to_string().bright_yellow()
+            );
         }
         if failed_count > 0 {
-            println!("Failed: {}", failed_count.to_string().bright_red());
+            println!("  Failed: {}", failed_count.to_string().bright_red());
         }
     }
 
