@@ -11,6 +11,18 @@ const MAX_DESC_LEN: usize = 60;
 // Functions
 //--------------------------------------------------------------------------------------------------
 
+/// Truncate a parameter description for non-verbose display.
+///
+/// Returns the description truncated to `MAX_DESC_LEN` with "..." suffix if needed.
+/// In verbose mode, returns the full description.
+pub fn truncate_param_desc(desc: &str, verbose: bool) -> String {
+    if verbose || desc.len() <= MAX_DESC_LEN {
+        desc.to_string()
+    } else {
+        format!("{}...", &desc[..MAX_DESC_LEN - 3])
+    }
+}
+
 /// Format a description for display.
 ///
 /// - Default: returns first non-empty line only (truncated if needed)

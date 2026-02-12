@@ -197,7 +197,9 @@ pub async fn auth_logout() -> ToolResult<()> {
 }
 
 /// Show current authentication status.
-pub async fn auth_status(concise: bool, no_header: bool) -> ToolResult<()> {
+///
+/// If `token` is provided, validates that specific token instead of using stored credentials.
+pub async fn auth_status(concise: bool, no_header: bool, token: Option<&str>) -> ToolResult<()> {
     let registry_url = get_registry_url();
 
     // Helper to print concise output with optional header
@@ -207,6 +209,51 @@ pub async fn auth_status(concise: bool, no_header: bool) -> ToolResult<()> {
         }
         println!("{}\t{}\t{}", user, registry, status);
     };
+
+    // If explicit token provided, validate it
+    if let Some(token) = token {
+        let client = RegistryClient::new()
+            .with_url(&registry_url)
+            .with_auth_token(token);
+
+        match client.validate_token().await {
+            Ok(user_info) => {
+                if concise {
+                    print_concise(
+                        &format!("@{}", user_info.username),
+                        &registry_url,
+                        "authenticated",
+                    );
+                    return Ok(());
+                }
+                println!("  {} Authenticated via --token", "✓".bright_green());
+                println!(
+                    "  · {}: @{}",
+                    "User".dimmed(),
+                    user_info.username.bright_cyan()
+                );
+                println!(
+                    "  · {}: {}",
+                    "Registry".dimmed(),
+                    registry_url.bright_blue()
+                );
+                println!(
+                    "  · {}: {}...{}",
+                    "Token".dimmed(),
+                    &token[..15.min(token.len())],
+                    &token[token.len().saturating_sub(4)..]
+                );
+            }
+            Err(_) => {
+                if concise {
+                    print_concise("-", &registry_url, "invalid");
+                    return Ok(());
+                }
+                println!("  {} Provided token is invalid", "✗".bright_red());
+            }
+        }
+        return Ok(());
+    }
 
     // Check environment variable first
     if let Ok(token) = std::env::var(REGISTRY_TOKEN_ENV) {

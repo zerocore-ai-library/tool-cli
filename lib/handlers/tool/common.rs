@@ -13,8 +13,8 @@ use crate::system_config::allocate_system_config;
 
 use super::call::{apply_user_config_defaults, parse_user_config, prompt_missing_user_config};
 use super::config_cmd::{parse_tool_ref_for_config, save_tool_config_with_schema};
+use super::install::{LinkResult, link_local_tool, link_local_tool_force};
 use super::list::resolve_tool_path;
-use super::registry::{LinkResult, link_local_tool, link_local_tool_force};
 
 //--------------------------------------------------------------------------------------------------
 // Types
