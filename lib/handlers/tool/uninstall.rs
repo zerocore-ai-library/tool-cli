@@ -94,7 +94,7 @@ pub async fn remove_tools(names: &[String], all: bool, yes: bool) -> ToolResult<
         let orphans = resolver.list_orphaned_entries()?;
 
         if installed.is_empty() && orphans.is_empty() {
-            println!("\n  No tools installed.\n");
+            println!("\n  {} No tools installed.\n", "!".bright_yellow());
             return Ok(());
         }
         (

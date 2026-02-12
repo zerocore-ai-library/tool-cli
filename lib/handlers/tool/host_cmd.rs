@@ -2,6 +2,7 @@
 
 use colored::Colorize;
 use serde_json::json;
+use std::io::{self, Write};
 
 use super::install::{execute_ensure, preflight_ensure};
 use crate::commands::HostCommand;
@@ -10,7 +11,6 @@ use crate::hosts::{
     McpHost, create_backup, generate_codex_server_entry, generate_server_entry, load_config,
     load_metadata, save_config, save_metadata, tool_ref_to_server_name,
 };
-use crate::prompt::init_theme;
 use crate::references::PluginRef;
 use crate::resolver::FilePluginResolver;
 
@@ -215,31 +215,39 @@ async fn host_add(
 
     // Confirm if not --yes
     if !yes {
-        init_theme();
         println!();
-
-        // Build confirm message based on what will happen
-        let confirm_msg = if !needs_fetch.is_empty() {
-            format!(
-                "Fetch {} tool(s) from registry and add {} tool(s) to {}?",
+        if !needs_fetch.is_empty() {
+            println!(
+                "  {} This will fetch {} tool(s) from registry and add {} tool(s) to {}",
+                "!".bright_yellow(),
                 needs_fetch.len(),
                 added.len(),
                 host.display_name()
-            )
+            );
         } else {
-            format!("Add {} tool(s) to {}?", added.len(), host.display_name())
-        };
-
-        let proceed = cliclack::confirm(confirm_msg)
-            .initial_value(true)
-            .interact()?;
-
-        if !proceed {
-            cliclack::outro_cancel("Cancelled.")?;
-            return Err(ToolError::Cancelled);
+            println!(
+                "  {} This will add {} tool(s) to {}",
+                "!".bright_yellow(),
+                added.len(),
+                host.display_name()
+            );
         }
+        println!();
+        print!("  Continue? [y/N] ");
+        io::stdout().flush().ok();
 
-        cliclack::outro("Done!")?;
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| ToolError::Generic(format!("Failed to read input: {}", e)))?;
+
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!();
+            println!("  {} Cancelled", "✗".bright_red());
+            println!();
+            return Ok(());
+        }
+        println!();
     }
 
     // Fetch tools from registry if needed (after confirmation)
@@ -282,11 +290,12 @@ async fn host_add(
         println!("ok\t{}", added.len());
     } else {
         println!(
-            "\n  {} Added {} tool(s) to {}\n",
+            "  {} Added {} tool(s) to {}",
             "✓".bright_green(),
             added.len(),
             host.display_name()
         );
+        println!();
         for tool in &added {
             println!("  {} {}", "+".bright_green(), tool);
         }
@@ -329,7 +338,7 @@ async fn host_remove(
             println!("ok\t0");
         } else {
             println!(
-                "  {} No tool-cli managed tools found for {}.\n",
+                "\n  {} No tool-cli managed tools found for {}.\n",
                 "!".bright_yellow(),
                 host.display_name()
             );
@@ -406,20 +415,29 @@ async fn host_remove(
 
     // Confirm if not --yes
     if !yes {
-        init_theme();
         println!();
-        let proceed = cliclack::confirm(format!(
-            "Remove {} tool(s) from {}?",
+        println!(
+            "  {} This will remove {} tool(s) from {}",
+            "!".bright_yellow(),
             removed.len(),
             host.display_name()
-        ))
-        .initial_value(true)
-        .interact()?;
+        );
+        println!();
+        print!("  Continue? [y/N] ");
+        io::stdout().flush().ok();
 
-        if !proceed {
-            cliclack::outro_cancel("Cancelled.")?;
-            return Err(ToolError::Cancelled);
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| ToolError::Generic(format!("Failed to read input: {}", e)))?;
+
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!();
+            println!("  {} Cancelled", "✗".bright_red());
+            println!();
+            return Ok(());
         }
+        println!();
     }
 
     // Create backup before modification
@@ -429,20 +447,17 @@ async fn host_remove(
     save_config(&host, &config)?;
     save_metadata(&host, &metadata)?;
 
-    if !yes {
-        cliclack::outro("Done!")?;
-    }
-
     // Output result
     if concise {
         println!("ok\t{}", removed.len());
     } else {
         println!(
-            "\n  {} Removed {} tool(s) from {}\n",
+            "  {} Removed {} tool(s) from {}",
             "✓".bright_green(),
             removed.len(),
             host.display_name()
         );
+        println!();
         for tool in &removed {
             println!("  {} {}", "-".bright_red(), tool);
         }

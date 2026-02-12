@@ -479,7 +479,10 @@ async fn config_list(
             }
             return Ok(());
         }
-        println!("\n  No tools have saved configuration.\n");
+        println!(
+            "\n  {} No tools have saved configuration.\n",
+            "!".bright_yellow()
+        );
         println!(
             "  · Use {} to configure a tool.\n",
             "tool config set <tool>".bright_cyan()
@@ -815,6 +818,7 @@ async fn unset_tool(tool: &str, yes: bool, concise: bool) -> ToolResult<()> {
             println!();
             return Err(ToolError::Cancelled);
         }
+        println!();
     }
 
     if has_config {
@@ -834,11 +838,12 @@ async fn unset_tool(tool: &str, yes: bool, concise: bool) -> ToolResult<()> {
             (false, false) => unreachable!(),
         };
         println!(
-            "\n  {} Removed {} for {}\n",
+            "  {} Removed {} for {}",
             "✓".bright_green(),
             what,
             plugin_ref
         );
+        println!();
     }
 
     Ok(())
@@ -891,6 +896,7 @@ async fn unset_all_tools(yes: bool, concise: bool) -> ToolResult<()> {
             println!();
             return Err(ToolError::Cancelled);
         }
+        println!();
     }
 
     let config_root = DEFAULT_CONFIG_PATH.clone();
