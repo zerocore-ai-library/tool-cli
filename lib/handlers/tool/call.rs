@@ -458,7 +458,14 @@ pub async fn tool_call(
                     continue;
                 }
                 printed_content = true;
-                for line in text.text.lines() {
+                // Syntax highlight if JSON, otherwise print as-is
+                let output = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text.text)
+                {
+                    highlight_json(&json)
+                } else {
+                    text.text.clone()
+                };
+                for line in output.lines() {
                     if is_error {
                         println!("  {}", line.bright_red());
                     } else {
