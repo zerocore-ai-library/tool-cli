@@ -1,6 +1,7 @@
 //! Tool call command handlers.
 
 use crate::error::{ToolError, ToolResult};
+use crate::format::highlight_json;
 use crate::mcp::call_tool;
 use crate::mcpb::McpbUserConfigField;
 use crate::styles::Spinner;
@@ -443,53 +444,61 @@ pub async fn tool_call(
         );
     }
 
-    // Output text content
+    // Output text content (skip if it's identical JSON to structured content)
+    let mut printed_content = false;
     for content in &result.result.content {
         // Content is wrapped in Annotated, so we dereference to get the inner RawContent
         match &**content {
             rmcp::model::RawContent::Text(text) => {
-                // Try to parse as JSON for pretty printing
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text.text) {
-                    let pretty = serde_json::to_string_pretty(&json).unwrap_or(text.text.clone());
-                    for line in pretty.lines() {
-                        if is_error {
-                            println!("  {}", line.bright_red());
-                        } else {
-                            println!("  {}", line);
-                        }
-                    }
+                // Skip if text content is the same JSON as structured content
+                if let Some(structured) = &result.result.structured_content
+                    && let Ok(text_json) = serde_json::from_str::<serde_json::Value>(&text.text)
+                    && &text_json == structured
+                {
+                    continue;
+                }
+                printed_content = true;
+                // Syntax highlight if JSON, otherwise print as-is
+                let output = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text.text)
+                {
+                    highlight_json(&json)
                 } else {
-                    // Plain text output
-                    for line in text.text.lines() {
-                        if is_error {
-                            println!("  {}", line.bright_red());
-                        } else {
-                            println!("  {}", line);
-                        }
+                    text.text.clone()
+                };
+                for line in output.lines() {
+                    if is_error {
+                        println!("  {}", line.bright_red());
+                    } else {
+                        println!("  {}", line);
                     }
                 }
             }
             rmcp::model::RawContent::Image(img) => {
+                printed_content = true;
                 println!("  · [Image: {} bytes]", img.data.len());
             }
             rmcp::model::RawContent::Audio(audio) => {
+                printed_content = true;
                 println!("  · [Audio: {} bytes]", audio.data.len());
             }
             rmcp::model::RawContent::Resource(res) => {
+                printed_content = true;
                 println!("  · [Resource: {:?}]", res.resource);
             }
             rmcp::model::RawContent::ResourceLink(link) => {
+                printed_content = true;
                 println!("  · [ResourceLink: {}]", link.uri);
             }
         }
     }
 
-    // Output structured content if available
+    // Output structured content if available (with syntax highlighting)
     if let Some(structured) = &result.result.structured_content {
-        println!();
-        let pretty =
-            serde_json::to_string_pretty(structured).unwrap_or_else(|_| structured.to_string());
-        for line in pretty.lines() {
+        if printed_content {
+            println!();
+        }
+        let highlighted = highlight_json(structured);
+        for line in highlighted.lines() {
             if is_error {
                 println!("  {}", line.bright_red());
             } else {
