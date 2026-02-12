@@ -473,6 +473,7 @@ async fn run() -> ToolResult<()> {
             win32_x64,
             win32_arm64,
             universal,
+            token,
         } => {
             // Collect pre-built artifacts into a map
             let mut prebuilt = std::collections::HashMap::new();
@@ -504,6 +505,7 @@ async fn run() -> ToolResult<()> {
                 strict,
                 multi_platform,
                 prebuilt,
+                token.as_deref(),
             )
             .await
         }
@@ -512,7 +514,9 @@ async fn run() -> ToolResult<()> {
 
         Command::Logout => handlers::auth_logout().await,
 
-        Command::Whoami => handlers::auth_status(cli.concise, cli.no_header).await,
+        Command::Whoami { token } => {
+            handlers::auth_status(cli.concise, cli.no_header, token.as_deref()).await
+        }
 
         Command::Grep {
             pattern,

@@ -3,7 +3,7 @@
 use colored::Colorize;
 use serde_json::json;
 
-use super::registry::{execute_ensure, preflight_ensure};
+use super::install::{execute_ensure, preflight_ensure};
 use crate::commands::HostCommand;
 use crate::error::{ToolError, ToolResult};
 use crate::hosts::{

@@ -6,7 +6,7 @@ use crate::mcpb::McpbUserConfigField;
 use crate::styles::Spinner;
 use crate::suggest::{
     McpErrorKind, analyze_mcp_error, extract_params_from_schema, find_similar_tools,
-    format_suggestions, is_missing_param_error,
+    format_suggestions, is_missing_param_error, is_unknown_tool_error,
 };
 use colored::Colorize;
 use std::collections::BTreeMap;
@@ -116,8 +116,24 @@ fn print_tool_params(method: &str, prepared: &PreparedTool) {
 }
 
 /// Print enhanced error message for unknown tool with fuzzy suggestions.
-fn print_unknown_tool_error(unknown_tool: &str, prepared: &PreparedTool) {
-    let available_tools = get_available_tools(prepared);
+///
+/// If static tools are not available in manifest, fetches from the live server.
+async fn print_unknown_tool_error(unknown_tool: &str, prepared: &PreparedTool) {
+    // Try to get tools from manifest first
+    let mut available_tools = get_available_tools(prepared);
+
+    // If manifest doesn't have tools, fetch from the live server
+    if available_tools.is_empty()
+        && let Ok(capabilities) =
+            crate::mcp::get_tool_info(&prepared.resolved, &prepared.tool_name, false).await
+    {
+        available_tools = capabilities
+            .tools
+            .iter()
+            .map(|t| t.name.to_string())
+            .collect();
+    }
+
     let suggestions = find_similar_tools(unknown_tool, &available_tools);
 
     println!(
@@ -128,11 +144,12 @@ fn print_unknown_tool_error(unknown_tool: &str, prepared: &PreparedTool) {
     );
 
     if let Some(hint) = format_suggestions(&suggestions) {
-        println!("  · {} {}", "hint:".bright_cyan().bold(), hint);
+        println!("  {} {}", "hint:".bright_cyan().bold(), hint);
     }
 
     // Show available tools if there are few
     if !available_tools.is_empty() && available_tools.len() <= 10 {
+        println!();
         println!("  {}:", "Available tools".dimmed());
         for tool in &available_tools {
             println!("  · {}", tool.bright_cyan());
@@ -289,7 +306,7 @@ pub async fn tool_call(
                         std::process::exit(1);
                     }
                     McpErrorKind::UnknownTool(tool) => {
-                        print_unknown_tool_error(&tool, &prepared);
+                        print_unknown_tool_error(&tool, &prepared).await;
                         std::process::exit(1);
                     }
                     McpErrorKind::Other { code, message } => {
@@ -398,6 +415,12 @@ pub async fn tool_call(
                 );
                 print_tool_params(&method, &prepared);
             }
+            std::process::exit(1);
+        }
+
+        // Handle unknown tool errors with suggestions from manifest
+        if is_unknown_tool_error(&error_text) {
+            print_unknown_tool_error(&method, &prepared).await;
             std::process::exit(1);
         }
     }

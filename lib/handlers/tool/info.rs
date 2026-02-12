@@ -1,7 +1,7 @@
 //! Tool info command handlers.
 
 use crate::error::{ToolError, ToolResult};
-use crate::format::format_description;
+use crate::format::{format_description, truncate_param_desc};
 use crate::mcp::{ToolCapabilities, ToolType, get_tool_info, get_tool_type};
 use crate::output::ToolInfoOutput;
 use crate::styles::Spinner;
@@ -292,7 +292,8 @@ fn output_tools_section(capabilities: &ToolCapabilities, verbose: bool, level: u
                 let param_desc = prop
                     .get("description")
                     .and_then(|d| d.as_str())
-                    .unwrap_or("");
+                    .map(|d| truncate_param_desc(d, verbose))
+                    .unwrap_or_default();
 
                 let param_name = format!("{}{}", name, req_marker);
                 println!(
@@ -328,7 +329,8 @@ fn output_tools_section(capabilities: &ToolCapabilities, verbose: bool, level: u
                     let param_desc = prop
                         .get("description")
                         .and_then(|d| d.as_str())
-                        .unwrap_or("");
+                        .map(|d| truncate_param_desc(d, verbose))
+                        .unwrap_or_default();
 
                     let param_name = format!("{}{}", name, req_marker);
                     println!(
@@ -387,7 +389,11 @@ fn output_prompts_section(capabilities: &ToolCapabilities, verbose: bool) {
                     ""
                 };
                 let arg_name = format!("{}{}", arg.name, req_marker);
-                let arg_desc = arg.description.as_deref().unwrap_or("");
+                let arg_desc = arg
+                    .description
+                    .as_deref()
+                    .map(|d| truncate_param_desc(d, verbose))
+                    .unwrap_or_default();
                 let branch = if is_last { "└──" } else { "├──" };
                 println!(
                     "      {} {:<20} {:<10} {}",
@@ -1020,7 +1026,8 @@ fn output_methods_normal(
                 let param_desc = prop
                     .get("description")
                     .and_then(|d| d.as_str())
-                    .unwrap_or("");
+                    .map(|d| truncate_param_desc(d, verbose))
+                    .unwrap_or_default();
 
                 let param_name = format!("{}{}", name, req_marker);
                 println!(
@@ -1058,7 +1065,8 @@ fn output_methods_normal(
                     let param_desc = prop
                         .get("description")
                         .and_then(|d| d.as_str())
-                        .unwrap_or("");
+                        .map(|d| truncate_param_desc(d, verbose))
+                        .unwrap_or_default();
 
                     let param_name = format!("{}{}", name, req_marker);
                     println!(

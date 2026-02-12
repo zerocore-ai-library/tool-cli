@@ -74,8 +74,18 @@ pub fn format_suggestions(suggestions: &[String]) -> Option<String> {
 
 /// Extract the unknown tool name from an MCP error message.
 ///
-/// Parses error messages like: "Tool call failed: Mcp error: -32602: unknown tool \"me\""
+/// Parses error messages like:
+/// - "Tool call failed: Mcp error: -32602: unknown tool \"me\""
+/// - "Tool get-library-docs not found"
 pub fn extract_unknown_tool_from_error(error_msg: &str) -> Option<String> {
+    // Pattern: "Tool xxx not found"
+    if let Some(start) = error_msg.find("Tool ") {
+        let rest = &error_msg[start + 5..]; // skip "Tool "
+        if let Some(end) = rest.find(" not found") {
+            return Some(rest[..end].to_string());
+        }
+    }
+
     // Pattern: unknown tool "xxx" or unknown tool 'xxx'
     if let Some(start) = error_msg.find("unknown tool") {
         let rest = &error_msg[start + 12..]; // skip "unknown tool"
@@ -92,6 +102,7 @@ pub fn extract_unknown_tool_from_error(error_msg: &str) -> Option<String> {
             return Some(rest[quote_start + 1..quote_start + 1 + quote_end].to_string());
         }
     }
+
     None
 }
 
@@ -114,6 +125,13 @@ pub fn is_missing_param_error(error_msg: &str) -> bool {
     error_msg.contains("missing required parameter")
         || error_msg.contains("missing field")
         || error_msg.contains("failed to deserialize parameters")
+}
+
+/// Check if an error is an unknown tool error.
+pub fn is_unknown_tool_error(error_msg: &str) -> bool {
+    error_msg.contains("not found")
+        || error_msg.contains("unknown tool")
+        || error_msg.contains("Unknown tool")
 }
 
 //--------------------------------------------------------------------------------------------------

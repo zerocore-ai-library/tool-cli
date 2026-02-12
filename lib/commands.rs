@@ -156,6 +156,7 @@ const PUBLISH_EXAMPLES: &str = examples![
     "tool publish                                                 " # "Publish current directory",
     "tool publish ./my-tool                                       " # "Publish specific directory",
     "tool publish --dry-run                                       " # "Preview without uploading",
+    "tool publish --token \"your-token\"                            " # "Publish with explicit token",
     "tool publish --multi-platform                                " # "Publish bundles for each platform",
     "tool publish --multi-platform --darwin-arm64 ./dist/mac.mcpb " # "Use pre-built bundle",
     "tool publish --multi-platform --universal ./dist/all.mcpb    " # "Specify universal bundle",
@@ -164,6 +165,11 @@ const PUBLISH_EXAMPLES: &str = examples![
 const LOGIN_EXAMPLES: &str = examples![
     "tool login                        " # "Interactive login (prompts for token)",
     "tool login --token \"your-token\"   " # "Non-interactive login",
+];
+
+const WHOAMI_EXAMPLES: &str = examples![
+    "tool whoami                       " # "Show current auth status",
+    "tool whoami --token \"your-token\"  " # "Validate a specific token",
 ];
 
 const SELF_UPDATE_EXAMPLES: &str = examples![
@@ -805,6 +811,10 @@ pub enum Command {
         /// Pre-built universal bundle (all platforms).
         #[arg(long, value_name = "PATH")]
         universal: Option<String>,
+
+        /// API token (uses stored credentials if not provided).
+        #[arg(long)]
+        token: Option<String>,
     },
 
     /// Login to the registry.
@@ -819,7 +829,12 @@ pub enum Command {
     Logout,
 
     /// Show authentication status.
-    Whoami,
+    #[command(after_help = WHOAMI_EXAMPLES)]
+    Whoami {
+        /// API token to validate (uses stored credentials if not provided).
+        #[arg(long)]
+        token: Option<String>,
+    },
 
     /// Manage the tool-cli installation itself.
     #[command(name = "self", subcommand)]
