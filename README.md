@@ -40,6 +40,7 @@
 - <img src="https://octicons-col.vercel.app/shield-lock/f88349" height="14"/> &nbsp;**Encrypted by default:** API keys and secrets are encrypted at rest
 - <img src="https://octicons-col.vercel.app/passkey-fill/f88349" height="14"/> &nbsp;**OAuth just works:** browser flow, token refresh, secure storage handled for you
 - <img src="https://octicons-col.vercel.app/device-desktop/f88349" height="14"/> &nbsp;**Fully local:** your API keys and tokens never leave your machine
+- <img src="https://octicons-col.vercel.app/broadcast/f88349" height="14"/> &nbsp;**Session support:** keep stdio servers alive and target them with multiple calls *(coming soon)*
 - <img src="https://octicons-col.vercel.app/container/f88349" height="14"/> &nbsp;**Sandboxed execution:** run tools in isolated environments *(coming soon)*
 
 <br />

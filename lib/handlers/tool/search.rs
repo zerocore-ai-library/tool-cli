@@ -67,14 +67,7 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
         return Ok(());
     }
 
-    let label = if results.len() == 1 { "tool" } else { "tools" };
-    println!(
-        "\n  {} Found {} {}\n",
-        "✓".bright_green(),
-        results.len().to_string().bold(),
-        label
-    );
-
+    println!();
     for result in &results {
         let version_str = result
             .latest_version
@@ -97,9 +90,9 @@ pub async fn search_tools(query: &str, concise: bool, no_header: bool) -> ToolRe
         {
             println!("  · {}", desc.dimmed());
         }
+        println!();
     }
 
-    println!();
     let install_ref = if results.len() == 1 {
         format!("{}/{}", results[0].namespace, results[0].name)
     } else {
