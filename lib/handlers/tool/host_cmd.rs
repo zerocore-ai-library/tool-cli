@@ -38,7 +38,7 @@ pub async fn handle_host_command(
             dry_run,
             yes,
         } => host_remove(&host, tools, dry_run, yes, concise).await,
-        HostCommand::List => host_list(concise, no_header).await,
+        HostCommand::List { host } => host_list(host.as_deref(), concise, no_header).await,
         HostCommand::Preview { host, tools } => host_preview(&host, tools, concise).await,
         HostCommand::Path { host } => host_path(&host).await,
     }
@@ -471,8 +471,39 @@ async fn host_remove(
     Ok(())
 }
 
-/// List all hosts and their status.
-async fn host_list(concise: bool, no_header: bool) -> ToolResult<()> {
+/// List all hosts and their status, or tools for a specific host.
+async fn host_list(host_name: Option<&str>, concise: bool, no_header: bool) -> ToolResult<()> {
+    if let Some(name) = host_name {
+        let host = McpHost::parse(name)?;
+        let metadata = load_metadata(&host).unwrap_or_default();
+        let tools = &metadata.managed_tools;
+
+        if concise {
+            if !no_header {
+                println!("#tool");
+            }
+            for tool in tools {
+                println!("{}", tool);
+            }
+        } else {
+            println!(
+                "\n  {} {} tools\n",
+                "✓".bright_green(),
+                host.canonical_name()
+            );
+            if tools.is_empty() {
+                println!("  · {}", "No tools installed.".dimmed());
+            } else {
+                for tool in tools {
+                    println!("  · {}", tool);
+                }
+            }
+            println!();
+        }
+
+        return Ok(());
+    }
+
     if concise && !no_header {
         println!("#host\ttools\tstatus\tpath");
     }

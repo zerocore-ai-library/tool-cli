@@ -985,7 +985,10 @@ pub enum HostCommand {
 
     /// List supported hosts and their status.
     #[command(alias = "l")]
-    List,
+    List {
+        /// Show tools for a specific host.
+        host: Option<String>,
+    },
 
     /// Preview the MCP config that would be generated.
     #[command(alias = "p", after_help = HOST_PREVIEW_EXAMPLES)]
